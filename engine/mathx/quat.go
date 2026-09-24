@@ -36,5 +36,39 @@ func (q Quat) Normalize() Quat {
 
 func (q Quat) Mat4() Mat4 { return FromQuat(q.X, q.Y, q.Z, q.W) }
 
+// Conjugate is the inverse rotation (for unit quaternions).
+func (q Quat) Conjugate() Quat { return Quat{-q.X, -q.Y, -q.Z, q.W} }
+
+// Decompose splits an affine translate*rotate*scale matrix (positive scale,
+// no shear) into its parts.
+func Decompose(m Mat4) (translation Vec3, rotation Quat, scale Vec3) {
+	translation = Vec3{m[12], m[13], m[14]}
+	cols := [3]Vec3{{m[0], m[1], m[2]}, {m[4], m[5], m[6]}, {m[8], m[9], m[10]}}
+	for i, c := range cols {
+		scale[i] = c.Len()
+		if scale[i] != 0 {
+			cols[i] = c.Scale(1 / scale[i])
+		}
+	}
+	// Rotation matrix element (row r, col c) is cols[c][r]. Shepperd's method.
+	m00, m11, m22 := cols[0][0], cols[1][1], cols[2][2]
+	var q Quat
+	switch trace := m00 + m11 + m22; {
+	case trace > 0:
+		s := float32(math.Sqrt(float64(trace+1))) * 2
+		q = Quat{(cols[1][2] - cols[2][1]) / s, (cols[2][0] - cols[0][2]) / s, (cols[0][1] - cols[1][0]) / s, s / 4}
+	case m00 > m11 && m00 > m22:
+		s := float32(math.Sqrt(float64(1+m00-m11-m22))) * 2
+		q = Quat{s / 4, (cols[1][0] + cols[0][1]) / s, (cols[2][0] + cols[0][2]) / s, (cols[1][2] - cols[2][1]) / s}
+	case m11 > m22:
+		s := float32(math.Sqrt(float64(1+m11-m00-m22))) * 2
+		q = Quat{(cols[1][0] + cols[0][1]) / s, s / 4, (cols[2][1] + cols[1][2]) / s, (cols[2][0] - cols[0][2]) / s}
+	default:
+		s := float32(math.Sqrt(float64(1+m22-m00-m11))) * 2
+		q = Quat{(cols[2][0] + cols[0][2]) / s, (cols[2][1] + cols[1][2]) / s, s / 4, (cols[0][1] - cols[1][0]) / s}
+	}
+	return translation, q.Normalize(), scale
+}
+
 // Rotate applies the rotation to a vector.
 func (q Quat) Rotate(v Vec3) Vec3 { return q.Mat4().TransformPoint(v) }

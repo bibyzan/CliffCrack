@@ -15,6 +15,7 @@ import (
 	"vkgame/engine/geom"
 	"vkgame/engine/input"
 	"vkgame/engine/mathx"
+	"vkgame/engine/physics"
 	"vkgame/engine/render"
 	"vkgame/engine/scene"
 	"vkgame/engine/script"
@@ -33,15 +34,17 @@ type Game struct {
 	ambientLevel float32
 	timeScale    float32
 
-	cubeMesh render.Mesh
-	cubeTex  render.Texture
-	spawned  []scene.ID
+	phys     *physics.World
+	links    []physLink
+	balls    []scene.ID
+	ballMesh render.Mesh
 	rng      *rand.Rand
 
-	sound      *audio.Mixer // nil without audio
-	volume     float32
-	spawnSound *audio.Sound
-	clearSound *audio.Sound
+	sound       *audio.Mixer // nil without audio
+	volume      float32
+	dropSound   *audio.Sound
+	clearSound  *audio.Sound
+	bounceSound *audio.Sound
 }
 
 // Stats are engine numbers shown in the debug UI.
@@ -55,6 +58,7 @@ type Options struct {
 	Model      string       // optional glTF file shown in the centre instead of the sphere
 	ScriptsDir string       // optional directory of hot-reloadable behaviours
 	Audio      *audio.Mixer // optional; sounds are skipped when nil
+	DropBalls  int          // balls to drop at startup
 }
 
 // New builds the demo scene.
@@ -68,8 +72,9 @@ func New(opts Options) (*Game, error) {
 		rng:          rand.New(rand.NewPCG(1, 2)),
 		sound:        opts.Audio,
 		volume:       0.8,
-		spawnSound:   audio.Blip(120*time.Millisecond, 520, 880, 0.6),
+		dropSound:    audio.Blip(120*time.Millisecond, 520, 880, 0.5),
 		clearSound:   audio.Blip(250*time.Millisecond, 600, 180, 0.6),
+		bounceSound:  audio.Blip(60*time.Millisecond, 260, 140, 0.8),
 	}
 	w := g.world
 	modelPath := opts.Model
@@ -97,6 +102,9 @@ func New(opts Options) (*Game, error) {
 	ground := w.Spawn("ground", scene.ID{})
 	ground.Transform.Scale = mathx.Vec3{14, 1, 14}
 	ground.Renderable = &scene.Renderable{Mesh: groundMesh, Texture: groundTex, Color: [4]float32{1, 1, 1, 1}}
+	if err := g.setupPhysics(7); err != nil {
+		return nil, err
+	}
 
 	centre := w.Spawn("centre", scene.ID{}).AddBehaviour(spin(0.3))
 	if modelPath != "" {
@@ -111,6 +119,7 @@ func New(opts Options) (*Game, error) {
 		centre.Transform.Position = mathx.Vec3{0, 1, 0}
 		centre.Renderable = &scene.Renderable{Mesh: sphere, Color: mathx.Hex(0xe5e7eb)}
 		centre.AddBehaviour(g.script("Bob"))
+		g.attachKinematic(centre, physics.Sphere, mathx.Vec3{0.75})
 	}
 
 	cube, err := render.CreateMesh(geom.Cube(1))
@@ -121,6 +130,10 @@ func New(opts Options) (*Game, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := g.addWalls(cube, panelTex, 7); err != nil {
+		return nil, err
+	}
+
 	// The cubes hang off a slowly turning ring, and each also spins on its own.
 	ring := w.Spawn("ring", scene.ID{}).AddBehaviour(spin(-0.1)).AddBehaviour(g.script("Pulse"))
 	palette := []uint32{0xe05252, 0xf0923a, 0xe8cf45, 0x4cbf6b, 0x4a90e2, 0x9b6ce0}
@@ -129,10 +142,13 @@ func New(opts Options) (*Game, error) {
 		c := w.Spawn(fmt.Sprintf("cube%d", i), ring.ID()).AddBehaviour(spin(0.8 + 0.2*float32(i)))
 		c.Transform.Position = mathx.Vec3{float32(math.Cos(angle)) * 3.5, 0.5, float32(math.Sin(angle)) * 3.5}
 		c.Renderable = &scene.Renderable{Mesh: cube, Texture: panelTex, Color: mathx.Hex(hex)}
+		g.attachKinematic(c, physics.Box, mathx.Vec3{0.5, 0.5, 0.5})
 	}
-	g.cubeMesh, g.cubeTex = cube, panelTex
 
 	w.UpdateTransforms()
+	for i := 0; i < opts.DropBalls; i++ {
+		g.dropBall()
+	}
 	return g, nil
 }
 
@@ -176,6 +192,7 @@ func (g *Game) Update(dt float32, in *input.State, mouseFree bool) {
 	}
 	g.camera.update(dt, in, mouseFree)
 	g.world.Update(dt * g.timeScale)
+	g.stepPhysics(dt * g.timeScale)
 }
 
 // DebugUI describes the game's debug window.
@@ -201,40 +218,28 @@ func (g *Game) DebugUI(b *ui.Builder, s Stats) {
 		g.sound.SetVolume(g.volume)
 	}
 	b.Separator()
-	if b.Button("spawn cube") {
-		g.spawnCube()
+	b.Text("physics: %d bodies, %d balls", len(g.phys.Bodies()), len(g.balls))
+	if b.Button("drop ball") {
+		g.dropBall()
+		g.playAtVolume(g.dropSound, mathx.Vec3{0, 6, 0}, 1)
 	}
-	if b.Button("clear spawned") && len(g.spawned) > 0 {
-		for _, id := range g.spawned {
-			g.world.Destroy(id)
+	if b.Button("drop 20") {
+		for i := 0; i < 20; i++ {
+			g.dropBall()
 		}
-		g.spawned = g.spawned[:0]
-		g.playAt(g.clearSound, mathx.Vec3{})
+		g.playAtVolume(g.dropSound, mathx.Vec3{0, 6, 0}, 1)
+	}
+	if b.Button("clear balls") && len(g.balls) > 0 {
+		g.clearBalls()
+		g.playAtVolume(g.clearSound, mathx.Vec3{}, 1)
 	}
 	b.Text("F1: hide this window")
 	b.End()
 }
 
-// spawnCube drops a randomly coloured spinning cube somewhere on the ground.
-func (g *Game) spawnCube() {
-	angle := g.rng.Float64() * 2 * math.Pi
-	dist := 1.5 + g.rng.Float64()*5
-	size := 0.3 + g.rng.Float32()*0.5
-	e := g.world.Spawn(fmt.Sprintf("spawned%d", len(g.spawned)), scene.ID{}).
-		AddBehaviour(spin(g.rng.Float32()*4 - 2))
-	e.Transform.Position = mathx.Vec3{float32(math.Cos(angle) * dist), size / 2, float32(math.Sin(angle) * dist)}
-	e.Transform.Scale = mathx.Vec3{size, size, size}
-	e.Renderable = &scene.Renderable{
-		Mesh:    g.cubeMesh,
-		Texture: g.cubeTex,
-		Color:   mathx.SRGB(g.rng.Float32(), g.rng.Float32(), g.rng.Float32(), 1),
-	}
-	g.spawned = append(g.spawned, e.ID())
-	g.playAt(g.spawnSound, e.Transform.Position)
-}
-
-// playAt plays a sound panned and attenuated by where pos is relative to the camera.
-func (g *Game) playAt(s *audio.Sound, pos mathx.Vec3) {
+// playAtVolume plays a sound panned and attenuated by where pos is relative
+// to the camera.
+func (g *Game) playAtVolume(s *audio.Sound, pos mathx.Vec3, volume float32) {
 	if g.sound == nil {
 		return
 	}
@@ -245,7 +250,7 @@ func (g *Game) playAt(s *audio.Sound, pos mathx.Vec3) {
 	if dist > 0 {
 		pan = p[0] / dist
 	}
-	g.sound.Play(s, 1/(1+0.1*dist), pan)
+	g.sound.Play(s, volume/(1+0.1*dist), pan)
 }
 
 // script returns the named script behaviour, or a no-op without scripts.

@@ -30,10 +30,11 @@ func run() error {
 	validation := flag.Bool("validation", true, "enable Vulkan validation layers (if installed)")
 	vsync := flag.Bool("vsync", true, "wait for vertical sync")
 	model := flag.String("model", "", "optional .gltf/.glb file to show in the centre of the scene")
-	screenshot := flag.String("screenshot", "", "render -frames frames, save the last one to this PNG and exit")
+	screenshot := flag.String("screenshot", "", "render -frames frames at a fixed 60 Hz step, save the last one to this PNG and exit")
 	frames := flag.Int("frames", 120, "number of frames to render before taking -screenshot")
 	ui := flag.Bool("ui", true, "show the debug UI at startup (F1 toggles)")
 	sound := flag.Bool("audio", true, "enable audio output")
+	drop := flag.Int("drop", 0, "number of physics balls to drop at startup")
 	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
 	flag.Parse()
 
@@ -78,7 +79,12 @@ func run() error {
 		}
 	}
 
-	g, err := game.New(game.Options{Model: *model, ScriptsDir: scriptsDir(*scripts, exeDir), Audio: mixer})
+	g, err := game.New(game.Options{
+		Model:      *model,
+		ScriptsDir: scriptsDir(*scripts, exeDir),
+		Audio:      mixer,
+		DropBalls:  *drop,
+	})
 	if err != nil {
 		return err
 	}
@@ -115,6 +121,9 @@ func run() error {
 		now := platform.Time()
 		dt := float32(now - last)
 		last = now
+		if *screenshot != "" {
+			dt = 1.0 / 60 // deterministic: -frames N always simulates N/60 seconds
+		}
 		if dt > 0 {
 			fps += (1/dt - fps) * 0.05
 		}

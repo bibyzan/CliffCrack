@@ -30,3 +30,31 @@ func TestQuat(t *testing.T) {
 		t.Errorf("Normalize = %v, want identity", q)
 	}
 }
+
+func TestDecompose(t *testing.T) {
+	// Cover all four branches of the quaternion extraction.
+	rotations := []Quat{
+		QuatIdentity(),
+		AxisAngle(Vec3{1, 0, 0}, 3),         // large X rotation
+		AxisAngle(Vec3{0, 1, 0}, 3),         // large Y rotation
+		AxisAngle(Vec3{0, 0, 1}, 3),         // large Z rotation
+		AxisAngle(Vec3{1, 2, 3}, 0.7),       // general
+		AxisAngle(Vec3{-1, 0.5, 0.2}, -2.5), // general, negative angle
+	}
+	for _, r := range rotations {
+		m := Translate(1, -2, 3).Mul(r.Mat4()).Mul(Scale(2, 0.5, 3))
+		pos, rot, scale := Decompose(m)
+		if !nearVec(pos, Vec3{1, -2, 3}) || !nearVec(scale, Vec3{2, 0.5, 3}) {
+			t.Errorf("Decompose(%v): pos %v scale %v", r, pos, scale)
+		}
+		// q and -q are the same rotation; compare by effect.
+		for _, v := range []Vec3{{1, 0, 0}, {0, 1, 0}, {0.3, -0.4, 0.8}} {
+			if got, want := rot.Rotate(v), r.Rotate(v); !nearVec(got, want) {
+				t.Errorf("Decompose(%v) rotation maps %v to %v, want %v", r, v, got, want)
+			}
+		}
+	}
+	if c := AxisAngle(Vec3{0, 1, 0}, 1).Conjugate().Mul(AxisAngle(Vec3{0, 1, 0}, 1)); !nearVec(c.Rotate(Vec3{1, 0, 0}), Vec3{1, 0, 0}) {
+		t.Error("q* q should be identity")
+	}
+}

@@ -39,7 +39,8 @@ You don't need to link against the Vulkan loader: volk loads `vulkan-1.dll` from
 ./build.ps1 -Config Release
 build/bin/game.exe -validation=false -vsync=false
 build/bin/game.exe -model path/to/model.glb   # show a glTF model in the centre
-build/bin/game.exe -screenshot out.png -frames 90   # render 90 frames, save the last, exit
+build/bin/game.exe -screenshot out.png -frames 90   # 90 fixed 1/60 s frames, save the last, exit
+build/bin/game.exe -drop 60                   # start with 60 physics balls
 go test ./engine/...          # math, geometry and glTF tests (no GPU needed)
 ```
 
@@ -65,6 +66,17 @@ turns `b.Slider("sun", &sun, 0, 3)`-style calls into a flat command list (labels
 into one byte buffer), `render.UI` draws it in a single cgo call, and `Builder.Apply`
 writes edits back to your variables. Buttons report their click on the next frame.
 While the UI has the mouse, the camera ignores clicks and scrolling.
+
+### Physics
+
+`engine/physics` steps at a fixed 120 Hz with sequential impulses (restitution,
+Coulomb friction, rolling). Dynamic bodies are spheres; they collide with each other
+and with static or kinematic spheres and oriented boxes. In the demo the ground and
+walls are static, the ring cubes and centre sphere are kinematic (they follow their
+entities, so scripts can move them and they shove balls around), and "drop ball"
+spawns dynamic balls. Impacts come back as events and play positional sounds.
+Tests check resting contact, bounce height, momentum, rolling on a ramp, kinematic
+pushes and that a 60-ball pile never gains energy.
 
 ### Hot-reloadable scripts
 
@@ -97,6 +109,7 @@ engine/
   scene/               entity world: hierarchy, transforms, renderables, behaviours
   ui/                  debug UI builder (immediate-mode widgets -> command list)
   audio/               Go mixer (voices, pan, loops, WAV, synth blips) -> oto/WASAPI
+  physics/             rigid bodies: dynamic spheres vs spheres/oriented boxes, impulses
   platform/            GLFW window; feeds OS events into input
   input/               per-frame keyboard/mouse state (pressed/released edges, deltas)
   camera/              fly + orbit cameras, perspective lens
@@ -122,4 +135,11 @@ cmd/game/            main package
 - [x] Entity model: scene.World with hierarchy, generational IDs, behaviours
 - [x] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)
 - [x] Audio: Go mixer on oto (WASAPI), positional pan/attenuation, `-audio=false` to mute
-- [ ] Physics
+- [x] Physics: pure-Go rigid bodies (dynamic spheres; static/kinematic spheres and boxes)
+
+### Next ideas
+
+- Shadows (a sun shadow map) and PBR materials (metallic/roughness from glTF)
+- Dynamic boxes and a broadphase in physics; physics bodies as scene components
+- Text input and more widgets in the debug UI; an entity inspector
+- Frustum culling and instancing once scenes get large
