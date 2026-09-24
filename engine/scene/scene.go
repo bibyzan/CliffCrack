@@ -4,8 +4,8 @@
 package scene
 
 import (
-	"vkgame/engine/gfx"
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/gfx"
+	"CliffCrack/engine/mathx"
 )
 
 // ID refers to an entity. It stays valid until the entity is destroyed; after

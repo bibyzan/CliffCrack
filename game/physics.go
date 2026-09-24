@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"math"
 
-	"vkgame/engine/geom"
-	"vkgame/engine/mathx"
-	"vkgame/engine/physics"
-	"vkgame/engine/render"
-	"vkgame/engine/scene"
+	"CliffCrack/engine/geom"
+	"CliffCrack/engine/mathx"
+	"CliffCrack/engine/physics"
+	"CliffCrack/engine/render"
+	"CliffCrack/engine/scene"
 )
 
 // physLink ties a scene entity to a physics body.

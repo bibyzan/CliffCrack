@@ -6,8 +6,8 @@ package game
 import (
 	"testing"
 
-	"vkgame/engine/mathx"
-	"vkgame/engine/physics"
+	"CliffCrack/engine/mathx"
+	"CliffCrack/engine/physics"
 )
 
 func testArena() (*physics.World, *physics.Body) {

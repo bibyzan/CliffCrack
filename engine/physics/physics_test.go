@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/mathx"
 )
 
 func ground(w *World) *Body {

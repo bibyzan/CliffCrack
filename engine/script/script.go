@@ -4,7 +4,7 @@
 //
 //	package scripts
 //
-//	import "vkgame/engine/scene"
+//	import "CliffCrack/engine/scene"
 //
 //	func Bob(w *scene.World, e *scene.Entity, dt float32) { ... }
 //
@@ -30,8 +30,8 @@ import (
 	"github.com/traefik/yaegi/interp"
 	"github.com/traefik/yaegi/stdlib"
 
-	"vkgame/engine/scene"
-	"vkgame/engine/script/symbols"
+	"CliffCrack/engine/scene"
+	"CliffCrack/engine/script/symbols"
 )
 
 // behaviourFunc is the signature scripts export.

@@ -1,6 +1,6 @@
 // Package symbols exposes engine packages to interpreted scripts (yaegi).
 //
-// The vkgame-engine-*.go files are generated; after changing the exported API
+// The CliffCrack-engine-*.go files are generated; after changing the exported API
 // of scene, mathx or gfx, regenerate them from this directory with:
 //
 //	go generate
@@ -11,7 +11,7 @@ package symbols
 
 import "reflect"
 
-//go:generate go run github.com/traefik/yaegi/cmd/yaegi extract -name symbols vkgame/engine/scene vkgame/engine/mathx vkgame/engine/gfx
+//go:generate go run github.com/traefik/yaegi/cmd/yaegi extract -name symbols CliffCrack/engine/scene CliffCrack/engine/mathx CliffCrack/engine/gfx
 
 // Symbols is filled in by the generated files' init functions.
 var Symbols = map[string]map[string]reflect.Value{}

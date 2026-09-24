@@ -11,13 +11,13 @@ import (
 	"strings"
 	"time"
 
-	"vkgame/engine/audio"
-	"vkgame/engine/gfx"
-	"vkgame/engine/input"
-	"vkgame/engine/platform"
-	"vkgame/engine/render"
-	uiPkg "vkgame/engine/ui"
-	"vkgame/game"
+	"CliffCrack/engine/audio"
+	"CliffCrack/engine/gfx"
+	"CliffCrack/engine/input"
+	"CliffCrack/engine/platform"
+	"CliffCrack/engine/render"
+	uiPkg "CliffCrack/engine/ui"
+	"CliffCrack/game"
 )
 
 func main() {

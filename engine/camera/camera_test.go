@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/mathx"
 )
 
 func near(a, b mathx.Vec3) bool { return a.Sub(b).Len() < 1e-4 }

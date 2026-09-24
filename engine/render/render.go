@@ -16,9 +16,9 @@ import (
 	"image"
 	"unsafe"
 
-	"vkgame/engine/geom"
-	"vkgame/engine/gfx"
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/geom"
+	"CliffCrack/engine/gfx"
+	"CliffCrack/engine/mathx"
 )
 
 // The data types live in package gfx (pure Go); these aliases keep call sites short.

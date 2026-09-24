@@ -14,7 +14,7 @@ package ui
 import (
 	"fmt"
 
-	"vkgame/engine/gfx"
+	"CliffCrack/engine/gfx"
 )
 
 type binding struct {

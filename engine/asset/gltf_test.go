@@ -12,7 +12,7 @@ import (
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
 
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/mathx"
 )
 
 func saveGLB(t *testing.T, doc *gltf.Document) string {

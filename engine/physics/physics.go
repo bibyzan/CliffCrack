@@ -11,7 +11,7 @@ import (
 	"errors"
 	"math"
 
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/mathx"
 )
 
 type Kind int
