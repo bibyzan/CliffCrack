@@ -826,7 +826,7 @@ bool init(const RInitDesc& desc) {
     VK_TRY(volkInitialize());
 
     vkb::InstanceBuilder inst_builder(vkGetInstanceProcAddr);
-    inst_builder.set_app_name("vkgame").require_api_version(1, 3, 0);
+    inst_builder.set_app_name("Cliff Crack").require_api_version(1, 3, 0);
     if (desc.enable_validation) {
         inst_builder.request_validation_layers().use_default_debug_messenger();
     }

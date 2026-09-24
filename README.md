@@ -1,6 +1,8 @@
-# vkgame
+# Cliff Crack
 
-A game engine with a **Go host** driving a **native C++ Vulkan 1.3 renderer**.
+A game built on its own engine: a **Go host** driving a **native C++ Vulkan 1.3 renderer**.
+Right now it's a physics sandbox: roll the checker ball around the arena, bump the
+spinning cubes and drop piles of balls.
 
 ```
 ┌──────────────────────── game.exe (Go) ────────────────────────┐

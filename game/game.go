@@ -218,7 +218,7 @@ func (g *Game) Update(dt float32, in *input.State, mouseFree bool) {
 
 // DebugUI describes the game's debug window.
 func (g *Game) DebugUI(b *ui.Builder, s Stats) {
-	b.Window("vkgame", 12, 12)
+	b.Window("Cliff Crack", 12, 12)
 	b.Text("%.0f fps  %.2f ms", s.FPS, s.FrameMS)
 	b.Text("%d entities, %d draws", g.world.Len(), s.Draws)
 	mode := "orbit (Tab: fly)"

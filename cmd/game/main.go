@@ -47,7 +47,7 @@ func run() error {
 	exeDir := filepath.Dir(exe)
 	shaderDir := filepath.Join(exeDir, "shaders")
 
-	win, err := platform.NewWindow("vkgame", 1280, 720)
+	win, err := platform.NewWindow("Cliff Crack", 1280, 720)
 	if err != nil {
 		return err
 	}
