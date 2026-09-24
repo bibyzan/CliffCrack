@@ -3,23 +3,23 @@
 A game engine with a **Go host** driving a **native C++ Vulkan 1.3 renderer**.
 
 ```
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ game.exe (Go) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚ cmd/game      main loop                                        â”‚
-â”‚ game/         gameplay: builds a draw list each frame          â”‚
-â”‚ engine/       platform (GLFW window/input), math, render API   â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-                                â”‚ ~5 cgo calls per frame, POD only
-â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â–¼â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
-â”‚ renderer.dll (C++)   renderer/include/renderer.h is the API    â”‚
-â”‚ Vulkan 1.3: dynamic rendering, sync2, volk, vk-bootstrap, VMA  â”‚
-â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+┌──────────────────────── game.exe (Go) ────────────────────────┐
+│ cmd/game      main loop                                        │
+│ game/         gameplay: builds a draw list each frame          │
+│ engine/       platform (GLFW window/input), math, render API   │
+└───────────────────────────────┬────────────────────────────────┘
+                                │ ~5 cgo calls per frame, POD only
+┌───────────────────────────────▼────────────────────────────────┐
+│ renderer.dll (C++)   renderer/include/renderer.h is the API    │
+│ Vulkan 1.3: dynamic rendering, sync2, volk, vk-bootstrap, VMA  │
+└────────────────────────────────────────────────────────────────┘
 ```
 
 ## The boundary rules
 
 1. **Coarse calls.** A handful per frame (`begin`, `draw(list)`, `end`), never one per object.
 2. **Plain data only.** Handles, flat arrays and fixed-size structs. No Go pointers are ever stored on the C side.
-3. **Layouts match exactly.** Each C struct in `renderer.h` has a Go twin (e.g. `RDrawCmd` â†” `render.DrawCmd`), and the Go twin is size-checked at startup.
+3. **Layouts match exactly.** Each C struct in `renderer.h` has a Go twin (e.g. `RDrawCmd` ↔ `render.DrawCmd`), and the Go twin is size-checked at startup.
 
 ## Prerequisites (Windows)
 
@@ -58,7 +58,7 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | | **Esc** | quit |
 
 Colours: the swapchain is sRGB and shaders work in linear space, so write colours
-with `mathx.Hex(0xRRGGBB)` / `mathx.SRGB(...)` â€” they convert picker values to linear.
+with `mathx.Hex(0xRRGGBB)` / `mathx.SRGB(...)` — they convert picker values to linear.
 
 ## Layout
 
@@ -85,7 +85,7 @@ cmd/game/            main package
 
 - [x] Meshes: `r_create_mesh` uploads vertex/index buffers through VMA; glTF parsed in Go
 - [x] Depth buffer, perspective camera, directional lighting
-- [x] Per-frame uniforms (camera, sun, ambient) â€” Blinn-Phong + hemisphere ambient
+- [x] Per-frame uniforms (camera, sun, ambient) — Blinn-Phong + hemisphere ambient
 - [x] Textures: `r_create_texture` with mipmaps, bindless descriptor table
 - [x] glTF materials (base colour factor + texture), parts grouped by material
 - [x] Frame capture (`-screenshot`, F12)
