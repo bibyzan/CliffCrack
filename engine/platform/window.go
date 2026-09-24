@@ -18,6 +18,7 @@ type Key = glfw.Key
 const (
 	KeyEscape = glfw.KeyEscape
 	KeySpace  = glfw.KeySpace
+	KeyF12    = glfw.KeyF12
 )
 
 type Window struct {

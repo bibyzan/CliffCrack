@@ -115,6 +115,17 @@ struct Renderer {
     uint32_t width = 0;
     uint32_t height = 0;
     bool     vsync = true;
+
+    // Frame capture (r_capture_next_frame / r_read_capture).
+    bool         capture_requested = false;
+    bool         capture_pending = false; // copy recorded, not yet read
+    uint32_t     capture_frame = 0;       // frames[] slot whose fence guards the copy
+    uint32_t     capture_width = 0;
+    uint32_t     capture_height = 0;
+    VkFormat     capture_format = VK_FORMAT_UNDEFINED;
+    Buffer       capture_buffer;
+    void*        capture_mapped = nullptr;
+    VkDeviceSize capture_capacity = 0;
 };
 
 Renderer*   g = nullptr;
@@ -678,6 +689,7 @@ bool create_swapchain() {
                      .set_desired_format({VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
                      .set_desired_present_mode(g->vsync ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_MAILBOX_KHR)
                      .set_desired_extent(g->width, g->height)
+                     .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_SRC_BIT) // frame capture
                      .set_old_swapchain(g->swapchain)
                      .build();
     if (!built.has_value()) return fail("swapchain creation failed: " + built.error().message());
@@ -743,6 +755,62 @@ bool create_frames() {
     VK_TRY(vkAllocateCommandBuffers(g->dev, &alloc, &g->upload_cmd));
     VkFenceCreateInfo upload_fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
     VK_TRY(vkCreateFence(g->dev, &upload_fence_info, nullptr, &g->upload_fence));
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Frame capture
+// ---------------------------------------------------------------------------
+
+// Records a copy of the current swapchain image into the host-readable capture
+// buffer and leaves the image in PRESENT_SRC. Returns false (recording nothing)
+// if the buffer can't be allocated, so the caller does the normal transition.
+bool record_capture(VkCommandBuffer cmd) {
+    const VkExtent2D   extent = g->swapchain.extent;
+    const VkDeviceSize size = VkDeviceSize{extent.width} * extent.height * 4;
+    if (size > g->capture_capacity) {
+        if (g->capture_buffer.buffer) vkDeviceWaitIdle(g->dev); // an older copy may still target it
+        destroy_buffer(g->capture_buffer);
+        g->capture_capacity = 0;
+        if (!create_buffer(size, VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                           VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                           g->capture_buffer, &g->capture_mapped)) {
+            return false;
+        }
+        g->capture_capacity = size;
+    }
+
+    VkImage image = g->images[g->image];
+    image_barrier(cmd, image, color_mips(0, 1),
+                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                  VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT);
+
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {extent.width, extent.height, 1};
+    vkCmdCopyImageToBuffer(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, g->capture_buffer.buffer, 1, &region);
+
+    image_barrier(cmd, image, color_mips(0, 1),
+                  VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                  VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_READ_BIT,
+                  VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0);
+
+    VkMemoryBarrier2 to_host{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+    to_host.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+    to_host.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    to_host.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    to_host.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &to_host;
+    vkCmdPipelineBarrier2(cmd, &dep);
+
+    g->capture_pending = true;
+    g->capture_frame = g->frame;
+    g->capture_width = extent.width;
+    g->capture_height = extent.height;
+    g->capture_format = g->swapchain.image_format;
     return true;
 }
 
@@ -840,6 +908,7 @@ void destroy_all() {
         vkb::destroy_swapchain(g->swapchain);
         if (g->allocator) {
             for (FrameData& f : g->frames) destroy_buffer(f.uniforms);
+            destroy_buffer(g->capture_buffer);
             for (Mesh& mesh : g->meshes) destroy_mesh(mesh);
             for (Texture& tex : g->textures) destroy_image(tex.image);
             destroy_image(g->depth);
@@ -1080,10 +1149,14 @@ void r_end_frame(void) {
     FrameData& f = g->frames[g->frame];
     vkCmdEndRendering(f.cmd);
 
-    image_barrier(f.cmd, g->images[g->image], color_mips(0, 1),
-                  VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
-                  VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0);
+    const bool captured = g->capture_requested && record_capture(f.cmd);
+    if (captured) g->capture_requested = false;
+    if (!captured) {
+        image_barrier(f.cmd, g->images[g->image], color_mips(0, 1),
+                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
+                      VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0);
+    }
     vkEndCommandBuffer(f.cmd);
 
     VkSemaphore render_done = g->render_done[g->image];
@@ -1124,6 +1197,36 @@ void r_end_frame(void) {
     }
 
     g->frame = (g->frame + 1) % kFramesInFlight;
+}
+
+void r_capture_next_frame(void) {
+    if (g) g->capture_requested = true;
+}
+
+int32_t r_read_capture(uint8_t* rgba, uint32_t capacity, uint32_t* width, uint32_t* height) {
+    if (!g || !g->capture_pending) return fail("r_read_capture: no captured frame"), 0;
+    if (width) *width = g->capture_width;
+    if (height) *height = g->capture_height;
+    if (!rgba) return 1;
+
+    const uint64_t pixels = uint64_t{g->capture_width} * g->capture_height;
+    if (capacity < pixels * 4) return fail("r_read_capture: buffer too small"), 0;
+
+    vkWaitForFences(g->dev, 1, &g->frames[g->capture_frame].in_flight, VK_TRUE, UINT64_MAX);
+    vmaInvalidateAllocation(g->allocator, g->capture_buffer.allocation, 0, VK_WHOLE_SIZE);
+
+    const bool bgra = g->capture_format == VK_FORMAT_B8G8R8A8_SRGB || g->capture_format == VK_FORMAT_B8G8R8A8_UNORM;
+    const auto* src = static_cast<const uint8_t*>(g->capture_mapped);
+    for (uint64_t i = 0; i < pixels; ++i) {
+        const uint8_t* s = src + i * 4;
+        uint8_t*       d = rgba + i * 4;
+        d[0] = bgra ? s[2] : s[0];
+        d[1] = s[1];
+        d[2] = bgra ? s[0] : s[2];
+        d[3] = 255; // swapchain alpha is meaningless for a screenshot
+    }
+    g->capture_pending = false;
+    return 1;
 }
 
 void r_shutdown(void) {

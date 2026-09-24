@@ -39,10 +39,13 @@ You don't need to link against the Vulkan loader: volk loads `vulkan-1.dll` from
 ./build.ps1 -Config Release
 build/bin/game.exe -validation=false -vsync=false
 build/bin/game.exe -model path/to/model.glb   # show a glTF model in the centre
+build/bin/game.exe -screenshot out.png -frames 90   # render 90 frames, save the last, exit
 go test ./engine/...          # math, geometry and glTF tests (no GPU needed)
 ```
 
 The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv`.
+In game: **F12** saves `screenshot-<time>.png` (read back from the GPU, so it works
+even when the desktop can't be screen-captured), **Esc** quits.
 
 Colours: the swapchain is sRGB and shaders work in linear space, so write colours
 with `mathx.Hex(0xRRGGBB)` / `mathx.SRGB(...)` — they convert picker values to linear.
@@ -68,9 +71,10 @@ cmd/game/            main package
 
 - [x] Meshes: `r_create_mesh` uploads vertex/index buffers through VMA; glTF parsed in Go
 - [x] Depth buffer, perspective camera, directional lighting
-- [ ] Per-frame uniforms (camera, lights) instead of hard-coded light
-- [ ] Textures: `r_load_texture` + bindless descriptors (UVs are already in the vertex format)
-- [ ] glTF materials (base colour / texture) and multiple meshes per file
+- [x] Per-frame uniforms (camera, sun, ambient) — Blinn-Phong + hemisphere ambient
+- [x] Textures: `r_create_texture` with mipmaps, bindless descriptor table
+- [x] glTF materials (base colour factor + texture), parts grouped by material
+- [x] Frame capture (`-screenshot`, F12)
 - [ ] Dear ImGui overlay (renderer side, toggled from Go)
 - [ ] Input abstraction, ECS or entity model on the Go side
 - [ ] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)

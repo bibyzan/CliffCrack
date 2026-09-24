@@ -101,6 +101,15 @@ R_API void r_draw(const RDrawCmd* cmds, uint32_t count);
 
 R_API void r_end_frame(void);
 
+// Asks for the next completed frame to be copied back to CPU memory.
+R_API void r_capture_next_frame(void);
+
+// Call right after the r_end_frame of a captured frame. Waits for the GPU and
+// copies the image into rgba as tightly packed, sRGB-encoded 8-bit RGBA.
+// Pass rgba = NULL to only query width/height. Returns 1 on success, 0 if no
+// capture is pending or capacity is too small.
+R_API int32_t r_read_capture(uint8_t* rgba, uint32_t capacity, uint32_t* width, uint32_t* height);
+
 R_API void r_shutdown(void);
 
 #ifdef __cplusplus

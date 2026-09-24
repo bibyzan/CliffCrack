@@ -170,6 +170,25 @@ func EndFrame() {
 	C.r_end_frame()
 }
 
+// CaptureNextFrame asks for the next completed frame to be read back; collect
+// it with ReadCapture right after that frame's EndFrame.
+func CaptureNextFrame() {
+	C.r_capture_next_frame()
+}
+
+// ReadCapture waits for the captured frame and returns it as sRGB RGBA pixels.
+func ReadCapture() (*image.NRGBA, error) {
+	var w, h C.uint32_t
+	if C.r_read_capture(nil, 0, &w, &h) == 0 {
+		return nil, fmt.Errorf("read capture: %w", lastError())
+	}
+	img := image.NewNRGBA(image.Rect(0, 0, int(w), int(h)))
+	if C.r_read_capture((*C.uint8_t)(unsafe.Pointer(&img.Pix[0])), C.uint32_t(len(img.Pix)), &w, &h) == 0 {
+		return nil, fmt.Errorf("read capture: %w", lastError())
+	}
+	return img, nil
+}
+
 func Shutdown() {
 	C.r_shutdown()
 }
