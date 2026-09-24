@@ -155,7 +155,7 @@ func (g *Game) stepPhysics(dt float32) {
 		if e := g.world.Get(l.entity); e != nil {
 			e.Transform.Position = l.body.Position
 			e.Transform.Rotation = l.body.Rotation
-			if l.body.Position[1] < fallLimit {
+			if l.body.Position[1] < fallLimit && l.entity != g.player.entity { // the player respawns instead
 				g.world.Destroy(l.entity)
 				fallen = true
 			}
@@ -168,12 +168,28 @@ func (g *Game) stepPhysics(dt float32) {
 
 	played := 0
 	for _, hit := range g.phys.Impacts() {
+		if cube, ok := g.bumpedCube(hit); ok && hit.Speed >= bumpSpeed {
+			g.bump(cube)
+			g.playAtVolume(g.bonkSound, hit.Point, min(1, 0.3+hit.Speed/6))
+			played++
+			continue
+		}
 		if hit.Speed < 1.5 || played >= 4 { // ignore taps; cap per frame
 			continue
 		}
 		g.playAtVolume(g.bounceSound, hit.Point, min(1, hit.Speed/8))
 		played++
 	}
+}
+
+// bumpedCube reports which ring cube (if any) took part in an impact.
+func (g *Game) bumpedCube(hit physics.Impact) (scene.ID, bool) {
+	for _, b := range [2]*physics.Body{hit.A, hit.B} {
+		if id, ok := b.UserData.(scene.ID); ok && g.cubes[id] {
+			return id, true
+		}
+	}
+	return scene.ID{}, false
 }
 
 // pruneLinks drops physics bodies whose entities no longer exist.

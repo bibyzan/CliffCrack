@@ -41,6 +41,7 @@ build/bin/game.exe -validation=false -vsync=false
 build/bin/game.exe -model path/to/model.glb   # show a glTF model in the centre
 build/bin/game.exe -screenshot out.png -frames 90   # 90 fixed 1/60 s frames, save the last, exit
 build/bin/game.exe -drop 60                   # start with 60 physics balls
+build/bin/game.exe -hold W -screenshot out.png -frames 110   # scripted input for tests
 go test ./engine/...          # math, geometry and glTF tests (no GPU needed)
 ```
 
@@ -49,7 +50,9 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 
 | Mode | Input | Action |
 |---|---|---|
-| Orbit (default) | left/right mouse drag | rotate around the scene |
+| Orbit (default) | **W A S D** | roll the ball (relative to the camera) |
+| | **Space** / **R** | jump / reset the ball |
+| | left/right mouse drag | orbit the camera around the ball |
 | | scroll | zoom |
 | | *(no input for 3 s)* | slow auto-spin |
 | Fly | **Tab** | toggle orbit / fly |
@@ -74,7 +77,9 @@ Coulomb friction, rolling). Dynamic bodies are spheres; they collide with each o
 and with static or kinematic spheres and oriented boxes. In the demo the ground and
 walls are static, the ring cubes and centre sphere are kinematic (they follow their
 entities, so scripts can move them and they shove balls around), and "drop ball"
-spawns dynamic balls. Impacts come back as events and play positional sounds.
+spawns dynamic balls. The player is a dynamic ball steered marble-style: input adds
+spin and ground friction turns it into motion; cubes wobble and bonk when bumped.
+`go test ./game` needs `renderer.dll` on `PATH` (the package links it), e.g. `build/bin`. Impacts come back as events and play positional sounds.
 Tests check resting contact, bounce height, momentum, rolling on a ramp, kinematic
 pushes and that a 60-ball pile never gains energy.
 

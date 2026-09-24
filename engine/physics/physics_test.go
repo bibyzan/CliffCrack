@@ -37,6 +37,28 @@ func TestBallComesToRestOnGround(t *testing.T) {
 	if v := ball.Velocity.Len(); v > 0.05 {
 		t.Errorf("ball still moving at %v m/s after 6 s", v)
 	}
+	if !ball.Grounded {
+		t.Error("resting ball should be grounded")
+	}
+	ball.Velocity[1] = 5
+	w.Update(0.1)
+	if ball.Grounded {
+		t.Error("ball in the air should not be grounded")
+	}
+}
+
+func TestWallContactIsNotGround(t *testing.T) {
+	w := NewWorld()
+	w.Gravity = mathx.Vec3{}
+	wall := NewBox(mathx.Vec3{0.5, 5, 5}, Static)
+	w.Add(wall)
+	ball := NewSphere(0.5, 1)
+	ball.Position = mathx.Vec3{0.9, 0, 0} // touching the wall's +X face
+	w.Add(ball)
+	w.Update(w.FixedStep)
+	if ball.Grounded {
+		t.Error("touching a vertical wall must not count as standing on ground")
+	}
 }
 
 func TestBounceAndImpact(t *testing.T) {

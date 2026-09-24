@@ -40,11 +40,16 @@ type Game struct {
 	ballMesh render.Mesh
 	rng      *rand.Rand
 
+	player   player
+	cubes    map[scene.ID]bool    // the ring cubes, which wobble when bumped
+	bumpedAt map[scene.ID]float32 // world time of each cube's last bump
+
 	sound       *audio.Mixer // nil without audio
 	volume      float32
 	dropSound   *audio.Sound
 	clearSound  *audio.Sound
 	bounceSound *audio.Sound
+	bonkSound   *audio.Sound
 }
 
 // Stats are engine numbers shown in the debug UI.
@@ -75,6 +80,9 @@ func New(opts Options) (*Game, error) {
 		dropSound:    audio.Blip(120*time.Millisecond, 520, 880, 0.5),
 		clearSound:   audio.Blip(250*time.Millisecond, 600, 180, 0.6),
 		bounceSound:  audio.Blip(60*time.Millisecond, 260, 140, 0.8),
+		bonkSound:    audio.Blip(90*time.Millisecond, 180, 90, 1),
+		cubes:        map[scene.ID]bool{},
+		bumpedAt:     map[scene.ID]float32{},
 	}
 	w := g.world
 	modelPath := opts.Model
@@ -139,11 +147,22 @@ func New(opts Options) (*Game, error) {
 	palette := []uint32{0xe05252, 0xf0923a, 0xe8cf45, 0x4cbf6b, 0x4a90e2, 0x9b6ce0}
 	for i, hex := range palette {
 		angle := float64(i) / float64(len(palette)) * 2 * math.Pi
-		c := w.Spawn(fmt.Sprintf("cube%d", i), ring.ID()).AddBehaviour(spin(0.8 + 0.2*float32(i)))
+		c := w.Spawn(fmt.Sprintf("cube%d", i), ring.ID()).
+			AddBehaviour(spin(0.8 + 0.2*float32(i))).
+			AddBehaviour(g.wobble())
+		g.cubes[c.ID()] = true
 		c.Transform.Position = mathx.Vec3{float32(math.Cos(angle)) * 3.5, 0.5, float32(math.Sin(angle)) * 3.5}
 		c.Renderable = &scene.Renderable{Mesh: cube, Texture: panelTex, Color: mathx.Hex(hex)}
 		g.attachKinematic(c, physics.Box, mathx.Vec3{0.5, 0.5, 0.5})
 	}
+
+	if err := g.spawnPlayer(); err != nil {
+		return nil, err
+	}
+	g.camera.orbit.Target = playerSpawn
+	g.camera.orbit.Distance = 8
+	g.camera.orbit.Yaw = 0 // behind the ball, looking at the centre: W rolls into the scene
+	g.camera.orbit.Pitch = -0.35
 
 	w.UpdateTransforms()
 	for i := 0; i < opts.DropBalls; i++ {
@@ -191,8 +210,10 @@ func (g *Game) Update(dt float32, in *input.State, mouseFree bool) {
 		g.scripts.Poll() // errors are logged by the host
 	}
 	g.camera.update(dt, in, mouseFree)
+	g.updatePlayer(dt*g.timeScale, in)
 	g.world.Update(dt * g.timeScale)
 	g.stepPhysics(dt * g.timeScale)
+	g.followPlayer(dt)
 }
 
 // DebugUI describes the game's debug window.
@@ -233,6 +254,7 @@ func (g *Game) DebugUI(b *ui.Builder, s Stats) {
 		g.clearBalls()
 		g.playAtVolume(g.clearSound, mathx.Vec3{}, 1)
 	}
+	b.Text("WASD roll, Space jump, R reset")
 	b.Text("F1: hide this window")
 	b.End()
 }

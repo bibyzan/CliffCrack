@@ -48,6 +48,10 @@ type Body struct {
 
 	UserData any // e.g. the scene entity this body drives
 
+	// Grounded is set by the world each step for dynamic bodies: true while
+	// something below is supporting the body (a contact normal pointing up).
+	Grounded bool
+
 	invMass, invInertia float32
 }
 
@@ -174,9 +178,18 @@ func (w *World) step(h float32) {
 	}
 
 	contacts := w.detect()
+	for _, b := range w.bodies {
+		b.Grounded = false
+	}
 	touched := make(map[[2]*Body]bool, len(contacts))
 	for i := range contacts {
 		c := &contacts[i]
+		const supportY = 0.5 // contact normals steeper than ~60 degrees don't count as ground
+		if c.normal[1] > supportY {
+			c.b.Grounded = c.b.Grounded || c.b.Kind == Dynamic // a is below b
+		} else if c.normal[1] < -supportY {
+			c.a.Grounded = c.a.Grounded || c.a.Kind == Dynamic
+		}
 		vn := relativeVelocity(c).Dot(c.normal)
 		if vn < -bounceThreshold {
 			c.bias = -max(c.a.Restitution, c.b.Restitution) * vn

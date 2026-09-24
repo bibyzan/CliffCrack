@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"vkgame/engine/audio"
@@ -35,6 +36,7 @@ func run() error {
 	ui := flag.Bool("ui", true, "show the debug UI at startup (F1 toggles)")
 	sound := flag.Bool("audio", true, "enable audio output")
 	drop := flag.Int("drop", 0, "number of physics balls to drop at startup")
+	hold := flag.String("hold", "", `keys to hold down every frame, e.g. "W" or "WD" (for scripted tests)`)
 	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
 	flag.Parse()
 
@@ -104,6 +106,9 @@ func run() error {
 	for !win.ShouldClose() {
 		in.NewFrame()
 		platform.PollEvents()
+		for _, k := range strings.ToUpper(*hold) {
+			in.KeyEvent(input.Key(k), true) // letters and space use their ASCII codes
+		}
 		if in.Pressed(input.KeyEscape) {
 			win.SetShouldClose(true)
 		}
