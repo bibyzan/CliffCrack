@@ -50,7 +50,17 @@ type Options struct {
 	DebugUI   bool   // show the Engine Demo's debug window at startup (F1 toggles)
 	Audio     *audio.Mixer
 	Demo      DemoOptions
+	DataDir   string // where settings are saved ("" = don't save)
 }
+
+// overlay is a screen shown over the frozen (or, on the main menu, idling) game.
+type overlay int
+
+const (
+	overlayNone overlay = iota
+	overlayPause
+	overlaySettings
+)
 
 // App owns the modes and routes the frame to the active one.
 type App struct {
@@ -65,6 +75,12 @@ type App struct {
 	pending Mode // a menu click, applied on the next Update
 	picked  bool
 	in      *input.State // this frame's input, for choosing button prompts
+
+	settings       Settings
+	overlay        overlay
+	settingsReturn overlay // where Back leaves the settings screen for
+	pause          pauseMenu
+	settingsUI     settingsScreen
 }
 
 func NewApp(opts Options) (*App, error) {
@@ -73,12 +89,21 @@ func NewApp(opts Options) (*App, error) {
 		return nil, err
 	}
 	a := &App{
-		opts:  opts,
-		run:   newRun(sc, opts.Audio, opts.Seed),
-		debug: map[Mode]bool{ModeDemo: opts.DebugUI},
-		menu:  newMenu(),
+		opts:     opts,
+		debug:    map[Mode]bool{ModeDemo: opts.DebugUI},
+		menu:     newMenu(),
+		settings: DefaultSettings(),
 	}
+	if opts.DataDir != "" {
+		s, err := LoadSettings(opts.DataDir)
+		if err != nil {
+			logf("settings: %v (using defaults)", err)
+		}
+		a.settings = s
+	}
+	a.run = newRun(sc, opts.Audio, opts.Seed, &a.settings)
 	a.run.Autopilot = opts.Autopilot
+	a.opts.Demo.Settings = &a.settings
 	if err := a.enter(opts.Start); err != nil {
 		return nil, err
 	}
@@ -111,6 +136,9 @@ func (a *App) Quit() bool { return a.quit }
 // Update advances the active mode. mouseFree is false while the UI has the mouse.
 func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 	a.in = in
+	if a.opts.Audio != nil {
+		a.opts.Audio.SetVolume(a.settings.Volume / 100)
+	}
 	if debugPressed(in) {
 		a.debug[a.mode] = !a.debug[a.mode]
 	}
@@ -119,6 +147,24 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 		a.choose(a.pending)
 		return
 	}
+
+	switch a.overlay {
+	case overlaySettings:
+		if a.settingsUI.update(in, &a.settings, dt) {
+			a.saveSettings()
+			a.overlay = a.settingsReturn
+		}
+		if a.mode == ModeMenu {
+			a.run.Update(dt, in, false) // the backdrop keeps riding behind the settings
+		}
+		return
+	case overlayPause:
+		if act, ok := a.pause.update(in, a.pauseItems()); ok {
+			a.pauseAction(act)
+		}
+		return // the game stays frozen
+	}
+
 	switch a.mode {
 	case ModeMenu:
 		if in.Pressed(input.KeyEscape) {
@@ -130,25 +176,79 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 			a.choose(item)
 		}
 	case ModeRun:
-		if pausePressed(in) || a.run.wantsMenu {
+		if a.run.wantsMenu {
 			a.choose(ModeMenu)
+			return
+		}
+		if pausePressed(in) {
+			a.openPause()
 			return
 		}
 		a.run.debugOpen = a.debug[ModeRun]
 		a.run.Update(dt, in, mouseFree)
 	case ModeDemo:
 		if pausePressed(in) || in.PadPressed(input.PadB) {
-			a.choose(ModeMenu)
+			a.openPause()
 			return
 		}
 		a.demo.Update(dt, in, mouseFree)
 	}
 }
 
+// Paused reports whether the game is frozen behind the pause menu or settings.
+func (a *App) Paused() bool { return a.overlay != overlayNone && a.mode != ModeMenu }
+
+func (a *App) openPause() {
+	a.overlay = overlayPause
+	a.pause.open()
+}
+
+func (a *App) openSettings(from overlay) {
+	a.overlay, a.settingsReturn = overlaySettings, from
+	a.settingsUI.open()
+}
+
+// pauseItems are the pause menu's entries for the current mode.
+func (a *App) pauseItems() []pauseAction {
+	if a.mode == ModeRun {
+		return []pauseAction{pauseResume, pauseRestart, pauseSettings, pauseMainMenu}
+	}
+	return []pauseAction{pauseResume, pauseSettings, pauseMainMenu}
+}
+
+func (a *App) pauseAction(act pauseAction) {
+	switch act {
+	case pauseResume:
+		a.overlay = overlayNone
+	case pauseRestart:
+		a.overlay = overlayNone
+		a.run.start(false)
+	case pauseSettings:
+		a.openSettings(overlayPause)
+	case pauseMainMenu:
+		a.overlay = overlayNone
+		a.choose(ModeMenu)
+	}
+}
+
+// saveSettings writes the settings to the data directory, if there is one.
+func (a *App) saveSettings() {
+	if a.opts.DataDir == "" {
+		return
+	}
+	if err := a.settings.Save(a.opts.DataDir); err != nil {
+		logf("settings: %v", err)
+	}
+}
+
 // choose acts on a menu item; quitting is the item after the modes.
 func (a *App) choose(m Mode) {
-	if m == menuQuit {
+	switch m {
+	case menuQuit:
 		a.quit = true
+		return
+	case menuSettings:
+		a.openSettings(overlayNone)
 		return
 	}
 	if err := a.enter(m); err != nil {
@@ -160,6 +260,9 @@ func (a *App) choose(m Mode) {
 // CursorLocked reports whether the mouse should be captured for looking
 // around (while riding in Run; while dragging or flying in the demo).
 func (a *App) CursorLocked() bool {
+	if a.overlay != overlayNone {
+		return false // the mouse is for the menus
+	}
 	switch a.mode {
 	case ModeRun:
 		return a.run.CursorLocked()
@@ -179,6 +282,14 @@ func (a *App) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, 
 
 // UI describes this frame's interface: menus, HUD and (F1) debug windows.
 func (a *App) UI(b *ui.Builder, s Stats) {
+	switch a.overlay {
+	case overlaySettings:
+		a.settingsUI.ui(b, &a.settings, a.in)
+		return
+	case overlayPause:
+		a.pause.ui(b, a.pauseItems(), a.in)
+		return
+	}
 	switch a.mode {
 	case ModeMenu:
 		if item, ok := a.menu.ui(b, a.run.best, a.in); ok {
@@ -196,8 +307,11 @@ func (a *App) UI(b *ui.Builder, s Stats) {
 	}
 }
 
-// menuQuit is the menu's third item.
-const menuQuit Mode = ModeDemo + 1
+// Main-menu items that aren't modes.
+const (
+	menuSettings Mode = ModeDemo + 1 + iota
+	menuQuit
+)
 
 // menu is the title screen over the self-playing run.
 type menu struct {
@@ -212,6 +326,7 @@ var menuItems = []struct {
 }{
 	{"Run", ModeRun},
 	{"Engine Demo", ModeDemo},
+	{"Settings", menuSettings},
 	{"Quit", menuQuit},
 }
 

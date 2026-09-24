@@ -96,12 +96,18 @@ func run() error {
 		}
 	}
 
+	dataDir, err := platform.DataDir()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "settings won't be saved:", err)
+		dataDir = ""
+	}
 	app, err := game.NewApp(game.Options{
 		Start:     startMode,
 		Seed:      *seed,
 		Autopilot: *autopilot,
 		DebugUI:   *ui,
 		Audio:     mixer,
+		DataDir:   dataDir,
 		Demo: game.DemoOptions{
 			Model:      *model,
 			ScriptsDir: scriptsDir(*scripts, exeDir),

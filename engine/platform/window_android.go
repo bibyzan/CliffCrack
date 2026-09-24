@@ -236,6 +236,12 @@ func Time() float64 { return time.Since(start).Seconds() }
 // ShaderDir is where the shaders were extracted from the APK's assets.
 func ShaderDir() (string, error) { return C.GoString(&C.cc_shader_dir[0]), nil }
 
+// DataDir is where the game keeps its files (settings): the app's private
+// internal storage.
+func DataDir() (string, error) {
+	return C.GoString(C.cc_app.activity.internalDataPath), nil
+}
+
 // UIScale enlarges the UI for the dense handheld screen: a 1080p panel a few
 // inches across, held closer than a monitor.
 func UIScale() float32 { return float32(C.cc_density()) * 0.6 }

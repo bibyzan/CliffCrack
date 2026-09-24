@@ -37,13 +37,13 @@ type chaseCam struct {
 	lookYaw  float32    // the player's turn around the ball
 	lookElev float32    // the player's change of height angle
 	idle     float32    // seconds since the last look input
-	fov      float32
+	widen    float32    // extra field of view from speed (radians), added to the player's setting
 
 	eye, target mathx.Vec3 // this frame's result
 }
 
 func newChaseCam(rd *ride) chaseCam {
-	c := chaseCam{fov: 50 * math.Pi / 180, idle: camRecenterAfter}
+	c := chaseCam{idle: camRecenterAfter}
 	c.pivot, _ = rd.pose(rd.ball)
 	c.yaw = headingYaw(rd.heading)
 	c.place(rd, rd.course)
@@ -55,6 +55,7 @@ func headingYaw(h mathx.Vec3) float32 {
 	return float32(math.Atan2(float64(h[0]), float64(-h[2])))
 }
 
+// update follows the ball and applies look input.
 func (c *chaseCam) update(dt float32, rd *ride, crs *course.Course, look lookInput) {
 	p, _ := rd.pose(rd.ball)
 	if rd.crashed {
@@ -79,8 +80,8 @@ func (c *chaseCam) update(dt float32, rd *ride, crs *course.Course, look lookInp
 	}
 
 	c.place(rd, crs)
-	fov := (50 + min(rd.speed(), 55)*0.45) * math.Pi / 180
-	c.fov += (float32(fov) - c.fov) * smoothing(6, dt)
+	widen := min(rd.speed(), 55) * 0.45 * math.Pi / 180 // up to ~25 degrees wider at full speed
+	c.widen += (widen - c.widen) * smoothing(6, dt)
 }
 
 // place puts the camera on its orbit: the distance and default height grow
@@ -106,6 +107,11 @@ func (c *chaseCam) place(rd *ride, crs *course.Course) {
 	ahead := 5 * max(0, float32(math.Cos(float64(c.lookYaw))))
 	c.target = c.pivot.Add(forward.Scale(ahead)).Add(mathx.Vec3{0, 0.4, 0})
 }
+
+// fov is the vertical field of view to draw with: the player's setting (read
+// every frame, so the settings slider shows its effect even while paused)
+// plus the widening from speed.
+func (c *chaseCam) fov(base float32) float32 { return base + c.widen }
 
 func (c *chaseCam) view() (mathx.Mat4, mathx.Vec3) {
 	return mathx.LookAt(c.eye, c.target, mathx.Vec3{0, 1, 0}), c.eye

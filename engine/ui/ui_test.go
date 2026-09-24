@@ -129,3 +129,18 @@ func TestColorTextProgressAndSameLine(t *testing.T) {
 		t.Error("plain text must not carry a colour")
 	}
 }
+
+func TestStyledSlider(t *testing.T) {
+	var b Builder
+	fov := float32(60)
+	b.StyledSlider("Field of view", &fov, 35, 90, SliderStyle{Format: "%.0f°", Width: 300, Highlight: true})
+	c := b.Cmds[0]
+	if label(&b, c) != "Field of view\x1f%.0f°" || c.Y != 300 || c.X != 1 || c.Value != 60 {
+		t.Errorf("styled slider = %+v %q", c, label(&b, c))
+	}
+	b.Cmds[0].Value, b.Cmds[0].Result = 75, 1
+	b.Apply()
+	if fov != 75 {
+		t.Errorf("fov = %v after the slider moved, want 75", fov)
+	}
+}

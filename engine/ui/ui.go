@@ -107,6 +107,29 @@ func (b *Builder) Slider(label string, v *float32, min, max float32) {
 	b.bindings = append(b.bindings, binding{cmd: len(b.Cmds) - 1, f: v})
 }
 
+// SliderStyle customises a slider: Format is the printf format its value is
+// shown with (e.g. "%.0f°"), Width its length in pixels (0 = default), and
+// Highlight marks it as the keyboard/gamepad selection.
+type SliderStyle struct {
+	Format    string
+	Width     float32
+	Highlight bool
+}
+
+// StyledSlider edits *v within [min, max], drawn as style says.
+func (b *Builder) StyledSlider(label string, v *float32, min, max float32, style SliderStyle) {
+	if style.Format != "" {
+		label += "\x1f" + style.Format
+	}
+	c := b.add(gfx.UISlider, label)
+	c.Value, c.Min, c.Max = *v, min, max
+	c.Y = style.Width
+	if style.Highlight {
+		c.X = 1
+	}
+	b.bindings = append(b.bindings, binding{cmd: len(b.Cmds) - 1, f: v})
+}
+
 // Checkbox toggles *v.
 func (b *Builder) Checkbox(label string, v *bool) {
 	c := b.add(gfx.UICheckbox, label)

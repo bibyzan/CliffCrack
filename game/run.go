@@ -60,16 +60,19 @@ type Run struct {
 
 	debugOpen bool // the F1 window is up: the mouse is for the UI unless the right button is held
 	locked    bool // the mouse is captured for looking around
+
+	settings *Settings // the player's preferences (field of view, look sensitivity)
 }
 
 type runSounds struct {
 	jump, land, crash, move, pick *audio.Sound
 }
 
-func newRun(sc *scenery, mixer *audio.Mixer, seed uint64) *Run {
+func newRun(sc *scenery, mixer *audio.Mixer, seed uint64, settings *Settings) *Run {
 	return &Run{
 		sc:        sc,
 		sound:     mixer,
+		settings:  settings,
 		fixedSeed: seed,
 		chunks:    map[int]*runChunk{},
 		sun:       1,
@@ -245,6 +248,9 @@ func (r *Run) look(in *input.State, mouseFree bool, dt float32) lookInput {
 		l.yaw += float32(dx) * camMouseSens
 		l.elev += float32(dy) * camMouseSens
 	}
+	scale := r.settings.LookSensitivity
+	l.yaw *= scale
+	l.elev *= scale * r.settings.lookSign()
 	return l
 }
 
@@ -260,7 +266,7 @@ func (r *Run) play(s *audio.Sound, volume float32) {
 // Render returns the frame parameters and the draw list (appended to out[:0]).
 func (r *Run) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
 	view, eye := r.cam.view()
-	proj := mathx.Perspective(r.cam.fov, aspect, 0.3, farPlane)
+	proj := mathx.Perspective(r.cam.fov(r.settings.fovRadians()), aspect, 0.3, farPlane)
 	params := runFrameParams(proj.Mul(view), eye, r.sun)
 
 	out = r.sc.appendBackdrop(out[:0], eye)

@@ -69,7 +69,7 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | | **Space** | jump (hit a kicker's lip to clear a crack) |
 | | mouse | look around (the cursor is captured while riding; with F1 open, hold the right button). The camera swings back behind the ball when you let go; steering always follows the direction of travel |
 | | **R**, **Enter** | ride again after a wipeout |
-| | **Esc** | back to the menu |
+| | **Esc** | pause |
 | Engine Demo, orbit (default) | **W A S D** | roll the ball (relative to the camera) |
 | | **Space** / **R** | jump / reset the ball |
 | | left/right mouse drag | orbit the camera around the ball |
@@ -78,7 +78,7 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | Fly | **Tab** | toggle orbit / fly |
 | | hold right mouse | look around |
 | | **W A S D**, **Q / E** | move, down / up (**Shift** = faster) |
-| | **Esc** | back to the menu |
+| | **Esc** | pause |
 | Any | **F1** | show / hide the debug window (stats and tuning; Run's has the seed and an autopilot toggle) |
 | | **F12** | save `screenshot-<time>.png` (read back from the GPU) |
 
@@ -96,13 +96,13 @@ button. The on-screen hints switch to gamepad buttons as soon as you use one.
 | | **RT** / **LT** | tuck / brake (analog) |
 | | **A** | jump |
 | | right stick | look around |
-| | **Start** | back to the menu |
+| | **Start** | pause |
 | Wipeout card | d-pad, **A** | choose |
 | | **Y** / **B** | ride again / main menu |
 | Engine Demo | left stick | roll the ball |
 | | right stick, **LB / RB** | orbit, zoom |
 | | **A** / **X** / **Y** | jump / drop a ball / reset |
-| | **B** / **Start** | back to the menu |
+| | **B** / **Start** | pause |
 | Any | **View** (Select) | show / hide the debug window |
 
 On Android the back button works like Esc, and touching the screen works like the mouse,
@@ -144,6 +144,24 @@ Specifics:
 
 Tested on an AYANEO (Konkr) Pocket FIT: Snapdragon 8 Gen 3, Adreno 750, Android 14. It
 runs at 144 fps, the display's full refresh rate. Scripts and `-model` are desktop-only.
+
+### Pause and settings
+
+Esc, Start or the Android back button pauses Run and the Engine Demo. The game freezes
+and the mouse is released. The pause menu offers **Resume**, **Restart run** (Run only),
+**Settings** and **Main menu**, and pressing Esc, Start or B again resumes.
+
+The settings screen is also on the main menu. It has:
+
+- **Field of view** (35–90°): Run widens it a little at speed.
+- **Look sensitivity**.
+- **Invert look up/down**.
+- **Volume**.
+
+Changes show immediately, even behind the pause menu. You can drag the sliders with the
+mouse, or pick a row with up/down and adjust it with left/right (holding repeats; the left
+stick adjusts smoothly). Settings are saved when you leave the screen, to
+`%AppData%\CliffCrack\settings.json` on Windows and the app's private storage on Android.
 
 ### Run mode
 

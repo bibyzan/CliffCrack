@@ -294,11 +294,27 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBit
             break;
         }
         case R_UI_SLIDER: {
+            std::string format = "%.3f";
+            if (const size_t sep = label.find('\x1f'); sep != std::string::npos) {
+                format = label.substr(sep + 1);
+                label.resize(sep);
+            }
+            const float width = c.y > 0.0f ? c.y * g_scale : ImGui::CalcItemWidth();
+            centre(width + ImGui::GetStyle().ItemInnerSpacing.x +
+                   ImGui::CalcTextSize(label.c_str(), nullptr, true).x);
+            ImGui::SetNextItemWidth(width);
+            const bool highlight = c.x != 0.0f;
+            if (highlight) {
+                ImVec4 selected = ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered);
+                selected.w = 0.55f;
+                ImGui::PushStyleColor(ImGuiCol_FrameBg, selected);
+            }
             float v = c.value;
-            if (ImGui::SliderFloat(label.c_str(), &v, c.min, c.max)) {
+            if (ImGui::SliderFloat(label.c_str(), &v, c.min, c.max, format.c_str())) {
                 c.value = v;
                 c.result = 1;
             }
+            if (highlight) ImGui::PopStyleColor();
             break;
         }
         case R_UI_CHECKBOX: {

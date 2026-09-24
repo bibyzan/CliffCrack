@@ -39,6 +39,9 @@ type cameraRig struct {
 	idle     float32 // seconds since the last orbit input
 	locked   bool    // the mouse cursor should be captured
 	autoSpin bool    // orbit slowly when idle
+
+	lookScale float32 // look sensitivity multiplier (settings)
+	lookSign  float32 // -1 inverts looking up and down
 }
 
 func newCameraRig() cameraRig {
@@ -51,9 +54,11 @@ func newCameraRig() cameraRig {
 			MinDist:  1.5,
 			MaxDist:  60,
 		},
-		lens:     camera.DefaultLens(),
-		idle:     autoOrbitDelay, // start spinning straight away
-		autoSpin: true,
+		lens:      camera.DefaultLens(),
+		idle:      autoOrbitDelay, // start spinning straight away
+		autoSpin:  true,
+		lookScale: 1,
+		lookSign:  1,
 	}
 }
 
@@ -67,7 +72,8 @@ func (r *cameraRig) update(dt float32, in *input.State, mouseFree bool) {
 		}
 	}
 	dx, dy := in.MouseDelta()
-	yaw, pitch := float32(dx)*mouseSensitivity, float32(-dy)*mouseSensitivity
+	yaw := float32(dx) * mouseSensitivity * r.lookScale
+	pitch := float32(-dy) * mouseSensitivity * r.lookScale * r.lookSign
 
 	if r.fly {
 		r.locked = in.MouseDown(input.MouseRight) && (mouseFree || r.locked)
@@ -98,7 +104,7 @@ func (r *cameraRig) update(dt float32, in *input.State, mouseFree bool) {
 	}
 	// Gamepad: the right stick orbits, the shoulders zoom.
 	if x, y := in.PadStick(true); x != 0 || y != 0 {
-		r.orbit.Rotate(x*padOrbitSpeed*dt, -y*padOrbitSpeed*0.7*dt)
+		r.orbit.Rotate(x*padOrbitSpeed*r.lookScale*dt, -y*padOrbitSpeed*0.7*r.lookScale*r.lookSign*dt)
 		r.idle = 0
 	}
 	if zoom := boolAxis(in.PadDown(input.PadRB), in.PadDown(input.PadLB)); zoom != 0 {

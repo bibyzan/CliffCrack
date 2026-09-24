@@ -168,6 +168,17 @@ func ShaderDir() (string, error) {
 	return filepath.Join(filepath.Dir(exe), "shaders"), nil
 }
 
+// DataDir is where the game keeps its files (settings): the user's config
+// directory, e.g. %AppData%\CliffCrack on Windows. It is created if needed.
+func DataDir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(base, "CliffCrack")
+	return dir, os.MkdirAll(dir, 0o755)
+}
+
 // UIScale is how much to enlarge the UI for the screen (1 on desktop).
 func UIScale() float32 { return 1 }
 

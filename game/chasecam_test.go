@@ -106,7 +106,8 @@ func TestLookingDoesNotChangeTheSteering(t *testing.T) {
 }
 
 func TestMouseLooksOnlyWhileCapturedOrDragging(t *testing.T) {
-	r := &Run{ride: newTestRide(3)}
+	settings := DefaultSettings()
+	r := &Run{ride: newTestRide(3), settings: &settings}
 	var in input.State
 	in.NewFrame()
 	in.MoveEvent(100, 100)
@@ -124,5 +125,25 @@ func TestMouseLooksOnlyWhileCapturedOrDragging(t *testing.T) {
 	}
 	if l.yaw <= 0 || l.elev >= 0 {
 		t.Errorf("mouse right and up should turn right and look up, got %+v", l)
+	}
+}
+
+func TestFieldOfViewFollowsTheSettingWhilePaused(t *testing.T) {
+	r, c := camOnFlat(t)
+	s := DefaultSettings()
+	before := c.fov(s.fovRadians())
+	// Paused: the slider moves, but no update runs.
+	s.FOV += 20
+	after := c.fov(s.fovRadians())
+	if want := float32(20 * math.Pi / 180); math.Abs(float64(after-before-want)) > 1e-5 {
+		t.Errorf("fov went from %v to %v without an update, want +%v", before, after, want)
+	}
+	// Speed still widens it on top.
+	r.ball.Velocity = mathx.Vec3{0, 0, -40}
+	for i := 0; i < 120; i++ {
+		c.update(1.0/60, r, r.course, lookInput{})
+	}
+	if c.fov(s.fovRadians()) <= after+0.2 {
+		t.Error("at speed the view should widen beyond the setting")
 	}
 }

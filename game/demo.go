@@ -44,10 +44,10 @@ type Demo struct {
 	cubes    map[scene.ID]bool    // the ring cubes, which wobble when bumped
 	bumpedAt map[scene.ID]float32 // world time of each cube's last bump
 
-	in *input.State // the last frame's input, for choosing prompts
+	in       *input.State // the last frame's input, for choosing prompts
+	settings *Settings
 
 	sound       *audio.Mixer // nil without audio
-	volume      float32
 	dropSound   *audio.Sound
 	clearSound  *audio.Sound
 	bounceSound *audio.Sound
@@ -59,6 +59,7 @@ type DemoOptions struct {
 	ScriptsDir string       // optional directory of hot-reloadable behaviours
 	Audio      *audio.Mixer // optional; sounds are skipped when nil
 	DropBalls  int          // balls to drop at startup
+	Settings   *Settings    // field of view and look sensitivity (defaults when nil)
 }
 
 // NewDemo builds the demo scene.
@@ -71,13 +72,17 @@ func NewDemo(opts DemoOptions) (*Demo, error) {
 		timeScale:    1,
 		rng:          rand.New(rand.NewPCG(1, 2)),
 		sound:        opts.Audio,
-		volume:       0.8,
 		dropSound:    audio.Blip(120*time.Millisecond, 520, 880, 0.5),
 		clearSound:   audio.Blip(250*time.Millisecond, 600, 180, 0.6),
 		bounceSound:  audio.Blip(60*time.Millisecond, 260, 140, 0.8),
 		bonkSound:    audio.Blip(90*time.Millisecond, 180, 90, 1),
 		cubes:        map[scene.ID]bool{},
 		bumpedAt:     map[scene.ID]float32{},
+	}
+	g.settings = opts.Settings
+	if g.settings == nil {
+		defaults := DefaultSettings()
+		g.settings = &defaults
 	}
 	w := g.world
 	modelPath := opts.Model
@@ -202,6 +207,8 @@ func (g *Demo) addModel(path string, parent scene.ID) error {
 // Update advances the game. mouseFree is false while the debug UI has the mouse.
 func (g *Demo) Update(dt float32, in *input.State, mouseFree bool) {
 	g.in = in
+	g.camera.lookScale = g.settings.LookSensitivity
+	g.camera.lookSign = g.settings.lookSign()
 	if g.scripts != nil {
 		g.scripts.Poll() // errors are logged by the host
 	}
@@ -230,10 +237,6 @@ func (g *Demo) DebugUI(b *ui.Builder, s Stats) {
 	b.Slider("ambient", &g.ambientLevel, 0, 3)
 	b.Slider("time scale", &g.timeScale, 0, 4)
 	b.Checkbox("auto orbit", &g.camera.autoSpin)
-	if g.sound != nil {
-		b.Slider("volume", &g.volume, 0, 1)
-		g.sound.SetVolume(g.volume)
-	}
 	b.Separator()
 	b.Text("physics: %d bodies, %d balls", len(g.phys.Bodies()), len(g.balls))
 	if b.Button("drop ball") {
@@ -253,10 +256,10 @@ func (g *Demo) DebugUI(b *ui.Builder, s Stats) {
 	if g.in != nil && g.in.UsingPad() {
 		b.Text("L-stick roll, R-stick camera, LB/RB zoom")
 		b.Text("A jump, X drop ball, Y reset")
-		b.Text("View: hide this window, B: main menu")
+		b.Text("View: hide this window, Start: pause")
 	} else {
 		b.Text("WASD roll, Space jump, R reset")
-		b.Text("F1: hide this window, Esc: main menu")
+		b.Text("F1: hide this window, Esc: pause")
 	}
 	b.End()
 }
@@ -295,6 +298,7 @@ func (g *Demo) CursorLocked() bool { return g.camera.locked }
 // Render returns this frame's scene parameters and draw list. The draw list is
 // appended to out[:0], so the caller can reuse one slice every frame.
 func (g *Demo) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
+	g.camera.lens.FovY = g.settings.fovRadians() // here, not in Update: it shows while paused too
 	view, eye := g.camera.view()
 	params := render.FrameParams{
 		ViewProj:     g.camera.lens.Projection(aspect).Mul(view),

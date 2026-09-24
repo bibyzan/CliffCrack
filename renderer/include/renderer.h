@@ -89,7 +89,9 @@ enum {
                         //   value = R_UI_WINDOW_* flags, max = font scale (0 = 1)
     R_UI_END,           // end the current window
     R_UI_TEXT,          // label = text; if max > 0, drawn in colour (x, y, min, max) = linear RGBA
-    R_UI_SLIDER,        // float slider: value in/out, min..max
+    R_UI_SLIDER,        // float slider: value in/out, min..max; x != 0 highlights it, y = width in
+                        //   pixels (0 = default). The label may end in "\x1f<printf format>" for
+                        //   how the value is shown (default "%.3f").
     R_UI_CHECKBOX,      // value in/out: 0 or 1
     R_UI_BUTTON,        // result = 1 on the frame it was clicked; value != 0 highlights it,
                         //   min/max = size in pixels (0 = fit the label)

@@ -93,8 +93,8 @@ func (r *Run) UI(b *ui.Builder, in *input.State) {
 	if r.ride.time < hintTime && !r.ride.crashed {
 		b.Panel("##hint", 0.5, 0.975, hudText, 1.1)
 		b.ColorText(uiMuted, "%s", prompt(in,
-			"A / D  steer      W  tuck      S  brake      Space  jump      Mouse  look      Esc  menu",
-			"L-stick  steer      RT  tuck      LT  brake      A  jump      R-stick  look      Start  menu"))
+			"A / D  steer      W  tuck      S  brake      Space  jump      Mouse  look      Esc  pause",
+			"L-stick  steer      RT  tuck      LT  brake      A  jump      R-stick  look      Start  pause"))
 		b.End()
 	}
 	if !r.ride.crashed || r.overTime < overDelay {
