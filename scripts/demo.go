@@ -11,8 +11,8 @@ package scripts
 import (
 	"math"
 
-	"vkgame/engine/mathx"
-	"vkgame/engine/scene"
+	"CliffCrack/engine/mathx"
+	"CliffCrack/engine/scene"
 )
 
 // Bob floats an entity up and down around y = 1.

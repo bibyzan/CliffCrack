@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"vkgame/engine/scene"
+	"CliffCrack/engine/scene"
 )
 
 func writeScript(t *testing.T, dir, name, src string) {
@@ -28,7 +28,7 @@ func forcePoll(t *testing.T, h *Host) (bool, error) {
 
 const moveX = `package scripts
 
-import "vkgame/engine/scene"
+import "CliffCrack/engine/scene"
 
 // MoveX moves the entity along +X at 2 units per second.
 func MoveX(w *scene.World, e *scene.Entity, dt float32) {
@@ -87,7 +87,7 @@ func TestPanicDisablesBehaviourUntilReload(t *testing.T) {
 	dir := t.TempDir()
 	writeScript(t, dir, "boom.go", `package scripts
 
-import "vkgame/engine/scene"
+import "CliffCrack/engine/scene"
 
 func Boom(w *scene.World, e *scene.Entity, dt float32) {
 	var m map[string]int

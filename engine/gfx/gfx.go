@@ -4,7 +4,7 @@
 // package render re-exports these types and moves them across the C boundary.
 package gfx
 
-import "vkgame/engine/mathx"
+import "CliffCrack/engine/mathx"
 
 // Mesh is a handle to vertex/index buffers in GPU memory. The zero value is "no mesh".
 type Mesh uint32

@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"vkgame/engine/gfx"
+	"CliffCrack/engine/gfx"
 )
 
 func label(b *Builder, c gfx.UICmd) string {

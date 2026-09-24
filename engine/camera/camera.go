@@ -7,7 +7,7 @@ package camera
 import (
 	"math"
 
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/mathx"
 )
 
 // MaxPitch keeps cameras just short of straight up/down, where LookAt degenerates.

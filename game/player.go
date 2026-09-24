@@ -4,12 +4,12 @@ import (
 	"image/color"
 	"math"
 
-	"vkgame/engine/camera"
-	"vkgame/engine/input"
-	"vkgame/engine/mathx"
-	"vkgame/engine/physics"
-	"vkgame/engine/render"
-	"vkgame/engine/scene"
+	"CliffCrack/engine/camera"
+	"CliffCrack/engine/input"
+	"CliffCrack/engine/mathx"
+	"CliffCrack/engine/physics"
+	"CliffCrack/engine/render"
+	"CliffCrack/engine/scene"
 )
 
 const (

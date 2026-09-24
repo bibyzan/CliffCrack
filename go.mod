@@ -1,4 +1,4 @@
-module vkgame
+module CliffCrack
 
 go 1.25.0
 

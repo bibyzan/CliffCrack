@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/mathx"
 )
 
 // checkWinding verifies every triangle is counter-clockwise when viewed from

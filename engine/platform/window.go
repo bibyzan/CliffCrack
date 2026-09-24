@@ -7,7 +7,7 @@ import (
 
 	"github.com/go-gl/glfw/v3.3/glfw"
 
-	"vkgame/engine/input"
+	"CliffCrack/engine/input"
 )
 
 // GLFW (and the Win32 message loop) must stay on the main OS thread.

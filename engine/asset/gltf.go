@@ -16,8 +16,8 @@ import (
 	"github.com/qmuntal/gltf"
 	"github.com/qmuntal/gltf/modeler"
 
-	"vkgame/engine/geom"
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/geom"
+	"CliffCrack/engine/mathx"
 )
 
 // Material is the subset of glTF PBR the renderer uses today.

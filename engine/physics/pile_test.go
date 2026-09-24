@@ -5,7 +5,7 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/mathx"
 )
 
 // energy is kinetic + rotational + potential energy of the dynamic bodies.

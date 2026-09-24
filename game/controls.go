@@ -3,9 +3,9 @@ package game
 import (
 	"math"
 
-	"vkgame/engine/camera"
-	"vkgame/engine/input"
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/camera"
+	"CliffCrack/engine/input"
+	"CliffCrack/engine/mathx"
 )
 
 const (

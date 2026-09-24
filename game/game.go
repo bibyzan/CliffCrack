@@ -10,16 +10,16 @@ import (
 	"strings"
 	"time"
 
-	"vkgame/engine/asset"
-	"vkgame/engine/audio"
-	"vkgame/engine/geom"
-	"vkgame/engine/input"
-	"vkgame/engine/mathx"
-	"vkgame/engine/physics"
-	"vkgame/engine/render"
-	"vkgame/engine/scene"
-	"vkgame/engine/script"
-	"vkgame/engine/ui"
+	"CliffCrack/engine/asset"
+	"CliffCrack/engine/audio"
+	"CliffCrack/engine/geom"
+	"CliffCrack/engine/input"
+	"CliffCrack/engine/mathx"
+	"CliffCrack/engine/physics"
+	"CliffCrack/engine/render"
+	"CliffCrack/engine/scene"
+	"CliffCrack/engine/script"
+	"CliffCrack/engine/ui"
 )
 
 var worldUp = mathx.Vec3{0, 1, 0}

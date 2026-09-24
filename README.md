@@ -93,7 +93,7 @@ Gameplay behaviours in [`scripts/`](scripts/) are plain Go files run by the
 attaches them by name (`g.script("Bob")`). Save a file while the game runs and it
 reloads within a quarter second — if the edit doesn't compile, the error is printed
 and the previous version keeps running; a script that panics is disabled until the
-next reload. Scripts can import `vkgame/engine/scene`, `mathx`, `gfx` and the standard
+next reload. Scripts can import `CliffCrack/engine/scene`, `mathx`, `gfx` and the standard
 library. `go vet ./...` type-checks them like normal code.
 
 `-scripts <dir>` picks another directory, `-scripts none` disables scripting. After

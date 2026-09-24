@@ -5,7 +5,7 @@ package geom
 import (
 	"math"
 
-	"vkgame/engine/mathx"
+	"CliffCrack/engine/mathx"
 )
 
 // Vertex must match RVertex in renderer/include/renderer.h.
