@@ -13,7 +13,6 @@ import (
 // The interface palette (linear RGBA), matching the renderer's UI theme.
 var (
 	uiAccent = mathx.Hex(0xf5842a) // the ball's orange
-	uiHot    = mathx.Hex(0xff4d2e)
 	uiMuted  = mathx.SRGB(0.86, 0.88, 0.96, 0.85)
 	uiWhite  = [4]float32{1, 1, 1, 1}
 )
@@ -23,6 +22,9 @@ const hudText = gfx.UIOverlay | gfx.UIAnchored | gfx.UINoBackground | gfx.UICent
 
 // Card is a pinned, centred panel with a background.
 const card = gfx.UIOverlay | gfx.UIAnchored | gfx.UICentered
+
+// speedoMax is the top of the speedometer (km/h).
+const speedoMax = 200
 
 // zoneLength is how often the run announces a new zone (metres).
 const zoneLength = 500
@@ -46,18 +48,6 @@ func withAlpha(c [4]float32, a float32) [4]float32 {
 	return c
 }
 
-// speedColor runs from white through orange to red as the ride gets fast.
-func speedColor(kmh float32) [4]float32 {
-	lerp := func(a, b [4]float32, t float32) [4]float32 {
-		t = clampf(t, 0, 1)
-		return [4]float32{a[0] + (b[0]-a[0])*t, a[1] + (b[1]-a[1])*t, a[2] + (b[2]-a[2])*t, 1}
-	}
-	if kmh < 110 {
-		return lerp(uiWhite, uiAccent, (kmh-70)/40)
-	}
-	return lerp(uiAccent, uiHot, (kmh-110)/60)
-}
-
 // UI draws the HUD, zone banners and the game-over card. in picks keyboard
 // or gamepad prompts.
 func (r *Run) UI(b *ui.Builder, in *input.State) {
@@ -69,10 +59,10 @@ func (r *Run) UI(b *ui.Builder, in *input.State) {
 	b.End()
 
 	if !r.ride.crashed {
-		kmh := r.ride.speed() * 3.6
-		b.Panel("##speed", 0.5, 0.125, hudText, 1.25)
-		b.ColorText(speedColor(kmh), "%.0f km/h", kmh)
-		b.Progress("", kmh/180, 200, 6)
+		// Speedometer, bottom left. The red zone starts where only a tuck at
+		// the fastest part of the mountain gets you.
+		b.Panel("##speedo", 0.015, 0.985, hudText&^gfx.UICentered, 1)
+		b.Gauge("km/h", r.ride.speed()*3.6, 0, speedoMax, ui.GaugeStyle{Size: 210, RedFrom: 0.8})
 		b.End()
 	}
 	if r.best > 0 {

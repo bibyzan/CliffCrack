@@ -94,6 +94,21 @@ func (b *Builder) Progress(label string, fraction, width, height float32) {
 	c.Value, c.Min, c.Max = fraction, width, height
 }
 
+// GaugeStyle describes a dial: its diameter in pixels (0 = 200) and where
+// its red zone starts, as a fraction of the range (0 = none).
+type GaugeStyle struct {
+	Size    float32
+	RedFrom float32
+}
+
+// Gauge draws a speedometer-style dial showing value within [min, max], with
+// the value in the middle and unit under it.
+func (b *Builder) Gauge(unit string, value, min, max float32, style GaugeStyle) {
+	c := b.add(gfx.UIGauge, unit)
+	c.Value, c.Min, c.Max = value, min, max
+	c.X, c.Y = style.Size, style.RedFrom
+}
+
 // SameLine keeps the next widget on the current line, spacing pixels after
 // this one (0 = default).
 func (b *Builder) SameLine(spacing float32) {

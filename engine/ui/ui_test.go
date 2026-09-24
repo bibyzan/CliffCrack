@@ -144,3 +144,13 @@ func TestStyledSlider(t *testing.T) {
 		t.Errorf("fov = %v after the slider moved, want 75", fov)
 	}
 }
+
+func TestGauge(t *testing.T) {
+	var b Builder
+	b.Gauge("km/h", 123, 0, 200, GaugeStyle{Size: 210, RedFrom: 0.8})
+	c := b.Cmds[0]
+	if c.Kind != gfx.UIGauge || label(&b, c) != "km/h" || c.Value != 123 || c.Min != 0 || c.Max != 200 ||
+		c.X != 210 || c.Y != 0.8 {
+		t.Errorf("gauge = %+v %q", c, label(&b, c))
+	}
+}

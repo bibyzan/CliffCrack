@@ -164,6 +164,93 @@ bool ui_init(const UiInitInfo& info, std::string* error) {
     return true;
 }
 
+constexpr float kPi = 3.14159265358979f;
+
+// Colour from sRGB components, for draw-list drawing (the swapchain is sRGB).
+static ImU32 srgb(float r, float g, float b, float a = 1.0f) {
+    return ImGui::GetColorU32(ImVec4(srgb_to_linear(r), srgb_to_linear(g), srgb_to_linear(b), a));
+}
+
+static ImU32 lerp_color(ImU32 a, ImU32 b, float t) {
+    const ImVec4 x = ImGui::ColorConvertU32ToFloat4(a), y = ImGui::ColorConvertU32ToFloat4(b);
+    return ImGui::GetColorU32(ImVec4(x.x + (y.x - x.x) * t, x.y + (y.y - x.y) * t, x.z + (y.z - x.z) * t,
+                                     x.w + (y.w - x.w) * t));
+}
+
+// Draws a speedometer-style dial at the cursor: a 270-degree arc open at the
+// bottom, filled up to the value in colours running white -> orange -> red,
+// with ticks, a needle and the value in the middle.
+static void draw_gauge(const RUICmd& c, const std::string& unit) {
+    const float  size = (c.x > 0.0f ? c.x : 200.0f) * g_scale;
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImGui::Dummy(ImVec2(size, size));
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+
+    const float  range = c.max > c.min ? c.max - c.min : 1.0f;
+    const float  t = std::clamp((c.value - c.min) / range, 0.0f, 1.0f);
+    const ImVec2 centre(origin.x + size * 0.5f, origin.y + size * 0.5f);
+    const float  radius = size * 0.44f;
+    const float  thick = size * 0.075f;
+    const float  start = 0.75f * kPi, sweep = 1.5f * kPi; // from bottom-left, clockwise to bottom-right
+    auto angle = [&](float f) { return start + sweep * f; };
+    auto at = [&](float a, float r) { return ImVec2(centre.x + std::cos(a) * r, centre.y + std::sin(a) * r); };
+
+    const ImU32 white = srgb(1.0f, 1.0f, 1.0f), orange = srgb(0.96f, 0.52f, 0.16f), red = srgb(1.0f, 0.30f, 0.18f);
+    auto heat = [&](float f) { return f < 0.5f ? lerp_color(white, orange, f * 2.0f) : lerp_color(orange, red, f * 2.0f - 1.0f); };
+
+    // Backing disc and track.
+    dl->AddCircleFilled(centre, radius + thick * 1.1f, srgb(0.05f, 0.07f, 0.14f, 0.72f), 64);
+    dl->PathArcTo(centre, radius, angle(0.0f), angle(1.0f), 64);
+    dl->PathStroke(srgb(1.0f, 1.0f, 1.0f, 0.14f), thick);
+    if (c.y > 0.0f && c.y < 1.0f) { // red zone
+        dl->PathArcTo(centre, radius, angle(c.y), angle(1.0f), 24);
+        dl->PathStroke(srgb(1.0f, 0.30f, 0.18f, 0.35f), thick);
+    }
+    // The filled part, in short segments so the colour can run along it.
+    const int segments = std::max(1, static_cast<int>(t * 48.0f));
+    for (int i = 0; i < segments && t > 0.0f; ++i) {
+        const float f0 = t * i / segments, f1 = t * (i + 1) / segments;
+        dl->PathArcTo(centre, radius, angle(f0), angle(f1) + 0.01f, 4);
+        dl->PathStroke(heat(f1), thick);
+    }
+
+    // Ticks every tenth of the range (labelled every other), small ones between.
+    ImFont* font = ImGui::GetFont();
+    const float label_size = size * 0.085f;
+    for (int i = 0; i <= 20; ++i) {
+        const float f = i / 20.0f;
+        const bool  major = i % 2 == 0;
+        const float a = angle(f);
+        const float r0 = radius - thick * (major ? 1.25f : 0.9f), r1 = radius - thick * 0.55f;
+        dl->AddLine(at(a, r0), at(a, r1), srgb(1.0f, 1.0f, 1.0f, major ? 0.8f : 0.4f), major ? 2.0f * g_scale : 1.0f * g_scale);
+        if (major && i % 4 == 0 && i > 0 && i < 20) { // the ends would crowd the readout
+            char text[16];
+            std::snprintf(text, sizeof text, "%.0f", c.min + range * f);
+            const ImVec2 ts = font->CalcTextSizeA(label_size, FLT_MAX, 0.0f, text);
+            const ImVec2 p = at(a, radius - thick * 2.2f);
+            dl->AddText(font, label_size, ImVec2(p.x - ts.x * 0.5f, p.y - ts.y * 0.5f), srgb(1.0f, 1.0f, 1.0f, 0.7f), text);
+        }
+    }
+
+    // Needle with a hub.
+    const float a = angle(t);
+    dl->AddLine(at(a + kPi, radius * 0.12f), at(a, radius * 0.92f), heat(t), size * 0.022f);
+    dl->AddCircleFilled(centre, size * 0.04f, heat(t), 24);
+    dl->AddCircleFilled(centre, size * 0.02f, srgb(0.05f, 0.07f, 0.14f), 16);
+
+    // The value, big, with the unit under it, low in the dial's open bottom.
+    char value[16];
+    std::snprintf(value, sizeof value, "%.0f", c.value);
+    const float  value_size = size * 0.2f, unit_size = size * 0.075f;
+    const ImVec2 vs = font->CalcTextSizeA(value_size, FLT_MAX, 0.0f, value);
+    const ImVec2 vp(centre.x - vs.x * 0.5f, centre.y + radius * 0.3f);
+    dl->AddText(font, value_size, ImVec2(vp.x + 2.0f, vp.y + 2.0f), srgb(0.02f, 0.03f, 0.08f, 0.55f), value);
+    dl->AddText(font, value_size, vp, heat(t), value);
+    const ImVec2 us = font->CalcTextSizeA(unit_size, FLT_MAX, 0.0f, unit.c_str());
+    dl->AddText(font, unit_size, ImVec2(centre.x - us.x * 0.5f, vp.y + vs.y * 0.92f), srgb(0.86f, 0.88f, 0.96f, 0.85f),
+                unit.c_str());
+}
+
 void ui_set_formats(VkFormat color_format, VkFormat depth_format) {
     if (!g_ready || (color_format == g_color_format && depth_format == g_depth_format)) return;
     g_color_format = color_format;
@@ -346,6 +433,9 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBit
         }
         case R_UI_SAME_LINE:
             ImGui::SameLine(0.0f, c.value > 0.0f ? c.value * g_scale : -1.0f);
+            break;
+        case R_UI_GAUGE:
+            draw_gauge(c, label);
             break;
         default:
             break;

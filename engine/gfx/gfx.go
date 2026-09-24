@@ -51,6 +51,7 @@ const (
 	UISeparator
 	UIProgress
 	UISameLine
+	UIGauge
 )
 
 // UIWindowFlags are window options (values match R_UI_WINDOW_* in renderer.h).

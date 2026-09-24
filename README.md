@@ -208,8 +208,10 @@ The menu, HUD and debug windows are Dear ImGui with a custom theme: navy translu
 panels, rounded corners, the ball's orange as the accent, and Windows' Bahnschrift font
 (ImGui's built-in font if it's missing). Besides the usual widgets, windows can be
 pinned to a screen fraction, centred, transparent (text then gets a drop shadow) and
-scaled (fonts are rasterised at that size). There is also coloured text, a progress bar
-and same-line items.
+scaled (fonts are rasterised at that size). There is also coloured text, a progress bar,
+same-line items, and a dial gauge (Run's speedometer). The gauge is drawn with ImGui's
+draw lists: an arc that heats from white through orange to red, ticks, a needle and a
+readout.
 
 Dear ImGui runs inside the renderer, but Go describes the UI: `engine/ui.Builder`
 turns `b.Slider("sun", &sun, 0, 3)`-style calls into a flat command list (labels packed
