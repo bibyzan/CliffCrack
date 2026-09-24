@@ -125,7 +125,7 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 			a.quit = true
 			return
 		}
-		a.run.Update(dt, in)
+		a.run.Update(dt, in, mouseFree)
 		if item, ok := a.menu.update(in, a.run); ok {
 			a.choose(item)
 		}
@@ -134,7 +134,8 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 			a.choose(ModeMenu)
 			return
 		}
-		a.run.Update(dt, in)
+		a.run.debugOpen = a.debug[ModeRun]
+		a.run.Update(dt, in, mouseFree)
 	case ModeDemo:
 		if pausePressed(in) || in.PadPressed(input.PadB) {
 			a.choose(ModeMenu)
@@ -156,9 +157,16 @@ func (a *App) choose(m Mode) {
 	}
 }
 
-// CursorLocked reports whether the mouse should be captured (demo mouse-look).
+// CursorLocked reports whether the mouse should be captured for looking
+// around (while riding in Run; while dragging or flying in the demo).
 func (a *App) CursorLocked() bool {
-	return a.mode == ModeDemo && a.demo.CursorLocked()
+	switch a.mode {
+	case ModeRun:
+		return a.run.CursorLocked()
+	case ModeDemo:
+		return a.demo.CursorLocked()
+	}
+	return false
 }
 
 // Render returns the active mode's frame parameters and draw list.

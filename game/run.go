@@ -57,6 +57,9 @@ type Run struct {
 	sun       float32 // debug: sun intensity
 	zone      int     // current zone (zoneLength metres each), -1 before the start line
 	zoneTime  float32 // seconds since entering it
+
+	debugOpen bool // the F1 window is up: the mouse is for the UI unless the right button is held
+	locked    bool // the mouse is captured for looking around
 }
 
 type runSounds struct {
@@ -139,8 +142,9 @@ func (r *Run) stream(all bool) {
 	}
 }
 
-// Update advances the run. Esc is handled by the App.
-func (r *Run) Update(dt float32, in *input.State) {
+// Update advances the run. mouseFree is false while the UI has the mouse.
+// Esc is handled by the App.
+func (r *Run) Update(dt float32, in *input.State, mouseFree bool) {
 	if r.retry {
 		r.play(r.sfx.pick, 1)
 		r.start(false)
@@ -162,7 +166,7 @@ func (r *Run) Update(dt float32, in *input.State) {
 	wasCrashed := r.ride.crashed
 	ev := r.ride.step(dt, ctl)
 	r.stream(false)
-	r.cam.update(dt, r.ride, r.course)
+	r.cam.update(dt, r.ride, r.course, r.look(in, mouseFree, dt))
 
 	r.zoneTime += dt
 	if s := r.ride.s(); s >= 0 && !r.ride.crashed {
@@ -217,6 +221,35 @@ func (r *Run) Update(dt float32, in *input.State) {
 		r.wantsMenu = true
 	}
 }
+
+// look reads this frame's camera input. While riding, the mouse is captured
+// and turns the camera; with the debug window open it's free for the UI and
+// the right button must be held to look. A drag (or a finger on a touch
+// screen) outside the UI looks too, and so does the right stick.
+func (r *Run) look(in *input.State, mouseFree bool, dt float32) lookInput {
+	if r.attract {
+		r.locked = false
+		return lookInput{}
+	}
+	riding := !r.ride.crashed || r.overTime < overDelay
+	held := in.MouseDown(input.MouseRight) && (mouseFree || r.locked)
+	r.locked = riding && (!r.debugOpen || held)
+
+	var l lookInput
+	if x, y := in.PadStick(true); x != 0 || y != 0 {
+		l.yaw += x * camStickYaw * dt
+		l.elev += y * camStickPitch * dt
+	}
+	if r.locked || ((in.MouseDown(input.MouseLeft) || in.MouseDown(input.MouseRight)) && mouseFree) {
+		dx, dy := in.MouseDelta()
+		l.yaw += float32(dx) * camMouseSens
+		l.elev += float32(dy) * camMouseSens
+	}
+	return l
+}
+
+// CursorLocked reports whether the mouse should be captured for looking around.
+func (r *Run) CursorLocked() bool { return r.locked }
 
 func (r *Run) play(s *audio.Sound, volume float32) {
 	if r.sound != nil {
@@ -318,51 +351,4 @@ func (r *Run) DebugUI(b *ui.Builder, s Stats) {
 		r.retry = true
 	}
 	b.End()
-}
-
-// chaseCam follows the ball from behind and above, looking down the slope,
-// and widens its field of view with speed.
-type chaseCam struct {
-	eye, target mathx.Vec3
-	fov         float32
-}
-
-func newChaseCam(rd *ride) chaseCam {
-	c := chaseCam{fov: 50 * math.Pi / 180}
-	c.eye, c.target = c.goal(rd, rd.course)
-	return c
-}
-
-func (c *chaseCam) goal(rd *ride, crs *course.Course) (eye, target mathx.Vec3) {
-	p, _ := rd.pose(rd.ball)
-	if rd.crashed {
-		p = rd.crashPos
-	}
-	speed := rd.speed()
-	back := 8 + speed*0.08
-	up := 3.6 + speed*0.03
-	eye = p.Sub(rd.heading.Scale(back)).Add(mathx.Vec3{0, up, 0})
-	if ground := crs.Height(eye[0], eye[2]) + 1.2; eye[1] < ground {
-		eye[1] = ground // never inside the mountain
-	}
-	target = p.Add(rd.heading.Scale(5)).Add(mathx.Vec3{0, 0.4, 0})
-	return eye, target
-}
-
-func (c *chaseCam) update(dt float32, rd *ride, crs *course.Course) {
-	eye, target := c.goal(rd, crs)
-	rate := float32(6)
-	if rd.crashed {
-		rate = 1.5 // drift to a stop over the wreck
-		eye = c.eye
-	}
-	k := float32(1 - math.Exp(-float64(rate*dt)))
-	c.eye = c.eye.Add(eye.Sub(c.eye).Scale(k))
-	c.target = c.target.Add(target.Sub(c.target).Scale(float32(1 - math.Exp(-float64(12*dt)))))
-	fov := (50 + min(rd.speed(), 55)*0.45) * math.Pi / 180
-	c.fov += (float32(fov) - c.fov) * k
-}
-
-func (c *chaseCam) view() (mathx.Mat4, mathx.Vec3) {
-	return mathx.LookAt(c.eye, c.target, mathx.Vec3{0, 1, 0}), c.eye
 }

@@ -67,6 +67,7 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | Run | **A / D**, left/right | steer |
 | | **W** / **S** | tuck (cruise 15% faster) / brake |
 | | **Space** | jump (hit a kicker's lip to clear a crack) |
+| | mouse | look around (the cursor is captured while riding; with F1 open, hold the right button). The camera swings back behind the ball when you let go; steering always follows the direction of travel |
 | | **R**, **Enter** | ride again after a wipeout |
 | | **Esc** | back to the menu |
 | Engine Demo, orbit (default) | **W A S D** | roll the ball (relative to the camera) |
@@ -94,6 +95,7 @@ button. The on-screen hints switch to gamepad buttons as soon as you use one.
 | Run | left stick, d-pad | steer (analog on the stick) |
 | | **RT** / **LT** | tuck / brake (analog) |
 | | **A** | jump |
+| | right stick | look around |
 | | **Start** | back to the menu |
 | Wipeout card | d-pad, **A** | choose |
 | | **Y** / **B** | ride again / main menu |
@@ -104,7 +106,7 @@ button. The on-screen hints switch to gamepad buttons as soon as you use one.
 | Any | **View** (Select) | show / hide the debug window |
 
 On Android the back button works like Esc, and touching the screen works like the mouse,
-so you can tap menu buttons.
+so you can tap menu buttons. Dragging a finger in Run looks around.
 
 ## Android
 
