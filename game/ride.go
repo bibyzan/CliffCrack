@@ -169,7 +169,7 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 	throttle := clampf(in.throttle, -1, 1)
 	// Skipping across moguls leaves the ground for a few frames at a time;
 	// that still counts as riding, not flying.
-	onGround := r.airborne < rideSkipTime
+	onGround := r.landed && r.airborne < rideSkipTime
 	push := float32(rideAirSteer)
 	if onGround {
 		push = rideSteer
