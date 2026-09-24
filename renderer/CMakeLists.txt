@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.24)
+cmake_minimum_required(VERSION 3.25)
 project(vkgame_renderer LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -18,19 +18,23 @@ include(FetchContent)
 FetchContent_Declare(vulkan_headers
     GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
     GIT_TAG        vulkan-sdk-1.4.357.0
-    GIT_SHALLOW    TRUE)
+    GIT_SHALLOW    TRUE
+    SYSTEM)
 FetchContent_Declare(volk
     GIT_REPOSITORY https://github.com/zeux/volk.git
     GIT_TAG        vulkan-sdk-1.4.357.0
-    GIT_SHALLOW    TRUE)
+    GIT_SHALLOW    TRUE
+    SYSTEM)
 FetchContent_Declare(vk_bootstrap
     GIT_REPOSITORY https://github.com/charles-lunarg/vk-bootstrap.git
     GIT_TAG        v1.4.357
-    GIT_SHALLOW    TRUE)
+    GIT_SHALLOW    TRUE
+    SYSTEM)
 FetchContent_Declare(vma
     GIT_REPOSITORY https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git
     GIT_TAG        v3.3.0
-    GIT_SHALLOW    TRUE)
+    GIT_SHALLOW    TRUE
+    SYSTEM)
 
 FetchContent_MakeAvailable(vulkan_headers)
 
@@ -81,7 +85,8 @@ endforeach()
 if(MSVC)
     target_compile_options(renderer PRIVATE /W4)
 else()
-    target_compile_options(renderer PRIVATE -Wall -Wextra)
+    # Vulkan structs are initialised as `T info{VK_STRUCTURE_TYPE_...}` on purpose.
+    target_compile_options(renderer PRIVATE -Wall -Wextra -Wno-missing-field-initializers)
 endif()
 
 if(MINGW)
