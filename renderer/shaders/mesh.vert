@@ -7,6 +7,7 @@ layout(set = 0, binding = 0) uniform Frame {
     vec4 sun_direction;
     vec4 sun_color;
     vec4 ambient_color;
+    vec4 fog_color;
 } frame;
 
 // Must match the leading fields of RDrawCmd in renderer.h.
@@ -14,6 +15,7 @@ layout(push_constant) uniform Push {
     mat4 model;
     vec4 color;
     uint texture_index;
+    uint flags;
 } pc;
 
 layout(location = 0) in vec3 in_position;

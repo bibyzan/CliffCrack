@@ -1,8 +1,14 @@
 # Cliff Crack
 
 A game built on its own engine: a **Go host** driving a **native C++ Vulkan 1.3 renderer**.
-Right now it's a physics sandbox: roll the checker ball around the arena, bump the
-spinning cubes and drop piles of balls.
+
+The main menu offers two modes:
+
+- **Run**, the arcade mode. You're dropped off a cliff and ride a ball down an endless,
+  procedurally generated mountain. Steer around rocks and pines, jump the cracks, and go
+  as far as you can. The first thing you hit ends the run.
+- **Engine Demo**, the physics sandbox. Roll the checker ball around the arena, bump the
+  spinning cubes and drop piles of balls.
 
 ```
 ┌──────────────────────── game.exe (Go) ────────────────────────┐
@@ -40,19 +46,30 @@ You don't need to link against the Vulkan loader: volk loads `vulkan-1.dll` from
 ./build.ps1 -Run              # Debug build, validation layers on
 ./build.ps1 -Config Release
 build/bin/game.exe -validation=false -vsync=false
+build/bin/game.exe -mode run                  # skip the menu: menu | run | demo
+build/bin/game.exe -mode run -seed 42         # replay one course (default: a new one each run)
+build/bin/game.exe -mode run -autopilot -screenshot out.png -frames 600   # a self-driving run
 build/bin/game.exe -model path/to/model.glb   # show a glTF model in the centre
 build/bin/game.exe -screenshot out.png -frames 90   # 90 fixed 1/60 s frames, save the last, exit
 build/bin/game.exe -drop 60                   # start with 60 physics balls
 build/bin/game.exe -hold W -screenshot out.png -frames 110   # scripted input for tests
-go test ./engine/...          # math, geometry and glTF tests (no GPU needed)
+go test ./engine/... ./game/course   # engine and course-generation tests (no GPU needed)
 ```
 
 The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv`.
 ### Controls
 
-| Mode | Input | Action |
+| Where | Input | Action |
 |---|---|---|
-| Orbit (default) | **W A S D** | roll the ball (relative to the camera) |
+| Menu | **W / S**, arrows | choose (or click) |
+| | **Enter** / **Space** | select |
+| | **Esc** | quit |
+| Run | **A / D**, left/right | steer |
+| | **W** / **S** | tuck (cruise 15% faster) / brake |
+| | **Space** | jump (hit a kicker's lip to clear a crack) |
+| | **R**, **Enter** | ride again after a wipeout |
+| | **Esc** | back to the menu |
+| Engine Demo, orbit (default) | **W A S D** | roll the ball (relative to the camera) |
 | | **Space** / **R** | jump / reset the ball |
 | | left/right mouse drag | orbit the camera around the ball |
 | | scroll | zoom |
@@ -60,11 +77,57 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | Fly | **Tab** | toggle orbit / fly |
 | | hold right mouse | look around |
 | | **W A S D**, **Q / E** | move, down / up (**Shift** = faster) |
-| Any | **F1** | show / hide the debug UI (stats, lighting, time scale, spawn cubes) |
+| | **Esc** | back to the menu |
+| Any | **F1** | show / hide the debug window (stats and tuning; Run's has the seed and an autopilot toggle) |
 | | **F12** | save `screenshot-<time>.png` (read back from the GPU) |
-| | **Esc** | quit |
 
-### Debug UI
+### Run mode
+
+The course comes from `game/course` and is pure Go. It is a function of a seed: one
+height function gives a meandering snow channel. Snow berms and ridged-noise peaks rise
+beside it. Cracks cut across it, each with a kicker ramp before it and a clear landing
+zone after.
+
+It gets harder and faster all the way down:
+
+- **Harder**: difficulty rises without limit (about 0.46 at 1 km, 0.71 at 2 km,
+  0.85 at 3 km). The channel narrows, moguls grow, and cracks get wider and closer
+  together. Rocks and pines get denser, and **gates** appear more and more often: walls
+  of rocks across the channel with a single gap.
+- **Faster**: the slope steepens from ~17° to ~29° over 3 km. On the ground the ride
+  pushes the ball up to a **cruise speed** that climbs from 72 km/h to about 180 km/h,
+  and drag only bites above it.
+- **Zones**: every 500 m you enter a new named zone (*The Drop*, *Pine Line*,
+  *Boulder Field*, and so on), announced with a banner.
+
+The
+level is built in 48 m chunks. Each chunk's mesh samples that same height function, and
+the physics collides with it through a heightfield collider. What you see is what you
+ride on. Chunks stream in as you go: the game keeps about 480 m ahead and builds at most
+one new chunk per frame (~0.7 ms). The renderer frees old chunk meshes once no frame in
+flight uses them, so streaming never stalls the GPU.
+
+The look comes from per-draw shading flags on the engine side:
+
+- **Faceted flat shading**: normals come from screen-space derivatives, so no duplicated
+  vertices are needed.
+- **Snow shading**: up-facing faces keep their colour and steep faces turn to dark rock.
+- **A procedural sky**: a gradient with a sun disc on an inside-out dome.
+- **Distance fog**: faded towards a sun-warmed haze, so the layered backdrop ranges dissolve
+  into the horizon.
+
+Lighting is a low golden sun with cool blue shade. `ride` (the rules and physics) has no
+graphics, so `go test ./game` plays whole runs headless with an autopilot. The same
+autopilot rides the menu backdrop.
+
+### UI
+
+The menu, HUD and debug windows are Dear ImGui with a custom theme: navy translucent
+panels, rounded corners, the ball's orange as the accent, and Windows' Bahnschrift font
+(ImGui's built-in font if it's missing). Besides the usual widgets, windows can be
+pinned to a screen fraction, centred, transparent (text then gets a drop shadow) and
+scaled (fonts are rasterised at that size). There is also coloured text, a progress bar
+and same-line items.
 
 Dear ImGui runs inside the renderer, but Go describes the UI: `engine/ui.Builder`
 turns `b.Slider("sun", &sun, 0, 3)`-style calls into a flat command list (labels packed
@@ -75,7 +138,9 @@ While the UI has the mouse, the camera ignores clicks and scrolling.
 ### Physics
 
 `engine/physics` steps at a fixed 120 Hz with sequential impulses (restitution,
-Coulomb friction, rolling). Dynamic bodies are spheres; they collide with each other
+Coulomb friction, rolling). Bodies are drawn with `Body.Interpolated(world.Alpha())`,
+between their last two steps. Drawing the raw state stutters on displays that aren't a
+multiple of 120 Hz: some frames run no step, then the next one jumps. Dynamic bodies are spheres; they collide with each other
 and with static or kinematic spheres and oriented boxes. In the demo the ground and
 walls are static, the ring cubes and centre sphere are kinematic (they follow their
 entities, so scripts can move them and they shove balls around), and "drop ball"
@@ -116,15 +181,17 @@ engine/
   scene/               entity world: hierarchy, transforms, renderables, behaviours
   ui/                  debug UI builder (immediate-mode widgets -> command list)
   audio/               Go mixer (voices, pan, loops, WAV, synth blips) -> oto/WASAPI
-  physics/             rigid bodies: dynamic spheres vs spheres/oriented boxes, impulses
+  physics/             rigid bodies: dynamic spheres vs spheres/oriented boxes/heightfields
+  noise/               seeded gradient noise, FBM and ridged noise for procedural content
   platform/            GLFW window; feeds OS events into input
   input/               per-frame keyboard/mouse state (pressed/released edges, deltas)
   camera/              fly + orbit cameras, perspective lens
   mathx/               Vulkan-convention vectors, matrices, colours
-  geom/                CPU mesh data + procedural shapes (cube, plane, sphere)
+  geom/                CPU mesh data + procedural shapes (cube, plane, sphere, grid, cone, icosphere)
   asset/               file loaders (glTF / GLB)
   script/              yaegi host: loads scripts/, hot-reloads, exposes behaviours
-game/                gameplay code (pure Go, no cgo)
+game/                gameplay code (pure Go, no cgo): app/menu, Run mode, Engine Demo
+  course/              Run mode's seeded level generator (no GPU; testable on its own)
 scripts/             hot-reloadable behaviours (interpreted at runtime)
 cmd/game/            main package
 ```
@@ -143,6 +210,9 @@ cmd/game/            main package
 - [x] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)
 - [x] Audio: Go mixer on oto (WASAPI), positional pan/attenuation, `-audio=false` to mute
 - [x] Physics: pure-Go rigid bodies (dynamic spheres; static/kinematic spheres and boxes)
+- [x] Heightfield terrain collider, seeded noise, streamed procedural terrain (Run mode)
+- [x] Per-draw shading flags (flat, snow, unlit, sky), distance fog, deferred mesh freeing
+- [x] Main menu, HUD and game-over card (anchored/overlay UI windows, scaled fonts)
 
 ### Next ideas
 
@@ -150,3 +220,4 @@ cmd/game/            main package
 - Dynamic boxes and a broadphase in physics; physics bodies as scene components
 - Text input and more widgets in the debug UI; an entity inspector
 - Frustum culling and instancing once scenes get large
+- Run: saved best distances, a daily seed, snow spray and wind audio, more obstacle kinds

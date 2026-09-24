@@ -31,7 +31,7 @@ type player struct {
 	body   *physics.Body
 }
 
-func (g *Game) spawnPlayer() error {
+func (g *Demo) spawnPlayer() error {
 	tex, err := render.CreateTexture(checker(128, 4,
 		color.NRGBA{0xf5, 0xf5, 0xf5, 255}, color.NRGBA{0xe0, 0x6a, 0x1b, 255}), true)
 	if err != nil {
@@ -79,13 +79,14 @@ func rollControl(b *physics.Body, move mathx.Vec3, jump bool, dt float32) bool {
 }
 
 // updatePlayer reads input (orbit mode only; in fly mode WASD moves the camera).
-func (g *Game) updatePlayer(dt float32, in *input.State) {
+func (g *Demo) updatePlayer(dt float32, in *input.State) {
 	b := g.player.body
 	if b == nil {
 		return
 	}
 	if in.Pressed(input.KeyR) || b.Position[1] < -5 {
 		b.Position, b.Velocity, b.AngularVelocity = playerSpawn, mathx.Vec3{}, mathx.Vec3{}
+		b.Teleported()
 	}
 	if g.camera.fly {
 		return
@@ -108,23 +109,24 @@ func (g *Game) updatePlayer(dt float32, in *input.State) {
 }
 
 // followPlayer eases the orbit camera's target towards the ball.
-func (g *Game) followPlayer(dt float32) {
+func (g *Demo) followPlayer(dt float32) {
 	if g.player.body == nil {
 		return
 	}
-	target := g.player.body.Position.Add(mathx.Vec3{0, 0.3, 0})
+	drawn, _ := g.player.body.Interpolated(g.phys.Alpha())
+	target := drawn.Add(mathx.Vec3{0, 0.3, 0})
 	k := float32(1 - math.Exp(-followRate*float64(dt)))
 	g.camera.orbit.Target = g.camera.orbit.Target.Add(target.Sub(g.camera.orbit.Target).Scale(k))
 }
 
 // bump makes a cube wobble after the player (or a ball) hits it.
-func (g *Game) bump(id scene.ID) {
+func (g *Demo) bump(id scene.ID) {
 	g.bumpedAt[id] = g.world.Time()
 }
 
 // wobble is the cube behaviour that plays the bump animation: a quick
 // squash-and-stretch that dies away over about half a second.
-func (g *Game) wobble() scene.Behaviour {
+func (g *Demo) wobble() scene.Behaviour {
 	return func(w *scene.World, e *scene.Entity, dt float32) {
 		at, ok := g.bumpedAt[e.ID()]
 		if !ok {

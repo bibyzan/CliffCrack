@@ -29,7 +29,7 @@ type physLink struct {
 const fallLimit = -10 // balls below this height are removed
 
 // setupPhysics creates the physics world with the ground as a static box.
-func (g *Game) setupPhysics(groundHalfSize float32) error {
+func (g *Demo) setupPhysics(groundHalfSize float32) error {
 	g.phys = physics.NewWorld()
 	ground := physics.NewBox(mathx.Vec3{groundHalfSize, 0.5, groundHalfSize}, physics.Static)
 	ground.Position = mathx.Vec3{0, -0.5, 0} // top face at y = 0
@@ -45,7 +45,7 @@ func (g *Game) setupPhysics(groundHalfSize float32) error {
 }
 
 // addWalls rings the ground with low static walls so balls stay in play.
-func (g *Game) addWalls(mesh render.Mesh, tex render.Texture, groundHalfSize float32) error {
+func (g *Demo) addWalls(mesh render.Mesh, tex render.Texture, groundHalfSize float32) error {
 	const height, thick = 0.4, 0.3
 	edge := groundHalfSize - thick/2
 	walls := []struct{ pos, half mathx.Vec3 }{
@@ -70,7 +70,7 @@ func (g *Game) addWalls(mesh render.Mesh, tex render.Texture, groundHalfSize flo
 }
 
 // attachKinematic makes an entity a collider that follows the entity's motion.
-func (g *Game) attachKinematic(e *scene.Entity, shape physics.Shape, size mathx.Vec3) {
+func (g *Demo) attachKinematic(e *scene.Entity, shape physics.Shape, size mathx.Vec3) {
 	var b *physics.Body
 	if shape == physics.Box {
 		b = physics.NewBox(size, physics.Kinematic)
@@ -86,7 +86,7 @@ func (g *Game) attachKinematic(e *scene.Entity, shape physics.Shape, size mathx.
 }
 
 // dropBall spawns a randomly sized and coloured ball above the scene.
-func (g *Game) dropBall() {
+func (g *Demo) dropBall() {
 	radius := 0.2 + g.rng.Float32()*0.25
 	angle := g.rng.Float64() * 2 * math.Pi
 	dist := 1 + g.rng.Float64()*4.5
@@ -111,7 +111,7 @@ func (g *Game) dropBall() {
 }
 
 // clearBalls removes every dropped ball.
-func (g *Game) clearBalls() {
+func (g *Demo) clearBalls() {
 	for _, id := range g.balls {
 		g.world.Destroy(id)
 	}
@@ -121,7 +121,7 @@ func (g *Game) clearBalls() {
 
 // stepPhysics syncs kinematic colliders from the scene, advances the
 // simulation, writes dynamic bodies back and plays impact sounds.
-func (g *Game) stepPhysics(dt float32) {
+func (g *Demo) stepPhysics(dt float32) {
 	for i := range g.links {
 		l := &g.links[i]
 		if l.body.Kind != physics.Kinematic {
@@ -153,8 +153,8 @@ func (g *Game) stepPhysics(dt float32) {
 			continue
 		}
 		if e := g.world.Get(l.entity); e != nil {
-			e.Transform.Position = l.body.Position
-			e.Transform.Rotation = l.body.Rotation
+			// Drawn between physics steps, so motion stays smooth at any refresh rate.
+			e.Transform.Position, e.Transform.Rotation = l.body.Interpolated(g.phys.Alpha())
 			if l.body.Position[1] < fallLimit && l.entity != g.player.entity { // the player respawns instead
 				g.world.Destroy(l.entity)
 				fallen = true
@@ -183,7 +183,7 @@ func (g *Game) stepPhysics(dt float32) {
 }
 
 // bumpedCube reports which ring cube (if any) took part in an impact.
-func (g *Game) bumpedCube(hit physics.Impact) (scene.ID, bool) {
+func (g *Demo) bumpedCube(hit physics.Impact) (scene.ID, bool) {
 	for _, b := range [2]*physics.Body{hit.A, hit.B} {
 		if id, ok := b.UserData.(scene.ID); ok && g.cubes[id] {
 			return id, true
@@ -193,7 +193,7 @@ func (g *Game) bumpedCube(hit physics.Impact) (scene.ID, bool) {
 }
 
 // pruneLinks drops physics bodies whose entities no longer exist.
-func (g *Game) pruneLinks() {
+func (g *Demo) pruneLinks() {
 	alive := g.links[:0]
 	for _, l := range g.links {
 		if g.world.Get(l.entity) != nil {

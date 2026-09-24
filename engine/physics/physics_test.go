@@ -187,3 +187,26 @@ func TestFixedStepAccumulates(t *testing.T) {
 		t.Errorf("a long hitch ran %d steps, want capped at %d", n, w.MaxSteps)
 	}
 }
+
+func TestInterpolationIsSmoothAtAnyFrameRate(t *testing.T) {
+	// A body gliding at constant speed, drawn at 144 Hz with a 120 Hz simulation:
+	// the drawn position must advance by the same amount every frame.
+	w := NewWorld()
+	w.Gravity = mathx.Vec3{}
+	w.LinearDamping = 0
+	b := NewSphere(0.5, 1)
+	b.Velocity = mathx.Vec3{30, 0, 0}
+	w.Add(b)
+	const dt = 1.0 / 144
+	prev, _ := b.Interpolated(w.Alpha())
+	for i := 0; i < 100; i++ {
+		w.Update(dt)
+		p, _ := b.Interpolated(w.Alpha())
+		// (Drawing lags one step behind the simulation, so the first frames,
+		// before two steps have run, are a start-up transient.)
+		if step := p[0] - prev[0]; i > 1 && math.Abs(float64(step-30*dt)) > 0.02 {
+			t.Fatalf("frame %d moved %v, want %v every frame", i, step, 30*dt)
+		}
+		prev = p
+	}
+}

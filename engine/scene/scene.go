@@ -41,6 +41,7 @@ type Renderable struct {
 	Mesh    gfx.Mesh
 	Texture gfx.Texture
 	Color   [4]float32 // linear RGBA
+	Flags   gfx.DrawFlags
 }
 
 // Behaviour runs once per World.Update for the entity it is attached to.
@@ -254,6 +255,7 @@ func (w *World) AppendDraws(out []gfx.DrawCmd) []gfx.DrawCmd {
 			Model:   e.world,
 			Color:   e.Renderable.Color,
 			Texture: e.Renderable.Texture,
+			Flags:   e.Renderable.Flags,
 			Mesh:    e.Renderable.Mesh,
 		})
 	}

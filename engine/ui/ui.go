@@ -58,6 +58,20 @@ func (b *Builder) Window(title string, x, y float32) {
 	c.X, c.Y = x, y
 }
 
+// Panel starts a window with options, e.g. a centred title card:
+//
+//	b.Panel("##title", 0.5, 0.3, gfx.UIOverlay|gfx.UIAnchored, 3)
+//
+// With gfx.UIAnchored, x and y are fractions of the screen (see gfx.UIAnchored);
+// otherwise they are an initial position in pixels. scale enlarges the text
+// (0 or 1 = normal); the font is rasterised at that size, so it stays sharp.
+func (b *Builder) Panel(title string, x, y float32, flags gfx.UIWindowFlags, scale float32) {
+	c := b.add(gfx.UIWindow, title)
+	c.X, c.Y = x, y
+	c.Value = float32(flags)
+	c.Max = scale
+}
+
 func (b *Builder) End() { b.add(gfx.UIEnd, "") }
 
 func (b *Builder) Separator() { b.add(gfx.UISeparator, "") }
@@ -65,6 +79,25 @@ func (b *Builder) Separator() { b.add(gfx.UISeparator, "") }
 // Text adds a line of text (fmt.Sprintf formatting).
 func (b *Builder) Text(format string, args ...any) {
 	b.add(gfx.UIText, fmt.Sprintf(format, args...))
+}
+
+// ColorText adds a line of text in a colour (linear RGBA, e.g. mathx.Hex(...)).
+func (b *Builder) ColorText(color [4]float32, format string, args ...any) {
+	c := b.add(gfx.UIText, fmt.Sprintf(format, args...))
+	c.X, c.Y, c.Min, c.Max = color[0], color[1], color[2], max(color[3], 1e-3)
+}
+
+// Progress adds a bar filled to fraction (0..1), width x height pixels
+// (0 = default), with label written over it.
+func (b *Builder) Progress(label string, fraction, width, height float32) {
+	c := b.add(gfx.UIProgress, label)
+	c.Value, c.Min, c.Max = fraction, width, height
+}
+
+// SameLine keeps the next widget on the current line, spacing pixels after
+// this one (0 = default).
+func (b *Builder) SameLine(spacing float32) {
+	b.add(gfx.UISameLine, "").Value = spacing
 }
 
 // Slider edits *v within [min, max].
@@ -87,6 +120,18 @@ func (b *Builder) Checkbox(label string, v *bool) {
 // click is only known after the frame is drawn).
 func (b *Builder) Button(label string) bool {
 	b.add(gfx.UIButton, label)
+	b.buttons = append(b.buttons, len(b.Cmds)-1)
+	return b.clicked[label]
+}
+
+// MenuButton is a Button with a size in pixels (0 = fit the label) that can
+// be highlighted, e.g. to show the keyboard selection.
+func (b *Builder) MenuButton(label string, width, height float32, highlight bool) bool {
+	c := b.add(gfx.UIButton, label)
+	c.Min, c.Max = width, height
+	if highlight {
+		c.Value = 1
+	}
 	b.buttons = append(b.buttons, len(b.Cmds)-1)
 	return b.clicked[label]
 }

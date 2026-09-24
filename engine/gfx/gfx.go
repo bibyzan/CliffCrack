@@ -13,12 +13,28 @@ type Mesh uint32
 // texture, so an untextured draw just uses its colour.
 type Texture uint32
 
+// DrawFlags select per-draw shading (values match R_DRAW_* in renderer.h).
+type DrawFlags uint32
+
+const (
+	// DrawFlat shades each triangle with its own normal (a faceted, low-poly look).
+	DrawFlat DrawFlags = 1 << iota
+	// DrawSnow keeps the colour on faces that point up and turns steep faces to dark rock.
+	DrawSnow
+	// DrawUnlit uses the colour as-is (still fogged).
+	DrawUnlit
+	// DrawSky draws a procedural sky: the fog colour at the horizon blending to
+	// the draw colour overhead, with a sun disc. Use it on an inside-out dome.
+	DrawSky
+)
+
 // DrawCmd draws one mesh. Its layout must match RDrawCmd in renderer.h
 // (checked at startup by package render).
 type DrawCmd struct {
 	Model   mathx.Mat4 // object-to-world transform
 	Color   [4]float32 // linear RGBA, multiplied with the texture
 	Texture Texture
+	Flags   DrawFlags
 	Mesh    Mesh
 }
 
@@ -33,6 +49,23 @@ const (
 	UICheckbox
 	UIButton
 	UISeparator
+	UIProgress
+	UISameLine
+)
+
+// UIWindowFlags are window options (values match R_UI_WINDOW_* in renderer.h).
+type UIWindowFlags uint32
+
+const (
+	// UIOverlay drops the title bar and stops the window moving, resizing or collapsing.
+	UIOverlay UIWindowFlags = 1 << iota
+	// UIAnchored places the window every frame at X, Y given as fractions of the
+	// screen; the same fraction of the window sits on that point (0.5, 0.5 centres it).
+	UIAnchored
+	// UINoBackground makes the window transparent; its text gets a drop shadow.
+	UINoBackground
+	// UICentered centres each line of text and each button in the window.
+	UICentered
 )
 
 // UICmd is one debug-UI command. Its layout must match RUICmd in renderer.h.
@@ -62,12 +95,14 @@ type UIOutput struct {
 	WantKeyboard int32
 }
 
-// FrameParams is the per-frame scene state: camera and lighting.
+// FrameParams is the per-frame scene state: camera, lighting and fog.
 type FrameParams struct {
 	ViewProj     mathx.Mat4
 	CameraPos    mathx.Vec3
 	SunDirection mathx.Vec3 // towards the light; normalised by the shader
 	SunColor     mathx.Vec3 // linear RGB * intensity
 	Ambient      mathx.Vec3 // linear RGB
+	FogColor     mathx.Vec3 // linear RGB haze, also the sky's horizon colour
+	FogDensity   float32    // per world unit; 0 disables fog
 	Clear        [4]float32 // linear RGBA
 }

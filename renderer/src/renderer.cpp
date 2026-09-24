@@ -27,16 +27,17 @@ constexpr uint32_t kFramesInFlight = 2;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
 constexpr uint32_t kMaxTextures = 1024; // must match MAX_TEXTURES in mesh.frag
 
-// Push constants are the leading fields of RDrawCmd: model, color, texture.
+// Push constants are the leading fields of RDrawCmd: model, color, texture, flags.
 constexpr uint32_t kPushConstantSize = offsetof(RDrawCmd, mesh);
 static_assert(kPushConstantSize <= 128, "push constants must fit the 128-byte guaranteed minimum");
-static_assert(offsetof(RDrawCmd, texture) == 80, "RDrawCmd layout must match the shader push block");
+static_assert(offsetof(RDrawCmd, texture) == 80 && offsetof(RDrawCmd, flags) == 84,
+              "RDrawCmd layout must match the shader push block");
 static_assert(sizeof(RVertex) == 32, "RVertex layout changed; update the pipeline vertex input");
 
 // The per-frame uniform buffer is RFrameParams minus the trailing clear colour
-// (std140: mat4 + 4 x vec4).
+// (std140: mat4 + 5 x vec4).
 constexpr VkDeviceSize kFrameUniformSize = offsetof(RFrameParams, clear_color);
-static_assert(kFrameUniformSize == 128, "RFrameParams layout must match the shader Frame block");
+static_assert(kFrameUniformSize == 144, "RFrameParams layout must match the shader Frame block");
 
 struct Buffer {
     VkBuffer      buffer = VK_NULL_HANDLE;
@@ -100,6 +101,13 @@ struct Renderer {
 
     std::vector<Mesh>     meshes;     // RMesh handle = index + 1
     std::vector<uint32_t> free_meshes;
+    // Destroyed meshes whose buffers may still be read by frames in flight.
+    // Each is freed once every frame numbered below `last_use` has finished.
+    struct RetiredMesh {
+        Mesh     mesh;
+        uint64_t last_use;
+    };
+    std::vector<RetiredMesh> retired_meshes;
     std::vector<Texture>  textures;   // RTexture handle = index; 0 = white
     std::vector<uint32_t> free_textures;
 
@@ -110,6 +118,7 @@ struct Renderer {
 
     FrameData frames[kFramesInFlight];
     uint32_t  frame = 0;
+    uint64_t  submitted = 0; // frames submitted so far; the next frame's number
     uint32_t  image = 0;
     bool      recording = false;
     bool      scene_state_bound = false; // our pipeline/sets/viewport are bound (UI rebinds its own)
@@ -443,6 +452,17 @@ void destroy_mesh(Mesh& mesh) {
     destroy_buffer(mesh.vertices);
     destroy_buffer(mesh.indices);
     mesh.index_count = 0;
+}
+
+// Frees retired meshes that no unfinished frame can reference. Frames numbered
+// below `finished` are known to be complete.
+void release_retired_meshes(uint64_t finished) {
+    auto& retired = g->retired_meshes;
+    auto  done = [finished](Renderer::RetiredMesh& r) { return r.last_use <= finished; };
+    for (auto& r : retired) {
+        if (done(r)) destroy_mesh(r.mesh);
+    }
+    retired.erase(std::remove_if(retired.begin(), retired.end(), done), retired.end());
 }
 
 // ---------------------------------------------------------------------------
@@ -942,6 +962,7 @@ void destroy_all() {
             for (FrameData& f : g->frames) destroy_buffer(f.uniforms);
             destroy_buffer(g->capture_buffer);
             for (Mesh& mesh : g->meshes) destroy_mesh(mesh);
+            for (auto& r : g->retired_meshes) destroy_mesh(r.mesh);
             for (Texture& tex : g->textures) destroy_image(tex.image);
             destroy_image(g->depth);
             vmaDestroyAllocator(g->allocator);
@@ -1029,8 +1050,10 @@ void r_destroy_mesh(RMesh handle) {
     if (!g) return;
     Mesh* mesh = lookup_mesh(handle);
     if (!mesh) return;
-    vkDeviceWaitIdle(g->dev); // it may still be referenced by frames in flight
-    destroy_mesh(*mesh);
+    // Frames up to and including the one being recorded may still draw it.
+    const uint64_t last_use = g->submitted + (g->recording ? 1 : 0);
+    g->retired_meshes.push_back({*mesh, last_use});
+    *mesh = Mesh{};
     g->free_meshes.push_back(handle - 1);
 }
 
@@ -1077,6 +1100,9 @@ int32_t r_begin_frame(const RFrameParams* params) {
 
     FrameData& f = g->frames[g->frame];
     vkWaitForFences(g->dev, 1, &f.in_flight, VK_TRUE, UINT64_MAX);
+    // This slot's fence belonged to frame (submitted - kFramesInFlight), and the
+    // other slots' fences were waited on before it, so everything older is done.
+    if (g->submitted >= kFramesInFlight - 1) release_retired_meshes(g->submitted - (kFramesInFlight - 1));
 
     VkResult acquired = vkAcquireNextImageKHR(g->dev, g->swapchain.swapchain, UINT64_MAX,
                                               f.image_acquired, VK_NULL_HANDLE, &g->image);
@@ -1216,6 +1242,7 @@ void r_end_frame(void) {
     if (submitted != VK_SUCCESS) {
         fail("vkQueueSubmit2 failed: VkResult " + std::to_string(static_cast<int>(submitted)));
     }
+    ++g->submitted;
 
     VkSwapchainKHR swapchain = g->swapchain.swapchain;
     VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};

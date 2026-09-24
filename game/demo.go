@@ -1,5 +1,3 @@
-// Package game is the gameplay layer. It only talks to the engine through
-// plain Go types; it never touches cgo or Vulkan.
 package game
 
 import (
@@ -24,7 +22,9 @@ import (
 
 var worldUp = mathx.Vec3{0, 1, 0}
 
-type Game struct {
+// Demo is the engine sandbox: a physics arena with a rollable ball, spinning
+// cubes, droppable balls, hot-reloadable scripts and an optional glTF model.
+type Demo struct {
 	world   *scene.World
 	camera  cameraRig
 	scripts *script.Host // nil when running without scripts
@@ -52,23 +52,16 @@ type Game struct {
 	bonkSound   *audio.Sound
 }
 
-// Stats are engine numbers shown in the debug UI.
-type Stats struct {
-	FPS     float32
-	FrameMS float32
-	Draws   int
-}
-
-type Options struct {
+type DemoOptions struct {
 	Model      string       // optional glTF file shown in the centre instead of the sphere
 	ScriptsDir string       // optional directory of hot-reloadable behaviours
 	Audio      *audio.Mixer // optional; sounds are skipped when nil
 	DropBalls  int          // balls to drop at startup
 }
 
-// New builds the demo scene.
-func New(opts Options) (*Game, error) {
-	g := &Game{
+// NewDemo builds the demo scene.
+func NewDemo(opts DemoOptions) (*Demo, error) {
+	g := &Demo{
 		world:        scene.NewWorld(),
 		camera:       newCameraRig(),
 		sunIntensity: 1,
@@ -173,7 +166,7 @@ func New(opts Options) (*Game, error) {
 
 // addModel loads a glTF file, fits it into a 2-unit box and adds one child
 // entity per material under parent.
-func (g *Game) addModel(path string, parent scene.ID) error {
+func (g *Demo) addModel(path string, parent scene.ID) error {
 	model, err := asset.LoadGLTF(path)
 	if err != nil {
 		return err
@@ -205,7 +198,7 @@ func (g *Game) addModel(path string, parent scene.ID) error {
 }
 
 // Update advances the game. mouseFree is false while the debug UI has the mouse.
-func (g *Game) Update(dt float32, in *input.State, mouseFree bool) {
+func (g *Demo) Update(dt float32, in *input.State, mouseFree bool) {
 	if g.scripts != nil {
 		g.scripts.Poll() // errors are logged by the host
 	}
@@ -217,8 +210,8 @@ func (g *Game) Update(dt float32, in *input.State, mouseFree bool) {
 }
 
 // DebugUI describes the game's debug window.
-func (g *Game) DebugUI(b *ui.Builder, s Stats) {
-	b.Window("Cliff Crack", 12, 12)
+func (g *Demo) DebugUI(b *ui.Builder, s Stats) {
+	b.Window("Engine Demo", 12, 12)
 	b.Text("%.0f fps  %.2f ms", s.FPS, s.FrameMS)
 	b.Text("%d entities, %d draws", g.world.Len(), s.Draws)
 	mode := "orbit (Tab: fly)"
@@ -255,13 +248,13 @@ func (g *Game) DebugUI(b *ui.Builder, s Stats) {
 		g.playAtVolume(g.clearSound, mathx.Vec3{}, 1)
 	}
 	b.Text("WASD roll, Space jump, R reset")
-	b.Text("F1: hide this window")
+	b.Text("F1: hide this window, Esc: main menu")
 	b.End()
 }
 
 // playAtVolume plays a sound panned and attenuated by where pos is relative
 // to the camera.
-func (g *Game) playAtVolume(s *audio.Sound, pos mathx.Vec3, volume float32) {
+func (g *Demo) playAtVolume(s *audio.Sound, pos mathx.Vec3, volume float32) {
 	if g.sound == nil {
 		return
 	}
@@ -276,7 +269,7 @@ func (g *Game) playAtVolume(s *audio.Sound, pos mathx.Vec3, volume float32) {
 }
 
 // script returns the named script behaviour, or a no-op without scripts.
-func (g *Game) script(name string) scene.Behaviour {
+func (g *Demo) script(name string) scene.Behaviour {
 	if g.scripts == nil {
 		return func(*scene.World, *scene.Entity, float32) {}
 	}
@@ -288,11 +281,11 @@ func logf(format string, args ...any) {
 }
 
 // CursorLocked reports whether the mouse should be captured (mouse-look).
-func (g *Game) CursorLocked() bool { return g.camera.locked }
+func (g *Demo) CursorLocked() bool { return g.camera.locked }
 
 // Render returns this frame's scene parameters and draw list. The draw list is
 // appended to out[:0], so the caller can reuse one slice every frame.
-func (g *Game) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
+func (g *Demo) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
 	view, eye := g.camera.view()
 	params := render.FrameParams{
 		ViewProj:     g.camera.lens.Projection(aspect).Mul(view),
