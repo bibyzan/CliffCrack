@@ -1,21 +1,34 @@
 #version 450
 
-// Must match the first 128 bytes of RDrawCmd in renderer.h.
+// Must match RFrameParams (minus clear_color) in renderer.h.
+layout(set = 0, binding = 0) uniform Frame {
+    mat4 view_proj;
+    vec4 camera_pos;
+    vec4 sun_direction;
+    vec4 sun_color;
+    vec4 ambient_color;
+} frame;
+
+// Must match the leading fields of RDrawCmd in renderer.h.
 layout(push_constant) uniform Push {
-    mat4 mvp;
-    vec4 normal_cols[3]; // world-space normal matrix, one column per vec4 (w unused)
+    mat4 model;
     vec4 color;
+    uint texture_index;
 } pc;
 
 layout(location = 0) in vec3 in_position;
 layout(location = 1) in vec3 in_normal;
+layout(location = 2) in vec2 in_uv;
 
-layout(location = 0) out vec3 v_normal;
-layout(location = 1) out vec4 v_color;
+layout(location = 0) out vec3 v_world_pos;
+layout(location = 1) out vec3 v_normal;
+layout(location = 2) out vec2 v_uv;
 
 void main() {
-    mat3 normal_matrix = mat3(pc.normal_cols[0].xyz, pc.normal_cols[1].xyz, pc.normal_cols[2].xyz);
-    gl_Position = pc.mvp * vec4(in_position, 1.0);
-    v_normal = normal_matrix * in_normal;
-    v_color = pc.color;
+    vec4 world = pc.model * vec4(in_position, 1.0);
+    gl_Position = frame.view_proj * world;
+    v_world_pos = world.xyz;
+    // Inverse-transpose keeps normals perpendicular under non-uniform scale.
+    v_normal = transpose(inverse(mat3(pc.model))) * in_normal;
+    v_uv = in_uv;
 }

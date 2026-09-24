@@ -1,10 +1,16 @@
 // Vulkan 1.3 renderer: dynamic rendering + synchronization2, no render passes.
+//
+// Descriptor model:
+//   set 0  per-frame uniform buffer (camera, sun) — one set per frame in flight
+//   set 1  bindless texture table: sampler2D textures[kMaxTextures], indexed by
+//          RDrawCmd::texture through push constants. Slot 0 is a white texture.
 #include "vk_common.h"
 
 #include <VkBootstrap.h>
 
 #include "renderer.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -18,20 +24,38 @@ namespace {
 
 constexpr uint32_t kFramesInFlight = 2;
 constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
-constexpr uint32_t kPushConstantSize = offsetof(RDrawCmd, mesh); // mvp + normal_matrix + color
-static_assert(kPushConstantSize == 128, "push constants must fit the 128-byte guaranteed minimum");
+constexpr uint32_t kMaxTextures = 1024; // must match MAX_TEXTURES in mesh.frag
+
+// Push constants are the leading fields of RDrawCmd: model, color, texture.
+constexpr uint32_t kPushConstantSize = offsetof(RDrawCmd, mesh);
+static_assert(kPushConstantSize <= 128, "push constants must fit the 128-byte guaranteed minimum");
+static_assert(offsetof(RDrawCmd, texture) == 80, "RDrawCmd layout must match the shader push block");
 static_assert(sizeof(RVertex) == 32, "RVertex layout changed; update the pipeline vertex input");
+
+// The per-frame uniform buffer is RFrameParams minus the trailing clear colour
+// (std140: mat4 + 4 x vec4).
+constexpr VkDeviceSize kFrameUniformSize = offsetof(RFrameParams, clear_color);
+static_assert(kFrameUniformSize == 128, "RFrameParams layout must match the shader Frame block");
+
+struct Buffer {
+    VkBuffer      buffer = VK_NULL_HANDLE;
+    VmaAllocation allocation = VK_NULL_HANDLE;
+};
+
+struct Image {
+    VkImage       image = VK_NULL_HANDLE;
+    VmaAllocation allocation = VK_NULL_HANDLE;
+    VkImageView   view = VK_NULL_HANDLE;
+};
 
 struct FrameData {
     VkCommandPool   pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkSemaphore     image_acquired = VK_NULL_HANDLE;
     VkFence         in_flight = VK_NULL_HANDLE;
-};
-
-struct Buffer {
-    VkBuffer      buffer = VK_NULL_HANDLE;
-    VmaAllocation allocation = VK_NULL_HANDLE;
+    Buffer          uniforms;
+    void*           uniforms_mapped = nullptr;
+    VkDescriptorSet frame_set = VK_NULL_HANDLE;
 };
 
 struct Mesh {
@@ -40,10 +64,8 @@ struct Mesh {
     uint32_t index_count = 0; // 0 = free slot
 };
 
-struct Image {
-    VkImage       image = VK_NULL_HANDLE;
-    VmaAllocation allocation = VK_NULL_HANDLE;
-    VkImageView   view = VK_NULL_HANDLE;
+struct Texture {
+    Image image; // image.image == VK_NULL_HANDLE marks a free slot
 };
 
 struct Renderer {
@@ -54,6 +76,7 @@ struct Renderer {
     VkQueue       queue = VK_NULL_HANDLE;
     uint32_t      queue_family = 0;
     VmaAllocator  allocator = VK_NULL_HANDLE;
+    float         max_anisotropy = 1.0f;
 
     vkb::Swapchain           swapchain;
     std::vector<VkImage>     images;
@@ -62,13 +85,22 @@ struct Renderer {
     bool                     swapchain_dirty = false;
     Image                    depth;       // shared by all frames; barriers serialize use
 
-    // Blocking uploads (mesh creation) use their own command buffer + fence.
+    // Blocking uploads (meshes, textures) use their own command buffer + fence.
     VkCommandPool   upload_pool = VK_NULL_HANDLE;
     VkCommandBuffer upload_cmd = VK_NULL_HANDLE;
     VkFence         upload_fence = VK_NULL_HANDLE;
 
+    VkDescriptorSetLayout frame_set_layout = VK_NULL_HANDLE;
+    VkDescriptorSetLayout texture_set_layout = VK_NULL_HANDLE;
+    VkDescriptorPool      frame_pool = VK_NULL_HANDLE;
+    VkDescriptorPool      texture_pool = VK_NULL_HANDLE;
+    VkDescriptorSet       texture_set = VK_NULL_HANDLE;
+    VkSampler             sampler = VK_NULL_HANDLE;
+
     std::vector<Mesh>     meshes;     // RMesh handle = index + 1
     std::vector<uint32_t> free_meshes;
+    std::vector<Texture>  textures;   // RTexture handle = index; 0 = white
+    std::vector<uint32_t> free_textures;
 
     std::string      shader_dir;
     VkFormat         pipeline_format = VK_FORMAT_UNDEFINED;
@@ -102,6 +134,10 @@ bool fail(std::string msg) {
                         std::to_string(static_cast<int>(vk_try_result_)));              \
     } while (0)
 
+// ---------------------------------------------------------------------------
+// Shaders and pipeline
+// ---------------------------------------------------------------------------
+
 bool read_spirv(const std::string& path, std::vector<uint32_t>& out) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) return fail("cannot open shader: " + path);
@@ -125,22 +161,12 @@ bool create_shader_module(const std::string& name, VkShaderModule& out) {
 
 void destroy_pipeline() {
     if (g->pipeline) vkDestroyPipeline(g->dev, g->pipeline, nullptr);
-    if (g->pipeline_layout) vkDestroyPipelineLayout(g->dev, g->pipeline_layout, nullptr);
     g->pipeline = VK_NULL_HANDLE;
-    g->pipeline_layout = VK_NULL_HANDLE;
+    g->pipeline_format = VK_FORMAT_UNDEFINED;
 }
 
 bool create_pipeline(VkFormat color_format) {
     destroy_pipeline();
-
-    VkPushConstantRange push{};
-    push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    push.size = kPushConstantSize;
-
-    VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-    layout_info.pushConstantRangeCount = 1;
-    layout_info.pPushConstantRanges = &push;
-    VK_TRY(vkCreatePipelineLayout(g->dev, &layout_info, nullptr, &g->pipeline_layout));
 
     VkShaderModule vert = VK_NULL_HANDLE, frag = VK_NULL_HANDLE;
     if (!create_shader_module("mesh.vert.spv", vert)) return false;
@@ -160,15 +186,15 @@ bool create_pipeline(VkFormat color_format) {
     stages[1].pName = "main";
 
     VkVertexInputBindingDescription vertex_binding{0, sizeof(RVertex), VK_VERTEX_INPUT_RATE_VERTEX};
-    // uv (offset 24) stays in the vertex layout but isn't bound until textures land.
     const VkVertexInputAttributeDescription vertex_attributes[] = {
         {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(RVertex, position)},
         {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(RVertex, normal)},
+        {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(RVertex, uv)},
     };
     VkPipelineVertexInputStateCreateInfo vertex_input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
     vertex_input.vertexBindingDescriptionCount = 1;
     vertex_input.pVertexBindingDescriptions = &vertex_binding;
-    vertex_input.vertexAttributeDescriptionCount = 2;
+    vertex_input.vertexAttributeDescriptionCount = 3;
     vertex_input.pVertexAttributeDescriptions = vertex_attributes;
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
@@ -242,10 +268,123 @@ bool create_pipeline(VkFormat color_format) {
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Memory: buffers, images, blocking uploads
+// ---------------------------------------------------------------------------
+
 void destroy_image(Image& img) {
     if (img.view) vkDestroyImageView(g->dev, img.view, nullptr);
     if (img.image) vmaDestroyImage(g->allocator, img.image, img.allocation);
     img = {};
+}
+
+void destroy_buffer(Buffer& b) {
+    if (b.buffer) vmaDestroyBuffer(g->allocator, b.buffer, b.allocation);
+    b = {};
+}
+
+bool create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
+                   Buffer& out, void** mapped = nullptr) {
+    VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    info.size = size;
+    info.usage = usage;
+
+    VmaAllocationCreateInfo alloc{};
+    alloc.usage = VMA_MEMORY_USAGE_AUTO;
+    alloc.flags = flags;
+
+    VmaAllocationInfo alloc_info{};
+    VK_TRY(vmaCreateBuffer(g->allocator, &info, &alloc, &out.buffer, &out.allocation, &alloc_info));
+    if (mapped) *mapped = alloc_info.pMappedData;
+    return true;
+}
+
+// Host-visible, persistently mapped buffer filled with `data`.
+bool create_staging(const void* data, VkDeviceSize size, Buffer& out) {
+    void* mapped = nullptr;
+    if (!create_buffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                       out, &mapped)) {
+        return false;
+    }
+    std::memcpy(mapped, data, static_cast<size_t>(size));
+    vmaFlushAllocation(g->allocator, out.allocation, 0, VK_WHOLE_SIZE);
+    return true;
+}
+
+// Records `record` into the upload command buffer, submits it and waits.
+template <typename F>
+bool submit_and_wait(F&& record) {
+    VK_TRY(vkResetCommandPool(g->dev, g->upload_pool, 0));
+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_TRY(vkBeginCommandBuffer(g->upload_cmd, &begin));
+    record(g->upload_cmd);
+    VK_TRY(vkEndCommandBuffer(g->upload_cmd));
+
+    VkCommandBufferSubmitInfo cmd_info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+    cmd_info.commandBuffer = g->upload_cmd;
+    VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    submit.commandBufferInfoCount = 1;
+    submit.pCommandBufferInfos = &cmd_info;
+    VK_TRY(vkQueueSubmit2(g->queue, 1, &submit, g->upload_fence));
+    VK_TRY(vkWaitForFences(g->dev, 1, &g->upload_fence, VK_TRUE, UINT64_MAX));
+    VK_TRY(vkResetFences(g->dev, 1, &g->upload_fence));
+    return true;
+}
+
+// Creates a device-local buffer and fills it through a staging buffer (blocking).
+bool upload_buffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage, Buffer& out) {
+    Buffer staging;
+    if (!create_staging(data, size, staging)) return false;
+
+    bool ok = create_buffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, out);
+    if (ok) {
+        ok = submit_and_wait([&](VkCommandBuffer cmd) {
+            VkBufferCopy region{0, 0, size};
+            vkCmdCopyBuffer(cmd, staging.buffer, out.buffer, 1, &region);
+
+            // Make the copy visible to vertex/index fetches in later submissions.
+            VkMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT;
+            VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+            dep.memoryBarrierCount = 1;
+            dep.pMemoryBarriers = &barrier;
+            vkCmdPipelineBarrier2(cmd, &dep);
+        });
+        if (!ok) destroy_buffer(out);
+    }
+    destroy_buffer(staging);
+    return ok;
+}
+
+void image_barrier(VkCommandBuffer cmd, VkImage image, VkImageSubresourceRange range,
+                   VkImageLayout old_layout, VkImageLayout new_layout,
+                   VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                   VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) {
+    VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
+    barrier.srcStageMask = src_stage;
+    barrier.srcAccessMask = src_access;
+    barrier.dstStageMask = dst_stage;
+    barrier.dstAccessMask = dst_access;
+    barrier.oldLayout = old_layout;
+    barrier.newLayout = new_layout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = image;
+    barrier.subresourceRange = range;
+
+    VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &barrier;
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+VkImageSubresourceRange color_mips(uint32_t base, uint32_t count) {
+    return {VK_IMAGE_ASPECT_COLOR_BIT, base, count, 0, 1};
 }
 
 bool create_depth(VkExtent2D extent) {
@@ -276,82 +415,9 @@ bool create_depth(VkExtent2D extent) {
     return true;
 }
 
-void destroy_buffer(Buffer& b) {
-    if (b.buffer) vmaDestroyBuffer(g->allocator, b.buffer, b.allocation);
-    b = {};
-}
-
-bool create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
-                   Buffer& out, void** mapped = nullptr) {
-    VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-    info.size = size;
-    info.usage = usage;
-
-    VmaAllocationCreateInfo alloc{};
-    alloc.usage = VMA_MEMORY_USAGE_AUTO;
-    alloc.flags = flags;
-
-    VmaAllocationInfo alloc_info{};
-    VK_TRY(vmaCreateBuffer(g->allocator, &info, &alloc, &out.buffer, &out.allocation, &alloc_info));
-    if (mapped) *mapped = alloc_info.pMappedData;
-    return true;
-}
-
-// Records `record` into the upload command buffer, submits it and waits.
-template <typename F>
-bool submit_and_wait(F&& record) {
-    VK_TRY(vkResetCommandPool(g->dev, g->upload_pool, 0));
-    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    VK_TRY(vkBeginCommandBuffer(g->upload_cmd, &begin));
-    record(g->upload_cmd);
-    VK_TRY(vkEndCommandBuffer(g->upload_cmd));
-
-    VkCommandBufferSubmitInfo cmd_info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
-    cmd_info.commandBuffer = g->upload_cmd;
-    VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
-    submit.commandBufferInfoCount = 1;
-    submit.pCommandBufferInfos = &cmd_info;
-    VK_TRY(vkQueueSubmit2(g->queue, 1, &submit, g->upload_fence));
-    VK_TRY(vkWaitForFences(g->dev, 1, &g->upload_fence, VK_TRUE, UINT64_MAX));
-    VK_TRY(vkResetFences(g->dev, 1, &g->upload_fence));
-    return true;
-}
-
-// Creates a device-local buffer and fills it through a staging buffer (blocking).
-bool upload_buffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage, Buffer& out) {
-    Buffer staging;
-    void*  mapped = nullptr;
-    if (!create_buffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
-                       staging, &mapped)) {
-        return false;
-    }
-    std::memcpy(mapped, data, static_cast<size_t>(size));
-    vmaFlushAllocation(g->allocator, staging.allocation, 0, VK_WHOLE_SIZE);
-
-    bool ok = create_buffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, out);
-    if (ok) {
-        ok = submit_and_wait([&](VkCommandBuffer cmd) {
-            VkBufferCopy region{0, 0, size};
-            vkCmdCopyBuffer(cmd, staging.buffer, out.buffer, 1, &region);
-
-            // Make the copy visible to vertex/index fetches in later submissions.
-            VkMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
-            barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
-            barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
-            barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
-            barrier.dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT;
-            VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-            dep.memoryBarrierCount = 1;
-            dep.pMemoryBarriers = &barrier;
-            vkCmdPipelineBarrier2(cmd, &dep);
-        });
-        if (!ok) destroy_buffer(out);
-    }
-    destroy_buffer(staging);
-    return ok;
-}
+// ---------------------------------------------------------------------------
+// Meshes
+// ---------------------------------------------------------------------------
 
 Mesh* lookup_mesh(RMesh handle) {
     if (handle == 0 || handle > g->meshes.size()) return nullptr;
@@ -364,6 +430,239 @@ void destroy_mesh(Mesh& mesh) {
     destroy_buffer(mesh.indices);
     mesh.index_count = 0;
 }
+
+// ---------------------------------------------------------------------------
+// Textures
+// ---------------------------------------------------------------------------
+
+bool texture_alive(RTexture handle) {
+    return handle < g->textures.size() && g->textures[handle].image.image != VK_NULL_HANDLE;
+}
+
+void write_texture_descriptor(uint32_t slot, VkImageView view) {
+    VkDescriptorImageInfo image_info{g->sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+    write.dstSet = g->texture_set;
+    write.dstBinding = 0;
+    write.dstArrayElement = slot;
+    write.descriptorCount = 1;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.pImageInfo = &image_info;
+    vkUpdateDescriptorSets(g->dev, 1, &write, 0, nullptr);
+}
+
+bool can_generate_mips(VkFormat format) {
+    VkFormatProperties props{};
+    vkGetPhysicalDeviceFormatProperties(g->device.physical_device.physical_device, format, &props);
+    const VkFormatFeatureFlags needed = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT |
+                                        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    return (props.optimalTilingFeatures & needed) == needed;
+}
+
+uint32_t mip_count(uint32_t width, uint32_t height) {
+    uint32_t levels = 1;
+    for (uint32_t size = std::max(width, height); size > 1; size /= 2) ++levels;
+    return levels;
+}
+
+// Uploads RGBA8 pixels into a sampled image and downsamples a full mip chain
+// with linear blits. Leaves every mip in SHADER_READ_ONLY_OPTIMAL.
+bool create_texture_image(const uint8_t* rgba, uint32_t width, uint32_t height, VkFormat format, Image& out) {
+    const uint32_t levels = can_generate_mips(format) ? mip_count(width, height) : 1;
+
+    VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = format;
+    info.extent = {width, height, 1};
+    info.mipLevels = levels;
+    info.arrayLayers = 1;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo alloc{};
+    alloc.usage = VMA_MEMORY_USAGE_AUTO;
+    VK_TRY(vmaCreateImage(g->allocator, &info, &alloc, &out.image, &out.allocation, nullptr));
+
+    Buffer staging;
+    if (!create_staging(rgba, VkDeviceSize{width} * height * 4, staging)) {
+        destroy_image(out);
+        return false;
+    }
+
+    const bool uploaded = submit_and_wait([&](VkCommandBuffer cmd) {
+        constexpr VkPipelineStageFlags2 kTransfer = VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT;
+        constexpr VkPipelineStageFlags2 kSample = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+
+        image_barrier(cmd, out.image, color_mips(0, levels),
+                      VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                      VK_PIPELINE_STAGE_2_NONE, 0, kTransfer, VK_ACCESS_2_TRANSFER_WRITE_BIT);
+
+        VkBufferImageCopy copy{};
+        copy.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        copy.imageExtent = {width, height, 1};
+        vkCmdCopyBufferToImage(cmd, staging.buffer, out.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+
+        int32_t w = static_cast<int32_t>(width), h = static_cast<int32_t>(height);
+        for (uint32_t level = 1; level < levels; ++level) {
+            // Previous level: written by copy/blit -> read by this blit.
+            image_barrier(cmd, out.image, color_mips(level - 1, 1),
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          kTransfer, VK_ACCESS_2_TRANSFER_WRITE_BIT, kTransfer, VK_ACCESS_2_TRANSFER_READ_BIT);
+
+            const int32_t nw = std::max(w / 2, 1), nh = std::max(h / 2, 1);
+            VkImageBlit blit{};
+            blit.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level - 1, 0, 1};
+            blit.srcOffsets[1] = {w, h, 1};
+            blit.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, level, 0, 1};
+            blit.dstOffsets[1] = {nw, nh, 1};
+            vkCmdBlitImage(cmd, out.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           out.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+
+            image_barrier(cmd, out.image, color_mips(level - 1, 1),
+                          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          kTransfer, VK_ACCESS_2_TRANSFER_READ_BIT, kSample, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+            w = nw;
+            h = nh;
+        }
+        image_barrier(cmd, out.image, color_mips(levels - 1, 1),
+                      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      kTransfer, VK_ACCESS_2_TRANSFER_WRITE_BIT, kSample, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT);
+    });
+    destroy_buffer(staging);
+    if (!uploaded) {
+        destroy_image(out);
+        return false;
+    }
+
+    VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    view.image = out.image;
+    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view.format = format;
+    view.subresourceRange = color_mips(0, levels);
+    if (vkCreateImageView(g->dev, &view, nullptr, &out.view) != VK_SUCCESS) {
+        destroy_image(out);
+        return fail("texture view creation failed");
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Descriptors, uniforms, sampler, pipeline layout
+// ---------------------------------------------------------------------------
+
+bool create_descriptors() {
+    // set 0: per-frame uniforms
+    VkDescriptorSetLayoutBinding frame_binding{};
+    frame_binding.binding = 0;
+    frame_binding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    frame_binding.descriptorCount = 1;
+    frame_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    VkDescriptorSetLayoutCreateInfo frame_layout{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    frame_layout.bindingCount = 1;
+    frame_layout.pBindings = &frame_binding;
+    VK_TRY(vkCreateDescriptorSetLayout(g->dev, &frame_layout, nullptr, &g->frame_set_layout));
+
+    // set 1: bindless textures. Partially bound (unused slots may be empty) and
+    // update-after-bind (new textures can be written while frames are in flight).
+    VkDescriptorSetLayoutBinding texture_binding{};
+    texture_binding.binding = 0;
+    texture_binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    texture_binding.descriptorCount = kMaxTextures;
+    texture_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    const VkDescriptorBindingFlags texture_flags = VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT |
+                                                   VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT |
+                                                   VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT;
+    VkDescriptorSetLayoutBindingFlagsCreateInfo binding_flags{
+        VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO};
+    binding_flags.bindingCount = 1;
+    binding_flags.pBindingFlags = &texture_flags;
+    VkDescriptorSetLayoutCreateInfo texture_layout{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+    texture_layout.pNext = &binding_flags;
+    texture_layout.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+    texture_layout.bindingCount = 1;
+    texture_layout.pBindings = &texture_binding;
+    VK_TRY(vkCreateDescriptorSetLayout(g->dev, &texture_layout, nullptr, &g->texture_set_layout));
+
+    VkDescriptorPoolSize frame_pool_size{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, kFramesInFlight};
+    VkDescriptorPoolCreateInfo frame_pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    frame_pool.maxSets = kFramesInFlight;
+    frame_pool.poolSizeCount = 1;
+    frame_pool.pPoolSizes = &frame_pool_size;
+    VK_TRY(vkCreateDescriptorPool(g->dev, &frame_pool, nullptr, &g->frame_pool));
+
+    VkDescriptorPoolSize texture_pool_size{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, kMaxTextures};
+    VkDescriptorPoolCreateInfo texture_pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+    texture_pool.flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT;
+    texture_pool.maxSets = 1;
+    texture_pool.poolSizeCount = 1;
+    texture_pool.pPoolSizes = &texture_pool_size;
+    VK_TRY(vkCreateDescriptorPool(g->dev, &texture_pool, nullptr, &g->texture_pool));
+
+    VkDescriptorSetAllocateInfo texture_alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+    texture_alloc.descriptorPool = g->texture_pool;
+    texture_alloc.descriptorSetCount = 1;
+    texture_alloc.pSetLayouts = &g->texture_set_layout;
+    VK_TRY(vkAllocateDescriptorSets(g->dev, &texture_alloc, &g->texture_set));
+
+    for (FrameData& f : g->frames) {
+        if (!create_buffer(kFrameUniformSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                           VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                           f.uniforms, &f.uniforms_mapped)) {
+            return false;
+        }
+        VkDescriptorSetAllocateInfo alloc{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        alloc.descriptorPool = g->frame_pool;
+        alloc.descriptorSetCount = 1;
+        alloc.pSetLayouts = &g->frame_set_layout;
+        VK_TRY(vkAllocateDescriptorSets(g->dev, &alloc, &f.frame_set));
+
+        VkDescriptorBufferInfo buffer_info{f.uniforms.buffer, 0, kFrameUniformSize};
+        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        write.dstSet = f.frame_set;
+        write.dstBinding = 0;
+        write.descriptorCount = 1;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        write.pBufferInfo = &buffer_info;
+        vkUpdateDescriptorSets(g->dev, 1, &write, 0, nullptr);
+    }
+
+    VkSamplerCreateInfo sampler{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    sampler.magFilter = VK_FILTER_LINEAR;
+    sampler.minFilter = VK_FILTER_LINEAR;
+    sampler.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    sampler.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    sampler.anisotropyEnable = VK_TRUE;
+    sampler.maxAnisotropy = g->max_anisotropy;
+    sampler.maxLod = VK_LOD_CLAMP_NONE;
+    VK_TRY(vkCreateSampler(g->dev, &sampler, nullptr, &g->sampler));
+
+    const VkDescriptorSetLayout set_layouts[] = {g->frame_set_layout, g->texture_set_layout};
+    VkPushConstantRange push{};
+    push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    push.size = kPushConstantSize;
+    VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+    layout_info.setLayoutCount = 2;
+    layout_info.pSetLayouts = set_layouts;
+    layout_info.pushConstantRangeCount = 1;
+    layout_info.pPushConstantRanges = &push;
+    VK_TRY(vkCreatePipelineLayout(g->dev, &layout_info, nullptr, &g->pipeline_layout));
+
+    // Slot 0: 1x1 white, so untextured draws just multiply by 1.
+    const uint8_t white[4] = {255, 255, 255, 255};
+    Texture tex;
+    if (!create_texture_image(white, 1, 1, VK_FORMAT_R8G8B8A8_UNORM, tex.image)) return false;
+    g->textures.push_back(tex);
+    write_texture_descriptor(0, tex.image.view);
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Swapchain and per-frame objects
+// ---------------------------------------------------------------------------
 
 void destroy_swapchain_resources() {
     for (VkSemaphore s : g->render_done) vkDestroySemaphore(g->dev, s, nullptr);
@@ -447,27 +746,9 @@ bool create_frames() {
     return true;
 }
 
-void image_barrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,
-                   VkImageLayout old_layout, VkImageLayout new_layout,
-                   VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
-                   VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) {
-    VkImageMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2};
-    barrier.srcStageMask = src_stage;
-    barrier.srcAccessMask = src_access;
-    barrier.dstStageMask = dst_stage;
-    barrier.dstAccessMask = dst_access;
-    barrier.oldLayout = old_layout;
-    barrier.newLayout = new_layout;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = image;
-    barrier.subresourceRange = {aspect, 0, 1, 0, 1};
-
-    VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
-    dep.imageMemoryBarrierCount = 1;
-    dep.pImageMemoryBarriers = &barrier;
-    vkCmdPipelineBarrier2(cmd, &dep);
-}
+// ---------------------------------------------------------------------------
+// Init / shutdown
+// ---------------------------------------------------------------------------
 
 bool init(const RInitDesc& desc) {
     VK_TRY(volkInitialize());
@@ -487,16 +768,28 @@ bool init(const RInitDesc& desc) {
     surface_info.hwnd = static_cast<HWND>(desc.native_window);
     VK_TRY(vkCreateWin32SurfaceKHR(g->instance.instance, &surface_info, nullptr, &g->surface));
 
+    VkPhysicalDeviceFeatures features{};
+    features.samplerAnisotropy = VK_TRUE;
+    features.shaderSampledImageArrayDynamicIndexing = VK_TRUE;
+
+    VkPhysicalDeviceVulkan12Features features12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    features12.descriptorBindingPartiallyBound = VK_TRUE;
+    features12.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
+    features12.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
+
     VkPhysicalDeviceVulkan13Features features13{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
     features13.dynamicRendering = VK_TRUE;
     features13.synchronization2 = VK_TRUE;
 
     auto phys = vkb::PhysicalDeviceSelector(g->instance, g->surface)
                     .set_minimum_version(1, 3)
+                    .set_required_features(features)
+                    .set_required_features_12(features12)
                     .set_required_features_13(features13)
                     .select();
     if (!phys.has_value()) return fail("no suitable GPU: " + phys.error().message());
     std::printf("[renderer] GPU: %s\n", phys.value().name.c_str());
+    g->max_anisotropy = std::min(16.0f, phys.value().properties.limits.maxSamplerAnisotropy);
 
     auto device = vkb::DeviceBuilder(phys.value()).build();
     if (!device.has_value()) return fail("device creation failed: " + device.error().message());
@@ -522,6 +815,7 @@ bool init(const RInitDesc& desc) {
     VK_TRY(vmaCreateAllocator(&vma_info, &g->allocator));
 
     if (!create_frames()) return false;
+    if (!create_descriptors()) return false;
     return create_swapchain(); // also builds the pipeline for the swapchain format
 }
 
@@ -536,10 +830,18 @@ void destroy_all() {
         if (g->upload_fence) vkDestroyFence(g->dev, g->upload_fence, nullptr);
         if (g->upload_pool) vkDestroyCommandPool(g->dev, g->upload_pool, nullptr);
         destroy_pipeline();
+        if (g->pipeline_layout) vkDestroyPipelineLayout(g->dev, g->pipeline_layout, nullptr);
+        if (g->sampler) vkDestroySampler(g->dev, g->sampler, nullptr);
+        if (g->frame_pool) vkDestroyDescriptorPool(g->dev, g->frame_pool, nullptr);
+        if (g->texture_pool) vkDestroyDescriptorPool(g->dev, g->texture_pool, nullptr);
+        if (g->frame_set_layout) vkDestroyDescriptorSetLayout(g->dev, g->frame_set_layout, nullptr);
+        if (g->texture_set_layout) vkDestroyDescriptorSetLayout(g->dev, g->texture_set_layout, nullptr);
         destroy_swapchain_resources();
         vkb::destroy_swapchain(g->swapchain);
         if (g->allocator) {
+            for (FrameData& f : g->frames) destroy_buffer(f.uniforms);
             for (Mesh& mesh : g->meshes) destroy_mesh(mesh);
+            for (Texture& tex : g->textures) destroy_image(tex.image);
             destroy_image(g->depth);
             vmaDestroyAllocator(g->allocator);
         }
@@ -550,6 +852,10 @@ void destroy_all() {
 }
 
 } // namespace
+
+// ---------------------------------------------------------------------------
+// C API
+// ---------------------------------------------------------------------------
 
 extern "C" {
 
@@ -582,103 +888,6 @@ void r_resize(uint32_t width, uint32_t height) {
     g->width = width;
     g->height = height;
     g->swapchain_dirty = true;
-}
-
-int32_t r_begin_frame(const float clear_color[4]) {
-    if (!g || g->recording) return 0;
-    if (g->width == 0 || g->height == 0) return 0; // minimized
-
-    if (g->swapchain_dirty && !recreate_swapchain()) return 0;
-
-    FrameData& f = g->frames[g->frame];
-    vkWaitForFences(g->dev, 1, &f.in_flight, VK_TRUE, UINT64_MAX);
-
-    VkResult acquired = vkAcquireNextImageKHR(g->dev, g->swapchain.swapchain, UINT64_MAX,
-                                              f.image_acquired, VK_NULL_HANDLE, &g->image);
-    if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
-        g->swapchain_dirty = true;
-        return 0;
-    }
-    if (acquired == VK_SUBOPTIMAL_KHR) {
-        g->swapchain_dirty = true; // still usable this frame; rebuild after present
-    } else if (acquired != VK_SUCCESS) {
-        fail("vkAcquireNextImageKHR failed: VkResult " + std::to_string(static_cast<int>(acquired)));
-        return 0;
-    }
-
-    vkResetFences(g->dev, 1, &f.in_flight);
-    vkResetCommandPool(g->dev, f.pool, 0);
-
-    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(f.cmd, &begin);
-
-    image_barrier(f.cmd, g->images[g->image], VK_IMAGE_ASPECT_COLOR_BIT,
-                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
-                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
-
-    // The depth image is shared by both frames in flight: wait for the previous
-    // frame's depth writes before this frame clears it.
-    constexpr VkPipelineStageFlags2 kDepthStages =
-        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-    image_barrier(f.cmd, g->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
-                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                  kDepthStages, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                  kDepthStages, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
-                                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
-
-    VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-    color.imageView = g->views[g->image];
-    color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    if (clear_color) {
-        for (int i = 0; i < 4; ++i) color.clearValue.color.float32[i] = clear_color[i];
-    }
-
-    VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
-    depth.imageView = g->depth.view;
-    depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-    depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depth.clearValue.depthStencil.depth = 1.0f;
-
-    const VkExtent2D extent = g->swapchain.extent;
-    VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
-    rendering.renderArea = {{0, 0}, extent};
-    rendering.layerCount = 1;
-    rendering.colorAttachmentCount = 1;
-    rendering.pColorAttachments = &color;
-    rendering.pDepthAttachment = &depth;
-    vkCmdBeginRendering(f.cmd, &rendering);
-
-    VkViewport viewport{0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f};
-    VkRect2D scissor{{0, 0}, extent};
-    vkCmdSetViewport(f.cmd, 0, 1, &viewport);
-    vkCmdSetScissor(f.cmd, 0, 1, &scissor);
-    vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->pipeline);
-
-    g->recording = true;
-    return 1;
-}
-
-void r_draw(const RDrawCmd* cmds, uint32_t count) {
-    if (!g || !g->recording || !cmds) return;
-    VkCommandBuffer cmd = g->frames[g->frame].cmd;
-    const Mesh*     bound = nullptr;
-    for (uint32_t i = 0; i < count; ++i) {
-        const Mesh* mesh = lookup_mesh(cmds[i].mesh);
-        if (!mesh) continue;
-        if (mesh != bound) {
-            const VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(cmd, 0, 1, &mesh->vertices.buffer, &offset);
-            vkCmdBindIndexBuffer(cmd, mesh->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
-            bound = mesh;
-        }
-        vkCmdPushConstants(cmd, g->pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, kPushConstantSize, &cmds[i]);
-        vkCmdDrawIndexed(cmd, mesh->index_count, 1, 0, 0, 0);
-    }
 }
 
 RMesh r_create_mesh(const RVertex* vertices, uint32_t vertex_count,
@@ -724,6 +933,146 @@ void r_destroy_mesh(RMesh handle) {
     g->free_meshes.push_back(handle - 1);
 }
 
+RTexture r_create_texture(const uint8_t* rgba, uint32_t width, uint32_t height, uint32_t flags) {
+    if (!g) return fail("r_create_texture: renderer not initialized"), 0;
+    if (!rgba || width == 0 || height == 0) return fail("r_create_texture: empty image"), 0;
+
+    uint32_t slot;
+    if (!g->free_textures.empty()) {
+        slot = g->free_textures.back();
+    } else if (g->textures.size() < kMaxTextures) {
+        slot = static_cast<uint32_t>(g->textures.size());
+    } else {
+        return fail("r_create_texture: texture table full (" + std::to_string(kMaxTextures) + ")"), 0;
+    }
+
+    const VkFormat format = (flags & R_TEXTURE_SRGB) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    Texture tex;
+    if (!create_texture_image(rgba, width, height, format, tex.image)) return 0;
+
+    if (slot == g->textures.size()) {
+        g->textures.push_back(tex);
+    } else {
+        g->free_textures.pop_back();
+        g->textures[slot] = tex;
+    }
+    write_texture_descriptor(slot, tex.image.view);
+    return slot;
+}
+
+void r_destroy_texture(RTexture handle) {
+    if (!g || handle == 0 || !texture_alive(handle)) return;
+    vkDeviceWaitIdle(g->dev); // it may still be referenced by frames in flight
+    write_texture_descriptor(handle, g->textures[0].image.view); // never leave a dangling view
+    destroy_image(g->textures[handle].image);
+    g->free_textures.push_back(handle);
+}
+
+int32_t r_begin_frame(const RFrameParams* params) {
+    if (!g || g->recording || !params) return 0;
+    if (g->width == 0 || g->height == 0) return 0; // minimized
+
+    if (g->swapchain_dirty && !recreate_swapchain()) return 0;
+
+    FrameData& f = g->frames[g->frame];
+    vkWaitForFences(g->dev, 1, &f.in_flight, VK_TRUE, UINT64_MAX);
+
+    VkResult acquired = vkAcquireNextImageKHR(g->dev, g->swapchain.swapchain, UINT64_MAX,
+                                              f.image_acquired, VK_NULL_HANDLE, &g->image);
+    if (acquired == VK_ERROR_OUT_OF_DATE_KHR) {
+        g->swapchain_dirty = true;
+        return 0;
+    }
+    if (acquired == VK_SUBOPTIMAL_KHR) {
+        g->swapchain_dirty = true; // still usable this frame; rebuild after present
+    } else if (acquired != VK_SUCCESS) {
+        fail("vkAcquireNextImageKHR failed: VkResult " + std::to_string(static_cast<int>(acquired)));
+        return 0;
+    }
+
+    // Safe to overwrite: this frame's fence says the GPU is done with its uniforms.
+    std::memcpy(f.uniforms_mapped, params, kFrameUniformSize);
+    vmaFlushAllocation(g->allocator, f.uniforms.allocation, 0, VK_WHOLE_SIZE);
+
+    vkResetFences(g->dev, 1, &f.in_flight);
+    vkResetCommandPool(g->dev, f.pool, 0);
+
+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    vkBeginCommandBuffer(f.cmd, &begin);
+
+    image_barrier(f.cmd, g->images[g->image], color_mips(0, 1),
+                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
+                  VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+
+    // The depth image is shared by both frames in flight: wait for the previous
+    // frame's depth writes before this frame clears it.
+    constexpr VkPipelineStageFlags2 kDepthStages =
+        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    image_barrier(f.cmd, g->depth.image, {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1},
+                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                  kDepthStages, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                  kDepthStages, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
+
+    VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    color.imageView = g->views[g->image];
+    color.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    for (int i = 0; i < 4; ++i) color.clearValue.color.float32[i] = params->clear_color[i];
+
+    VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    depth.imageView = g->depth.view;
+    depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.clearValue.depthStencil.depth = 1.0f;
+
+    const VkExtent2D extent = g->swapchain.extent;
+    VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
+    rendering.renderArea = {{0, 0}, extent};
+    rendering.layerCount = 1;
+    rendering.colorAttachmentCount = 1;
+    rendering.pColorAttachments = &color;
+    rendering.pDepthAttachment = &depth;
+    vkCmdBeginRendering(f.cmd, &rendering);
+
+    VkViewport viewport{0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f};
+    VkRect2D scissor{{0, 0}, extent};
+    vkCmdSetViewport(f.cmd, 0, 1, &viewport);
+    vkCmdSetScissor(f.cmd, 0, 1, &scissor);
+    vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->pipeline);
+
+    const VkDescriptorSet sets[] = {f.frame_set, g->texture_set};
+    vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->pipeline_layout, 0, 2, sets, 0, nullptr);
+
+    g->recording = true;
+    return 1;
+}
+
+void r_draw(const RDrawCmd* cmds, uint32_t count) {
+    if (!g || !g->recording || !cmds) return;
+    VkCommandBuffer cmd = g->frames[g->frame].cmd;
+    const Mesh*     bound = nullptr;
+    for (uint32_t i = 0; i < count; ++i) {
+        const Mesh* mesh = lookup_mesh(cmds[i].mesh);
+        if (!mesh) continue;
+        if (mesh != bound) {
+            const VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &mesh->vertices.buffer, &offset);
+            vkCmdBindIndexBuffer(cmd, mesh->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+            bound = mesh;
+        }
+        RDrawCmd push = cmds[i];
+        if (!texture_alive(push.texture)) push.texture = 0; // stale handle: fall back to white
+        vkCmdPushConstants(cmd, g->pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                           0, kPushConstantSize, &push);
+        vkCmdDrawIndexed(cmd, mesh->index_count, 1, 0, 0, 0);
+    }
+}
+
 void r_end_frame(void) {
     if (!g || !g->recording) return;
     g->recording = false;
@@ -731,7 +1080,7 @@ void r_end_frame(void) {
     FrameData& f = g->frames[g->frame];
     vkCmdEndRendering(f.cmd);
 
-    image_barrier(f.cmd, g->images[g->image], VK_IMAGE_ASPECT_COLOR_BIT,
+    image_barrier(f.cmd, g->images[g->image], color_mips(0, 1),
                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0);

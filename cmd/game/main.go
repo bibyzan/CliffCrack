@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"vkgame/engine/mathx"
 	"vkgame/engine/platform"
 	"vkgame/engine/render"
 	"vkgame/game"
@@ -59,7 +58,6 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	skyColor := mathx.Hex(0x9cc3e6)
 	var draws []render.DrawCmd
 
 	last := platform.Time()
@@ -80,10 +78,11 @@ func run() error {
 			continue
 		}
 
-		if !render.BeginFrame(skyColor) {
+		var params render.FrameParams
+		params, draws = g.Render(float32(width)/float32(height), draws)
+		if !render.BeginFrame(params) {
 			continue
 		}
-		draws = g.Draw(float32(width)/float32(height), draws)
 		render.Draw(draws)
 		render.EndFrame()
 	}

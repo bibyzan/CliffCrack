@@ -46,15 +46,26 @@ func (m MeshData) Bounds() (lo, hi mathx.Vec3) {
 // it on X/Z and rests it on y = 0.
 func (m *MeshData) FitToSize(size float32) {
 	lo, hi := m.Bounds()
+	offset, scale := FitTransform(lo, hi, size)
+	m.OffsetScale(offset, scale)
+}
+
+// FitTransform returns the offset and uniform scale that make the box lo..hi
+// size units across at its largest extent, centred on X/Z and resting on y = 0.
+// Apply the offset first, then the scale.
+func FitTransform(lo, hi mathx.Vec3, size float32) (offset mathx.Vec3, scale float32) {
 	ext := hi.Sub(lo)
 	largest := max(ext[0], ext[1], ext[2])
 	if largest == 0 {
-		return
+		return mathx.Vec3{}, 1
 	}
-	s := size / largest
-	offset := mathx.Vec3{-(lo[0] + hi[0]) / 2, -lo[1], -(lo[2] + hi[2]) / 2}
+	return mathx.Vec3{-(lo[0] + hi[0]) / 2, -lo[1], -(lo[2] + hi[2]) / 2}, size / largest
+}
+
+// OffsetScale moves every vertex by offset, then scales it uniformly.
+func (m *MeshData) OffsetScale(offset mathx.Vec3, scale float32) {
 	for i := range m.Vertices {
-		m.Vertices[i].Position = m.Vertices[i].Position.Add(offset).Scale(s)
+		m.Vertices[i].Position = m.Vertices[i].Position.Add(offset).Scale(scale)
 	}
 }
 

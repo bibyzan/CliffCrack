@@ -30,7 +30,7 @@ typedef struct RInitDesc {
     int32_t     vsync;             // non-zero: FIFO present mode
 } RInitDesc;
 
-// Interleaved vertex. Must match render.Vertex in Go.
+// Interleaved vertex. Must match geom.Vertex in Go.
 typedef struct RVertex {
     float position[3];
     float normal[3];
@@ -40,13 +40,32 @@ typedef struct RVertex {
 // Opaque mesh handle; 0 is never a valid mesh.
 typedef uint32_t RMesh;
 
+// Texture handle. 0 is a built-in 1x1 white texture, so "untextured" needs no
+// special case: the draw colour is used as-is.
+typedef uint32_t RTexture;
+
+enum {
+    R_TEXTURE_SRGB = 1 << 0, // pixel data is sRGB-encoded colour (base colour maps)
+};
+
+// Per-frame scene data. Must match render.frameParams in Go.
+// Everything except clear_color becomes the shaders' per-frame uniform buffer.
+typedef struct RFrameParams {
+    float view_proj[16];     // column-major, Vulkan clip space
+    float camera_pos[4];     // world space, w unused
+    float sun_direction[4];  // world space, *towards* the light, w unused
+    float sun_color[4];      // linear RGB * intensity, w unused
+    float ambient_color[4];  // linear RGB, w unused
+    float clear_color[4];    // linear RGBA
+} RFrameParams;
+
 // One draw of one mesh. Must match render.DrawCmd in Go.
-// The first 128 bytes (mvp, normal_matrix, color) are the shader push constants.
+// Everything before `mesh` (84 bytes) is sent as shader push constants.
 typedef struct RDrawCmd {
-    float mvp[16];          // column-major model-view-projection (Vulkan clip space)
-    float normal_matrix[12]; // world-space normal matrix: 3 columns, each padded to vec4
-    float color[4];         // RGBA tint
-    RMesh mesh;
+    float    model[16]; // column-major object-to-world transform
+    float    color[4];  // linear RGBA, multiplied with the texture
+    RTexture texture;
+    RMesh    mesh;
 } RDrawCmd;
 
 // Returns 1 on success, 0 on failure (see r_last_error).
@@ -67,9 +86,16 @@ R_API RMesh r_create_mesh(const RVertex* vertices, uint32_t vertex_count,
 // Any meshes still alive at r_shutdown are freed there.
 R_API void r_destroy_mesh(RMesh mesh);
 
+// Uploads tightly packed 8-bit RGBA pixels and builds a full mip chain
+// (blocking). flags is a combination of R_TEXTURE_*. Returns 0 on failure.
+R_API RTexture r_create_texture(const uint8_t* rgba, uint32_t width, uint32_t height, uint32_t flags);
+
+// Frees a texture. Waits for the GPU to go idle. Destroying handle 0 is a no-op.
+R_API void r_destroy_texture(RTexture texture);
+
 // Starts a frame. Returns 0 if the frame should be skipped (minimized, swapchain
 // being rebuilt); in that case do not call r_draw / r_end_frame.
-R_API int32_t r_begin_frame(const float clear_color[4]);
+R_API int32_t r_begin_frame(const RFrameParams* params);
 
 R_API void r_draw(const RDrawCmd* cmds, uint32_t count);
 
