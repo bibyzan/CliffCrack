@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"strings"
 
 	"vkgame/engine/asset"
 	"vkgame/engine/geom"
@@ -13,20 +14,38 @@ import (
 	"vkgame/engine/mathx"
 	"vkgame/engine/render"
 	"vkgame/engine/scene"
+	"vkgame/engine/script"
 )
 
 var worldUp = mathx.Vec3{0, 1, 0}
 
 type Game struct {
-	world  *scene.World
-	camera cameraRig
+	world   *scene.World
+	camera  cameraRig
+	scripts *script.Host // nil when running without scripts
 }
 
-// New builds the demo scene. If modelPath is set, that glTF file is shown in
-// the centre instead of the sphere.
-func New(modelPath string) (*Game, error) {
+type Options struct {
+	Model      string // optional glTF file shown in the centre instead of the sphere
+	ScriptsDir string // optional directory of hot-reloadable behaviours
+}
+
+// New builds the demo scene.
+func New(opts Options) (*Game, error) {
 	g := &Game{world: scene.NewWorld(), camera: newCameraRig()}
 	w := g.world
+	modelPath := opts.Model
+
+	if opts.ScriptsDir != "" {
+		host, err := script.New(opts.ScriptsDir, logf)
+		if err != nil {
+			// Keep going: the host retries when the files change.
+			logf("script: initial load failed: %v", err)
+		} else {
+			logf("script: loaded %s: %s", opts.ScriptsDir, strings.Join(host.Names(), ", "))
+		}
+		g.scripts = host
+	}
 
 	groundMesh, err := render.CreateMesh(scaledUVs(geom.Plane(1), 7))
 	if err != nil {
@@ -53,6 +72,7 @@ func New(modelPath string) (*Game, error) {
 		}
 		centre.Transform.Position = mathx.Vec3{0, 1, 0}
 		centre.Renderable = &scene.Renderable{Mesh: sphere, Color: mathx.Hex(0xe5e7eb)}
+		centre.AddBehaviour(g.script("Bob"))
 	}
 
 	cube, err := render.CreateMesh(geom.Cube(1))
@@ -64,7 +84,7 @@ func New(modelPath string) (*Game, error) {
 		return nil, err
 	}
 	// The cubes hang off a slowly turning ring, and each also spins on its own.
-	ring := w.Spawn("ring", scene.ID{}).AddBehaviour(spin(-0.1))
+	ring := w.Spawn("ring", scene.ID{}).AddBehaviour(spin(-0.1)).AddBehaviour(g.script("Pulse"))
 	palette := []uint32{0xe05252, 0xf0923a, 0xe8cf45, 0x4cbf6b, 0x4a90e2, 0x9b6ce0}
 	for i, hex := range palette {
 		angle := float64(i) / float64(len(palette)) * 2 * math.Pi
@@ -111,8 +131,23 @@ func (g *Game) addModel(path string, parent scene.ID) error {
 }
 
 func (g *Game) Update(dt float32, in *input.State) {
+	if g.scripts != nil {
+		g.scripts.Poll() // errors are logged by the host
+	}
 	g.camera.update(dt, in)
 	g.world.Update(dt)
+}
+
+// script returns the named script behaviour, or a no-op without scripts.
+func (g *Game) script(name string) scene.Behaviour {
+	if g.scripts == nil {
+		return func(*scene.World, *scene.Entity, float32) {}
+	}
+	return g.scripts.Behaviour(name)
+}
+
+func logf(format string, args ...any) {
+	fmt.Printf(format+"\n", args...)
 }
 
 // CursorLocked reports whether the mouse should be captured (mouse-look).

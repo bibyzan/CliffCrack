@@ -57,6 +57,21 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | Any | **F12** | save `screenshot-<time>.png` (read back from the GPU) |
 | | **Esc** | quit |
 
+### Hot-reloadable scripts
+
+Gameplay behaviours in [`scripts/`](scripts/) are plain Go files run by the
+[yaegi](https://github.com/traefik/yaegi) interpreter. Any exported
+`func Name(w *scene.World, e *scene.Entity, dt float32)` is a behaviour; the game
+attaches them by name (`g.script("Bob")`). Save a file while the game runs and it
+reloads within a quarter second — if the edit doesn't compile, the error is printed
+and the previous version keeps running; a script that panics is disabled until the
+next reload. Scripts can import `vkgame/engine/scene`, `mathx`, `gfx` and the standard
+library. `go vet ./...` type-checks them like normal code.
+
+`-scripts <dir>` picks another directory, `-scripts none` disables scripting. After
+changing the exported API of `scene`/`mathx`/`gfx`, run `go generate ./engine/script/...`
+to refresh the interpreter's symbol tables.
+
 Colours: the swapchain is sRGB and shaders work in linear space, so write colours
 with `mathx.Hex(0xRRGGBB)` / `mathx.SRGB(...)` — they convert picker values to linear.
 
@@ -77,7 +92,9 @@ engine/
   mathx/               Vulkan-convention vectors, matrices, colours
   geom/                CPU mesh data + procedural shapes (cube, plane, sphere)
   asset/               file loaders (glTF / GLB)
+  script/              yaegi host: loads scripts/, hot-reloads, exposes behaviours
 game/                gameplay code (pure Go, no cgo)
+scripts/             hot-reloadable behaviours (interpreted at runtime)
 cmd/game/            main package
 ```
 
@@ -92,5 +109,5 @@ cmd/game/            main package
 - [ ] Dear ImGui overlay (renderer side, toggled from Go)
 - [x] Input abstraction + orbit/fly camera controls
 - [x] Entity model: scene.World with hierarchy, generational IDs, behaviours
-- [ ] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)
+- [x] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)
 - [ ] Audio (miniaudio / oto), physics

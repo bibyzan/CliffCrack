@@ -83,7 +83,12 @@ type World struct {
 	free     []uint32
 	pending  []ID // destroyed during Update, removed at the end of it
 	updating bool
+	time     float64
 }
+
+// Time is the total simulated time in seconds (the sum of all Update dts).
+// During Update it already includes the current frame's dt.
+func (w *World) Time() float32 { return float32(w.time) }
 
 func NewWorld() *World { return &World{} }
 
@@ -194,6 +199,7 @@ func (w *World) SetParent(child, parent ID) bool {
 // Update runs every entity's behaviours, applies deferred destroys and
 // recomputes world matrices. Entities spawned during Update start next frame.
 func (w *World) Update(dt float32) {
+	w.time += float64(dt)
 	w.updating = true
 	count := len(w.slots)
 	for i := 0; i < count; i++ {

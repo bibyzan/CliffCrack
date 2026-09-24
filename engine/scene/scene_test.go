@@ -82,6 +82,9 @@ func TestBehavioursAndDeferredDestroy(t *testing.T) {
 	})
 
 	w.Update(0.5)
+	if w.Time() != 0.5 {
+		t.Errorf("Time = %v, want 0.5", w.Time())
+	}
 	if ticks != 1 || spinner.Transform.Position[0] != 0.5 {
 		t.Errorf("behaviour ran %d times, x = %v", ticks, spinner.Transform.Position[0])
 	}

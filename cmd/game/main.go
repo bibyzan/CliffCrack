@@ -29,13 +29,15 @@ func run() error {
 	model := flag.String("model", "", "optional .gltf/.glb file to show in the centre of the scene")
 	screenshot := flag.String("screenshot", "", "render -frames frames, save the last one to this PNG and exit")
 	frames := flag.Int("frames", 120, "number of frames to render before taking -screenshot")
+	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
 	flag.Parse()
 
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	shaderDir := filepath.Join(filepath.Dir(exe), "shaders")
+	exeDir := filepath.Dir(exe)
+	shaderDir := filepath.Join(exeDir, "shaders")
 
 	win, err := platform.NewWindow("vkgame", 1280, 720)
 	if err != nil {
@@ -59,7 +61,7 @@ func run() error {
 
 	win.OnFramebufferResize(render.Resize)
 
-	g, err := game.New(*model)
+	g, err := game.New(game.Options{Model: *model, ScriptsDir: scriptsDir(*scripts, exeDir)})
 	if err != nil {
 		return err
 	}
@@ -120,6 +122,24 @@ func run() error {
 		}
 	}
 	return nil
+}
+
+// scriptsDir resolves the -scripts flag. By default it prefers ./scripts and
+// then the source tree's scripts/ (the exe lives in <repo>/build/bin), so
+// edits to the checked-in scripts hot-reload straight into a dev build.
+func scriptsDir(flagValue, exeDir string) string {
+	switch flagValue {
+	case "none":
+		return ""
+	case "":
+		for _, dir := range []string{"scripts", filepath.Join(exeDir, "..", "..", "scripts")} {
+			if info, err := os.Stat(dir); err == nil && info.IsDir() {
+				return filepath.Clean(dir)
+			}
+		}
+		return ""
+	}
+	return flagValue
 }
 
 func saveCapture(path string) error {
