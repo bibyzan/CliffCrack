@@ -12,29 +12,23 @@ import (
 	"vkgame/engine/input"
 	"vkgame/engine/mathx"
 	"vkgame/engine/render"
+	"vkgame/engine/scene"
 )
 
-type object struct {
-	mesh     render.Mesh
-	texture  render.Texture
-	position mathx.Vec3
-	scale    float32
-	spin     float32 // radians per second around Y
-	color    [4]float32
-}
+var worldUp = mathx.Vec3{0, 1, 0}
 
 type Game struct {
-	time    float32
-	objects []object
-	camera  cameraRig
+	world  *scene.World
+	camera cameraRig
 }
 
 // New builds the demo scene. If modelPath is set, that glTF file is shown in
 // the centre instead of the sphere.
 func New(modelPath string) (*Game, error) {
-	g := &Game{camera: newCameraRig()}
+	g := &Game{world: scene.NewWorld(), camera: newCameraRig()}
+	w := g.world
 
-	ground, err := render.CreateMesh(scaledUVs(geom.Plane(1), 7))
+	groundMesh, err := render.CreateMesh(scaledUVs(geom.Plane(1), 7))
 	if err != nil {
 		return nil, err
 	}
@@ -43,10 +37,13 @@ func New(modelPath string) (*Game, error) {
 	if err != nil {
 		return nil, err
 	}
-	g.objects = append(g.objects, object{mesh: ground, texture: groundTex, scale: 14, color: [4]float32{1, 1, 1, 1}})
+	ground := w.Spawn("ground", scene.ID{})
+	ground.Transform.Scale = mathx.Vec3{14, 1, 14}
+	ground.Renderable = &scene.Renderable{Mesh: groundMesh, Texture: groundTex, Color: [4]float32{1, 1, 1, 1}}
 
+	centre := w.Spawn("centre", scene.ID{}).AddBehaviour(spin(0.3))
 	if modelPath != "" {
-		if err := g.addModel(modelPath); err != nil {
+		if err := g.addModel(modelPath, centre.ID()); err != nil {
 			return nil, err
 		}
 	} else {
@@ -54,7 +51,8 @@ func New(modelPath string) (*Game, error) {
 		if err != nil {
 			return nil, err
 		}
-		g.objects = append(g.objects, object{mesh: sphere, position: mathx.Vec3{0, 1, 0}, scale: 1, color: mathx.Hex(0xe5e7eb)})
+		centre.Transform.Position = mathx.Vec3{0, 1, 0}
+		centre.Renderable = &scene.Renderable{Mesh: sphere, Color: mathx.Hex(0xe5e7eb)}
 	}
 
 	cube, err := render.CreateMesh(geom.Cube(1))
@@ -65,24 +63,23 @@ func New(modelPath string) (*Game, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The cubes hang off a slowly turning ring, and each also spins on its own.
+	ring := w.Spawn("ring", scene.ID{}).AddBehaviour(spin(-0.1))
 	palette := []uint32{0xe05252, 0xf0923a, 0xe8cf45, 0x4cbf6b, 0x4a90e2, 0x9b6ce0}
 	for i, hex := range palette {
 		angle := float64(i) / float64(len(palette)) * 2 * math.Pi
-		g.objects = append(g.objects, object{
-			mesh:     cube,
-			texture:  panelTex,
-			position: mathx.Vec3{float32(math.Cos(angle)) * 3.5, 0.5, float32(math.Sin(angle)) * 3.5},
-			scale:    1,
-			spin:     0.8 + 0.2*float32(i),
-			color:    mathx.Hex(hex),
-		})
+		c := w.Spawn(fmt.Sprintf("cube%d", i), ring.ID()).AddBehaviour(spin(0.8 + 0.2*float32(i)))
+		c.Transform.Position = mathx.Vec3{float32(math.Cos(angle)) * 3.5, 0.5, float32(math.Sin(angle)) * 3.5}
+		c.Renderable = &scene.Renderable{Mesh: cube, Texture: panelTex, Color: mathx.Hex(hex)}
 	}
+
+	w.UpdateTransforms()
 	return g, nil
 }
 
-// addModel loads a glTF file, fits it into a 2-unit box at the origin and
-// uploads one mesh per material, plus its base colour textures.
-func (g *Game) addModel(path string) error {
+// addModel loads a glTF file, fits it into a 2-unit box and adds one child
+// entity per material under parent.
+func (g *Game) addModel(path string, parent scene.ID) error {
 	model, err := asset.LoadGLTF(path)
 	if err != nil {
 		return err
@@ -96,17 +93,17 @@ func (g *Game) addModel(path string) error {
 		}
 	}
 	triangles := 0
-	for _, part := range model.Parts {
+	for i, part := range model.Parts {
 		mesh, err := render.CreateMesh(part.Mesh)
 		if err != nil {
 			return fmt.Errorf("%s: %w", path, err)
 		}
 		mat := model.Materials[part.Material]
-		obj := object{mesh: mesh, scale: 1, spin: 0.3, color: mat.BaseColor}
+		r := &scene.Renderable{Mesh: mesh, Color: mat.BaseColor}
 		if mat.BaseColorImage >= 0 {
-			obj.texture = textures[mat.BaseColorImage]
+			r.Texture = textures[mat.BaseColorImage]
 		}
-		g.objects = append(g.objects, obj)
+		g.world.Spawn(fmt.Sprintf("part%d", i), parent).Renderable = r
 		triangles += len(part.Mesh.Indices) / 3
 	}
 	fmt.Printf("loaded %s: %d parts, %d triangles, %d textures\n", path, len(model.Parts), triangles, len(textures))
@@ -114,8 +111,8 @@ func (g *Game) addModel(path string) error {
 }
 
 func (g *Game) Update(dt float32, in *input.State) {
-	g.time += dt
 	g.camera.update(dt, in)
+	g.world.Update(dt)
 }
 
 // CursorLocked reports whether the mouse should be captured (mouse-look).
@@ -125,7 +122,6 @@ func (g *Game) CursorLocked() bool { return g.camera.locked }
 // appended to out[:0], so the caller can reuse one slice every frame.
 func (g *Game) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
 	view, eye := g.camera.view()
-
 	params := render.FrameParams{
 		ViewProj:     g.camera.lens.Projection(aspect).Mul(view),
 		CameraPos:    eye,
@@ -134,15 +130,14 @@ func (g *Game) Render(aspect float32, out []render.DrawCmd) (render.FrameParams,
 		Ambient:      mathx.Vec3{0.18, 0.2, 0.25},
 		Clear:        mathx.Hex(0x9cc3e6),
 	}
+	return params, g.world.AppendDraws(out[:0])
+}
 
-	out = out[:0]
-	for _, o := range g.objects {
-		model := mathx.Translate(o.position[0], o.position[1], o.position[2]).
-			Mul(mathx.RotateY(g.time * o.spin)).
-			Mul(mathx.Scale(o.scale, o.scale, o.scale))
-		out = append(out, render.DrawCmd{Model: model, Color: o.color, Texture: o.texture, Mesh: o.mesh})
+// spin rotates an entity around world up at a constant rate (radians/second).
+func spin(speed float32) scene.Behaviour {
+	return func(_ *scene.World, e *scene.Entity, dt float32) {
+		e.Transform.Rotation = mathx.AxisAngle(worldUp, speed*dt).Mul(e.Transform.Rotation).Normalize()
 	}
-	return params, out
 }
 
 // scaledUVs multiplies a mesh's texture coordinates, so textures repeat.
