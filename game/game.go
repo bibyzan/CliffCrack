@@ -8,8 +8,10 @@ import (
 	"math"
 	"math/rand/v2"
 	"strings"
+	"time"
 
 	"vkgame/engine/asset"
+	"vkgame/engine/audio"
 	"vkgame/engine/geom"
 	"vkgame/engine/input"
 	"vkgame/engine/mathx"
@@ -35,6 +37,11 @@ type Game struct {
 	cubeTex  render.Texture
 	spawned  []scene.ID
 	rng      *rand.Rand
+
+	sound      *audio.Mixer // nil without audio
+	volume     float32
+	spawnSound *audio.Sound
+	clearSound *audio.Sound
 }
 
 // Stats are engine numbers shown in the debug UI.
@@ -45,8 +52,9 @@ type Stats struct {
 }
 
 type Options struct {
-	Model      string // optional glTF file shown in the centre instead of the sphere
-	ScriptsDir string // optional directory of hot-reloadable behaviours
+	Model      string       // optional glTF file shown in the centre instead of the sphere
+	ScriptsDir string       // optional directory of hot-reloadable behaviours
+	Audio      *audio.Mixer // optional; sounds are skipped when nil
 }
 
 // New builds the demo scene.
@@ -58,6 +66,10 @@ func New(opts Options) (*Game, error) {
 		ambientLevel: 1,
 		timeScale:    1,
 		rng:          rand.New(rand.NewPCG(1, 2)),
+		sound:        opts.Audio,
+		volume:       0.8,
+		spawnSound:   audio.Blip(120*time.Millisecond, 520, 880, 0.6),
+		clearSound:   audio.Blip(250*time.Millisecond, 600, 180, 0.6),
 	}
 	w := g.world
 	modelPath := opts.Model
@@ -184,15 +196,20 @@ func (g *Game) DebugUI(b *ui.Builder, s Stats) {
 	b.Slider("ambient", &g.ambientLevel, 0, 3)
 	b.Slider("time scale", &g.timeScale, 0, 4)
 	b.Checkbox("auto orbit", &g.camera.autoSpin)
+	if g.sound != nil {
+		b.Slider("volume", &g.volume, 0, 1)
+		g.sound.SetVolume(g.volume)
+	}
 	b.Separator()
 	if b.Button("spawn cube") {
 		g.spawnCube()
 	}
-	if b.Button("clear spawned") {
+	if b.Button("clear spawned") && len(g.spawned) > 0 {
 		for _, id := range g.spawned {
 			g.world.Destroy(id)
 		}
 		g.spawned = g.spawned[:0]
+		g.playAt(g.clearSound, mathx.Vec3{})
 	}
 	b.Text("F1: hide this window")
 	b.End()
@@ -213,6 +230,22 @@ func (g *Game) spawnCube() {
 		Color:   mathx.SRGB(g.rng.Float32(), g.rng.Float32(), g.rng.Float32(), 1),
 	}
 	g.spawned = append(g.spawned, e.ID())
+	g.playAt(g.spawnSound, e.Transform.Position)
+}
+
+// playAt plays a sound panned and attenuated by where pos is relative to the camera.
+func (g *Game) playAt(s *audio.Sound, pos mathx.Vec3) {
+	if g.sound == nil {
+		return
+	}
+	view, _ := g.camera.view()
+	p := view.TransformPoint(pos) // camera space: +X right, -Z forward
+	dist := p.Len()
+	pan := float32(0)
+	if dist > 0 {
+		pan = p[0] / dist
+	}
+	g.sound.Play(s, 1/(1+0.1*dist), pan)
 }
 
 // script returns the named script behaviour, or a no-op without scripts.

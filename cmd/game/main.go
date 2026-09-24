@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"vkgame/engine/audio"
 	"vkgame/engine/gfx"
 	"vkgame/engine/input"
 	"vkgame/engine/platform"
@@ -32,6 +33,7 @@ func run() error {
 	screenshot := flag.String("screenshot", "", "render -frames frames, save the last one to this PNG and exit")
 	frames := flag.Int("frames", 120, "number of frames to render before taking -screenshot")
 	ui := flag.Bool("ui", true, "show the debug UI at startup (F1 toggles)")
+	sound := flag.Bool("audio", true, "enable audio output")
 	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
 	flag.Parse()
 
@@ -64,7 +66,19 @@ func run() error {
 
 	win.OnFramebufferResize(render.Resize)
 
-	g, err := game.New(game.Options{Model: *model, ScriptsDir: scriptsDir(*scripts, exeDir)})
+	var mixer *audio.Mixer
+	if *sound {
+		mixer = audio.NewMixer()
+		dev, err := audio.Open(mixer)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "audio disabled:", err)
+			mixer = nil
+		} else {
+			defer dev.Close()
+		}
+	}
+
+	g, err := game.New(game.Options{Model: *model, ScriptsDir: scriptsDir(*scripts, exeDir), Audio: mixer})
 	if err != nil {
 		return err
 	}

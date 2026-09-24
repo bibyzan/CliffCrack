@@ -25,7 +25,7 @@ A game engine with a **Go host** driving a **native C++ Vulkan 1.3 renderer**.
 
 | Tool | Why | Get it |
 |---|---|---|
-| Go 1.23+ | host + gameplay | `winget install GoLang.Go` |
+| Go 1.25+ | host + gameplay | `winget install GoLang.Go` |
 | GCC, CMake, Ninja | cgo needs GCC; builds the renderer | [MSYS2](https://www.msys2.org), then in the *UCRT64* shell: `pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja`, and add `C:\msys64\ucrt64\bin` to `PATH` |
 | Vulkan SDK | `glslc` shader compiler + validation layers | [vulkan.lunarg.com](https://vulkan.lunarg.com/sdk/home) |
 | Git | CMake fetches the C++ dependencies | already installed |
@@ -96,6 +96,7 @@ engine/
   gfx/                 renderer data types (handles, DrawCmd, FrameParams), pure Go
   scene/               entity world: hierarchy, transforms, renderables, behaviours
   ui/                  debug UI builder (immediate-mode widgets -> command list)
+  audio/               Go mixer (voices, pan, loops, WAV, synth blips) -> oto/WASAPI
   platform/            GLFW window; feeds OS events into input
   input/               per-frame keyboard/mouse state (pressed/released edges, deltas)
   camera/              fly + orbit cameras, perspective lens
@@ -120,4 +121,5 @@ cmd/game/            main package
 - [x] Input abstraction + orbit/fly camera controls
 - [x] Entity model: scene.World with hierarchy, generational IDs, behaviours
 - [x] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)
-- [ ] Audio (miniaudio / oto), physics
+- [x] Audio: Go mixer on oto (WASAPI), positional pan/attenuation, `-audio=false` to mute
+- [ ] Physics
