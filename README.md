@@ -1,0 +1,68 @@
+# vkgame
+
+A game engine with a **Go host** driving a **native C++ Vulkan 1.3 renderer**.
+
+```
+┌──────────────────────── game.exe (Go) ────────────────────────┐
+│ cmd/game      main loop                                        │
+│ game/         gameplay: builds a draw list each frame          │
+│ engine/       platform (GLFW window/input), math, render API   │
+└───────────────────────────────┬────────────────────────────────┘
+                                │ ~5 cgo calls per frame, POD only
+┌───────────────────────────────▼────────────────────────────────┐
+│ renderer.dll (C++)   renderer/include/renderer.h is the API    │
+│ Vulkan 1.3: dynamic rendering, sync2, volk, vk-bootstrap, VMA  │
+└────────────────────────────────────────────────────────────────┘
+```
+
+## The boundary rules
+
+1. **Coarse calls.** A handful per frame (`begin`, `draw(list)`, `end`), never one per object.
+2. **Plain data only.** Handles, flat arrays and fixed-size structs. No Go pointers are ever stored on the C side.
+3. **Layouts match exactly.** Each C struct in `renderer.h` has a Go twin (e.g. `RDrawCmd` ↔ `render.DrawCmd`), and the Go twin is size-checked at startup.
+
+## Prerequisites (Windows)
+
+| Tool | Why | Get it |
+|---|---|---|
+| Go 1.23+ | host + gameplay | `winget install GoLang.Go` |
+| GCC, CMake, Ninja | cgo needs GCC; builds the renderer | [MSYS2](https://www.msys2.org), then in the *UCRT64* shell: `pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-ninja`, and add `C:\msys64\ucrt64\bin` to `PATH` |
+| Vulkan SDK | `glslc` shader compiler + validation layers | [vulkan.lunarg.com](https://vulkan.lunarg.com/sdk/home) |
+| Git | CMake fetches the C++ dependencies | already installed |
+
+You don't need to link against the Vulkan loader: volk loads `vulkan-1.dll` from your GPU driver at runtime.
+
+## Build and run
+
+```powershell
+./build.ps1 -Run              # Debug build, validation layers on
+./build.ps1 -Config Release
+build/bin/game.exe -validation=false -vsync=false
+```
+
+The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv`.
+
+## Layout
+
+```
+renderer/            C++ Vulkan renderer (CMake project)
+  include/renderer.h   the C API (the only thing Go sees)
+  src/                 implementation
+  shaders/             GLSL, compiled to SPIR-V at build time
+engine/
+  render/              cgo wrapper around renderer.h
+  platform/            GLFW window, input, time
+  mathx/               Vulkan-convention matrix math
+game/                gameplay code (pure Go, no cgo)
+cmd/game/            main package
+```
+
+## Roadmap
+
+- [ ] Meshes: `r_load_mesh` (glTF via fastgltf) + vertex/index buffers through VMA
+- [ ] Textures: `r_load_texture` + bindless descriptors
+- [ ] Depth buffer, 3D camera
+- [ ] Dear ImGui overlay (renderer side, toggled from Go)
+- [ ] Input abstraction, ECS or entity model on the Go side
+- [ ] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)
+- [ ] Audio (miniaudio / oto), physics

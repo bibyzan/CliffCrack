@@ -1,0 +1,10 @@
+# Build output (CMake build dir, renderer.dll, game.exe, compiled shaders)
+/build/
+*.exe
+*.dll
+*.spv
+
+# Editors / IDEs
+.vscode/
+.idea/
+.vs/
