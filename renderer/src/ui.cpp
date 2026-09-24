@@ -3,6 +3,7 @@
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -15,6 +16,72 @@ VkFormat g_depth_format = VK_FORMAT_UNDEFINED;
 
 float srgb_to_linear(float c) {
     return c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
+}
+
+// The game's look: deep navy translucent panels, rounded corners, warm white
+// text and the ball's orange as the accent. Colours are written in sRGB here
+// and linearised afterwards.
+void apply_style() {
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 12.0f;
+    style.ChildRounding = 8.0f;
+    style.FrameRounding = 8.0f;
+    style.PopupRounding = 8.0f;
+    style.GrabRounding = 8.0f;
+    style.ScrollbarRounding = 8.0f;
+    style.WindowBorderSize = 0.0f;
+    style.FrameBorderSize = 0.0f;
+    style.WindowPadding = ImVec2(18.0f, 14.0f);
+    style.FramePadding = ImVec2(12.0f, 6.0f);
+    style.ItemSpacing = ImVec2(10.0f, 8.0f);
+    style.WindowTitleAlign = ImVec2(0.5f, 0.5f);
+
+    const ImVec4 navy(0.07f, 0.09f, 0.16f, 0.84f);
+    const ImVec4 slate(0.17f, 0.21f, 0.33f, 0.95f);
+    const ImVec4 slate_hi(0.23f, 0.28f, 0.43f, 1.0f);
+    const ImVec4 orange(0.88f, 0.42f, 0.11f, 1.0f);
+    const ImVec4 orange_hi(0.97f, 0.55f, 0.20f, 1.0f);
+    const ImVec4 text(0.97f, 0.96f, 0.93f, 1.0f);
+
+    ImVec4* c = style.Colors;
+    c[ImGuiCol_Text] = text;
+    c[ImGuiCol_TextDisabled] = ImVec4(0.62f, 0.64f, 0.72f, 1.0f);
+    c[ImGuiCol_WindowBg] = navy;
+    c[ImGuiCol_PopupBg] = navy;
+    c[ImGuiCol_Border] = ImVec4(1.0f, 1.0f, 1.0f, 0.08f);
+    c[ImGuiCol_FrameBg] = slate;
+    c[ImGuiCol_FrameBgHovered] = slate_hi;
+    c[ImGuiCol_FrameBgActive] = slate_hi;
+    c[ImGuiCol_TitleBg] = ImVec4(0.10f, 0.13f, 0.22f, 0.95f);
+    c[ImGuiCol_TitleBgActive] = ImVec4(0.13f, 0.17f, 0.28f, 1.0f);
+    c[ImGuiCol_TitleBgCollapsed] = navy;
+    c[ImGuiCol_Button] = slate;
+    c[ImGuiCol_ButtonHovered] = orange;
+    c[ImGuiCol_ButtonActive] = orange_hi;
+    c[ImGuiCol_Header] = slate;
+    c[ImGuiCol_HeaderHovered] = orange;
+    c[ImGuiCol_HeaderActive] = orange_hi;
+    c[ImGuiCol_SliderGrab] = orange;
+    c[ImGuiCol_SliderGrabActive] = orange_hi;
+    c[ImGuiCol_CheckMark] = orange_hi;
+    c[ImGuiCol_Separator] = ImVec4(1.0f, 1.0f, 1.0f, 0.14f);
+    c[ImGuiCol_PlotHistogram] = orange;
+    c[ImGuiCol_PlotHistogramHovered] = orange_hi;
+    c[ImGuiCol_ResizeGrip] = ImVec4(0, 0, 0, 0);
+}
+
+// Uses Windows' Bahnschrift (a sporty DIN face) or Segoe UI if present,
+// otherwise ImGui's built-in font. ImGui 1.92 rasterises glyphs at whatever
+// size is asked for, so scaled text stays sharp.
+void load_font() {
+    ImGuiIO& io = ImGui::GetIO();
+    for (const char* path : {"C:/Windows/Fonts/bahnschrift.ttf", "C:/Windows/Fonts/segoeui.ttf"}) {
+        if (FILE* f = std::fopen(path, "rb")) {
+            std::fclose(f);
+            if (io.Fonts->AddFontFromFileTTF(path, 18.0f)) return;
+        }
+    }
+    io.Fonts->AddFontDefault();
 }
 
 // ImGui's palette is authored in sRGB, but we draw into an sRGB swapchain that
@@ -50,7 +117,9 @@ bool ui_init(const UiInitInfo& info, std::string* error) {
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr; // don't litter imgui.ini next to the exe
     ImGui::StyleColorsDark();
+    apply_style();
     linearize_style();
+    load_font();
 
     // The backend has no prototypes: hand it the loader volk already opened.
     const bool loaded = ImGui_ImplVulkan_LoadFunctions(
@@ -118,6 +187,20 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D extent, const RUIInput& input,
 
     bool        window_open = false;
     bool        collapsed = false; // current window's contents are hidden
+    bool        font_pushed = false;
+    bool        shadowed = false; // text gets a drop shadow (transparent window)
+    bool        centered = false; // centre text and buttons
+    auto        end_window = [&] {
+        if (font_pushed) ImGui::PopFont();
+        ImGui::End();
+        window_open = collapsed = font_pushed = shadowed = centered = false;
+    };
+    // Moves the cursor so an item `width` wide is centred in the window.
+    auto centre = [&](float width) {
+        if (!centered) return;
+        const float avail = ImGui::GetContentRegionAvail().x;
+        if (avail > width) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (avail - width) * 0.5f);
+    };
     std::string label;
     for (uint32_t i = 0; i < count; ++i) {
         RUICmd& c = cmds[i];
@@ -129,24 +212,54 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D extent, const RUIInput& input,
         }
 
         if (c.kind == R_UI_WINDOW) {
-            if (window_open) ImGui::End(); // tolerate a missing R_UI_END
-            if (c.x != 0.0f || c.y != 0.0f) ImGui::SetNextWindowPos(ImVec2(c.x, c.y), ImGuiCond_FirstUseEver);
-            collapsed = !ImGui::Begin(label.empty() ? "##window" : label.c_str(), nullptr,
-                                      ImGuiWindowFlags_AlwaysAutoResize);
+            if (window_open) end_window(); // tolerate a missing R_UI_END
+            const uint32_t   options = static_cast<uint32_t>(c.value);
+            ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize;
+            if (options & R_UI_WINDOW_OVERLAY) {
+                flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings;
+            }
+            if (options & R_UI_WINDOW_NO_BACKGROUND) flags |= ImGuiWindowFlags_NoBackground;
+            if (options & R_UI_WINDOW_ANCHORED) {
+                ImGui::SetNextWindowPos(ImVec2(c.x * io.DisplaySize.x, c.y * io.DisplaySize.y), ImGuiCond_Always,
+                                        ImVec2(c.x, c.y));
+            } else if (c.x != 0.0f || c.y != 0.0f) {
+                ImGui::SetNextWindowPos(ImVec2(c.x, c.y), ImGuiCond_FirstUseEver);
+            }
+            collapsed = !ImGui::Begin(label.empty() ? "##window" : label.c_str(), nullptr, flags);
             window_open = true;
+            shadowed = (options & R_UI_WINDOW_NO_BACKGROUND) != 0;
+            centered = (options & R_UI_WINDOW_CENTERED) != 0;
+            if (c.max > 0.0f && c.max != 1.0f) {
+                ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * c.max); // rasterised at that size
+                font_pushed = true;
+            }
             continue;
         }
         if (c.kind == R_UI_END) {
-            if (window_open) ImGui::End();
-            window_open = collapsed = false;
+            if (window_open) end_window();
             continue;
         }
         if (collapsed) continue;
 
         switch (c.kind) {
-        case R_UI_TEXT:
-            ImGui::TextUnformatted(label.data(), label.data() + label.size());
+        case R_UI_TEXT: {
+            const char* begin = label.data();
+            const char* end = begin + label.size();
+            centre(ImGui::CalcTextSize(begin, end).x);
+            if (shadowed) {
+                const float  off = std::max(1.0f, std::round(ImGui::GetFontSize() / 14.0f));
+                const ImVec2 at = ImGui::GetCursorScreenPos();
+                const float  alpha = c.max > 0.0f ? c.max : 1.0f;
+                ImGui::GetWindowDrawList()->AddText(ImVec2(at.x + off, at.y + off),
+                                                    ImGui::GetColorU32(ImVec4(0.02f, 0.03f, 0.08f, 0.55f * alpha)),
+                                                    begin, end);
+            }
+            if (c.max > 0.0f) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(c.x, c.y, c.min, c.max));
+            ImGui::TextUnformatted(begin, end);
+            if (c.max > 0.0f) ImGui::PopStyleColor();
             break;
+        }
         case R_UI_SLIDER: {
             float v = c.value;
             if (ImGui::SliderFloat(label.c_str(), &v, c.min, c.max)) {
@@ -163,17 +276,32 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D extent, const RUIInput& input,
             }
             break;
         }
-        case R_UI_BUTTON:
-            if (ImGui::Button(label.c_str())) c.result = 1;
+        case R_UI_BUTTON: {
+            const bool   highlight = c.value != 0.0f;
+            const ImVec2 text = ImGui::CalcTextSize(label.c_str(), nullptr, true);
+            centre(c.min > 0.0f ? c.min : text.x + ImGui::GetStyle().FramePadding.x * 2.0f);
+            if (highlight) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
+            if (ImGui::Button(label.c_str(), ImVec2(c.min, c.max))) c.result = 1;
+            if (highlight) ImGui::PopStyleColor();
             break;
+        }
         case R_UI_SEPARATOR:
             ImGui::Separator();
+            break;
+        case R_UI_PROGRESS: {
+            centre(c.min);
+            ImGui::ProgressBar(std::clamp(c.value, 0.0f, 1.0f), ImVec2(c.min > 0.0f ? c.min : -FLT_MIN, c.max),
+                               label.c_str());
+            break;
+        }
+        case R_UI_SAME_LINE:
+            ImGui::SameLine(0.0f, c.value > 0.0f ? c.value : -1.0f);
             break;
         default:
             break;
         }
     }
-    if (window_open) ImGui::End();
+    if (window_open) end_window();
 
     ImGui::Render();
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);

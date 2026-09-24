@@ -34,6 +34,16 @@ func (q Quat) Normalize() Quat {
 	return Quat{q.X / l, q.Y / l, q.Z / l, q.W / l}
 }
 
+// Nlerp blends from a to b by t along the shorter arc (normalised lerp):
+// cheap and smooth for the small angles between neighbouring frames.
+func Nlerp(a, b Quat, t float32) Quat {
+	if a.X*b.X+a.Y*b.Y+a.Z*b.Z+a.W*b.W < 0 {
+		b = Quat{-b.X, -b.Y, -b.Z, -b.W}
+	}
+	s := 1 - t
+	return Quat{a.X*s + b.X*t, a.Y*s + b.Y*t, a.Z*s + b.Z*t, a.W*s + b.W*t}.Normalize()
+}
+
 func (q Quat) Mat4() Mat4 { return FromQuat(q.X, q.Y, q.Z, q.W) }
 
 // Conjugate is the inverse rotation (for unit quaternions).

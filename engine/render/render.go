@@ -36,6 +36,7 @@ type frameParams struct {
 	sunDirection [4]float32
 	sunColor     [4]float32
 	ambient      [4]float32
+	fog          [4]float32
 	clear        [4]float32
 }
 
@@ -140,6 +141,7 @@ func BeginFrame(p FrameParams) bool {
 		sunDirection: vec4(p.SunDirection),
 		sunColor:     vec4(p.SunColor),
 		ambient:      vec4(p.Ambient),
+		fog:          [4]float32{p.FogColor[0], p.FogColor[1], p.FogColor[2], p.FogDensity},
 		clear:        p.Clear,
 	}
 	return C.r_begin_frame((*C.RFrameParams)(unsafe.Pointer(&c))) != 0

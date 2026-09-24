@@ -33,12 +33,19 @@ func run() error {
 	model := flag.String("model", "", "optional .gltf/.glb file to show in the centre of the scene")
 	screenshot := flag.String("screenshot", "", "render -frames frames at a fixed 60 Hz step, save the last one to this PNG and exit")
 	frames := flag.Int("frames", 120, "number of frames to render before taking -screenshot")
-	ui := flag.Bool("ui", true, "show the debug UI at startup (F1 toggles)")
+	mode := flag.String("mode", "menu", `start in "menu", "run" or "demo"`)
+	seed := flag.Uint64("seed", 0, "Run mode course seed (0 = a new course every run)")
+	autopilot := flag.Bool("autopilot", false, "Run mode steers itself (for demos and scripted tests)")
+	ui := flag.Bool("ui", true, "show the Engine Demo's debug UI at startup (F1 toggles the debug window in any mode)")
 	sound := flag.Bool("audio", true, "enable audio output")
 	drop := flag.Int("drop", 0, "number of physics balls to drop at startup")
 	hold := flag.String("hold", "", `keys to hold down every frame, e.g. "W" or "WD" (for scripted tests)`)
 	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
 	flag.Parse()
+	startMode, ok := game.ParseMode(*mode)
+	if !ok {
+		return fmt.Errorf("unknown -mode %q (want menu, run or demo)", *mode)
+	}
 
 	exe, err := os.Executable()
 	if err != nil {
@@ -81,11 +88,18 @@ func run() error {
 		}
 	}
 
-	g, err := game.New(game.Options{
-		Model:      *model,
-		ScriptsDir: scriptsDir(*scripts, exeDir),
-		Audio:      mixer,
-		DropBalls:  *drop,
+	app, err := game.NewApp(game.Options{
+		Start:     startMode,
+		Seed:      *seed,
+		Autopilot: *autopilot,
+		DebugUI:   *ui,
+		Audio:     mixer,
+		Demo: game.DemoOptions{
+			Model:      *model,
+			ScriptsDir: scriptsDir(*scripts, exeDir),
+			Audio:      mixer,
+			DropBalls:  *drop,
+		},
 	})
 	if err != nil {
 		return err
@@ -95,7 +109,6 @@ func run() error {
 	var (
 		rendered    int    // frames completed so far
 		capturePath string // non-empty: capture the next frame to this file
-		showUI      = *ui
 		uiBuilder   uiPkg.Builder
 		uiWantMouse bool    // the debug UI used the mouse last frame
 		fps         float32 // smoothed
@@ -108,13 +121,6 @@ func run() error {
 		platform.PollEvents()
 		for _, k := range strings.ToUpper(*hold) {
 			in.KeyEvent(input.Key(k), true) // letters and space use their ASCII codes
-		}
-		if in.Pressed(input.KeyEscape) {
-			win.SetShouldClose(true)
-		}
-		if in.Pressed(input.KeyF1) {
-			showUI = !showUI
-			uiWantMouse = false
 		}
 		if in.Pressed(input.KeyF12) && capturePath == "" {
 			capturePath = time.Now().Format("screenshot-20060102-150405.png")
@@ -132,8 +138,11 @@ func run() error {
 		if dt > 0 {
 			fps += (1/dt - fps) * 0.05
 		}
-		g.Update(dt, in, !uiWantMouse)
-		win.SetCursorLocked(g.CursorLocked())
+		app.Update(dt, in, !uiWantMouse)
+		if app.Quit() {
+			break
+		}
+		win.SetCursorLocked(app.CursorLocked())
 
 		width, height := win.FramebufferSize()
 		if width == 0 || height == 0 { // minimized: sleep until something happens
@@ -142,7 +151,7 @@ func run() error {
 		}
 
 		var params render.FrameParams
-		params, draws = g.Render(float32(width)/float32(height), draws)
+		params, draws = app.Render(float32(width)/float32(height), draws)
 		if capturePath != "" {
 			render.CaptureNextFrame()
 		}
@@ -150,16 +159,12 @@ func run() error {
 			continue // the capture request carries over to the next frame
 		}
 		render.Draw(draws)
-		if showUI {
-			uiBuilder.Reset()
-			g.DebugUI(&uiBuilder, game.Stats{FPS: fps, FrameMS: 1000 / max(fps, 1), Draws: len(draws)})
-			out := render.UI(uiInput(win, dt), uiBuilder.Cmds, uiBuilder.Labels)
-			uiWantMouse = out.WantMouse != 0
-		}
+		uiBuilder.Reset()
+		app.UI(&uiBuilder, game.Stats{FPS: fps, FrameMS: 1000 / max(fps, 1), Draws: len(draws)})
+		out := render.UI(uiInput(win, dt), uiBuilder.Cmds, uiBuilder.Labels)
+		uiWantMouse = out.WantMouse != 0
 		render.EndFrame()
-		if showUI {
-			uiBuilder.Apply()
-		}
+		uiBuilder.Apply()
 		rendered++
 
 		if capturePath != "" {

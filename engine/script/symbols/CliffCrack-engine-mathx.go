@@ -19,6 +19,7 @@ func init() {
 		"Hex":          reflect.ValueOf(mathx.Hex),
 		"Identity":     reflect.ValueOf(mathx.Identity),
 		"LookAt":       reflect.ValueOf(mathx.LookAt),
+		"Nlerp":        reflect.ValueOf(mathx.Nlerp),
 		"NormalMatrix": reflect.ValueOf(mathx.NormalMatrix),
 		"Ortho":        reflect.ValueOf(mathx.Ortho),
 		"Perspective":  reflect.ValueOf(mathx.Perspective),

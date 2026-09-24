@@ -38,9 +38,16 @@ func checkUnitNormals(t *testing.T, name string, m MeshData) {
 
 func TestShapes(t *testing.T) {
 	shapes := map[string]MeshData{
-		"cube":   Cube(2),
-		"plane":  Plane(10),
-		"sphere": Sphere(1, 24, 12),
+		"cube":      Cube(2),
+		"plane":     Plane(10),
+		"sphere":    Sphere(1, 24, 12),
+		"cone":      Cone(1, 2, 7),
+		"disc":      Disc(1, 16, false),
+		"disc down": Disc(1, 16, true),
+		"icosphere": Icosphere(1, 1),
+		"grid": Grid(5, 4, func(i, j int) mathx.Vec3 {
+			return mathx.Vec3{float32(i), float32(i*j) * 0.1, -float32(j)}
+		}),
 	}
 	for name, m := range shapes {
 		checkWinding(t, name, m)
@@ -79,5 +86,35 @@ func TestFitToSize(t *testing.T) {
 	}
 	if math.Abs(float64(lo[0]+hi[0])) > 1e-6 {
 		t.Errorf("after FitToSize: not centred on X (%v..%v)", lo[0], hi[0])
+	}
+}
+
+func TestGridFacesUp(t *testing.T) {
+	g := Grid(3, 3, func(i, j int) mathx.Vec3 { return mathx.Vec3{float32(i), 0, -float32(j)} })
+	if len(g.Vertices) != 9 || len(g.Indices) != 24 {
+		t.Fatalf("grid has %d verts / %d indices, want 9 / 24", len(g.Vertices), len(g.Indices))
+	}
+	for _, v := range g.Vertices {
+		if v.Normal != (mathx.Vec3{0, 1, 0}) {
+			t.Fatalf("flat grid normal = %v, want +Y", v.Normal)
+		}
+	}
+}
+
+func TestFlipWindingAndIcosphere(t *testing.T) {
+	ico := Icosphere(2, 2)
+	if len(ico.Indices)/3 != 20*16 {
+		t.Errorf("icosphere(2) has %d triangles, want 320", len(ico.Indices)/3)
+	}
+	for _, v := range ico.Vertices {
+		if l := v.Position.Len(); math.Abs(float64(l-2)) > 1e-4 {
+			t.Fatalf("icosphere vertex at radius %v, want 2", l)
+		}
+	}
+	dome := Sphere(1, 8, 4)
+	dome.FlipWinding()
+	checkWinding(t, "flipped sphere", dome)
+	if n := dome.Vertices[len(dome.Vertices)/2].Normal; n.Dot(dome.Vertices[len(dome.Vertices)/2].Position) >= 0 {
+		t.Error("flipped normals should point inwards")
 	}
 }

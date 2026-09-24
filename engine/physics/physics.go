@@ -1,6 +1,6 @@
 // Package physics is a small rigid-body simulation in pure Go: dynamic spheres
-// colliding with each other and with static or kinematic spheres and oriented
-// boxes. It runs at a fixed timestep with sequential impulses (restitution,
+// colliding with each other, with static or kinematic spheres and oriented
+// boxes, and with static heightfield terrain. It runs at a fixed timestep with sequential impulses (restitution,
 // Coulomb friction, rolling via angular velocity).
 //
 // Deliberately small: no dynamic boxes, no broadphase (O(n^2) pairs, fine for
@@ -27,7 +27,13 @@ type Shape int
 const (
 	Sphere Shape = iota
 	Box
+	// Heightfield is static terrain given by a height function over world X/Z
+	// (see Body.Height). Position and Rotation are ignored.
+	Heightfield
 )
+
+// HeightFunc returns the terrain height at world (x, z).
+type HeightFunc func(x, z float32) float32
 
 // Body is a rigid body. Set Position/Rotation/Velocity directly; for kinematic
 // bodies, also set Velocity so collisions feel their motion.
@@ -36,6 +42,7 @@ type Body struct {
 	Shape       Shape
 	Radius      float32    // Sphere
 	HalfExtents mathx.Vec3 // Box
+	Height      HeightFunc // Heightfield
 
 	Position        mathx.Vec3
 	Rotation        mathx.Quat
@@ -53,6 +60,25 @@ type Body struct {
 	Grounded bool
 
 	invMass, invInertia float32
+
+	// State before the latest step, for Interpolated.
+	prevPosition mathx.Vec3
+	prevRotation mathx.Quat
+}
+
+// Interpolated is where to draw the body: between its state before and after
+// the latest step, alpha (see World.Alpha) of the way along. The simulation
+// runs at a fixed rate that doesn't match the display, so drawing the raw
+// state makes fast bodies stutter (some frames run no step, others two).
+func (b *Body) Interpolated(alpha float32) (mathx.Vec3, mathx.Quat) {
+	p := b.prevPosition.Add(b.Position.Sub(b.prevPosition).Scale(alpha))
+	return p, mathx.Nlerp(b.prevRotation, b.Rotation, alpha)
+}
+
+// Teleported tells the body it was moved by hand, so Interpolated doesn't
+// draw it sliding from where it was.
+func (b *Body) Teleported() {
+	b.prevPosition, b.prevRotation = b.Position, b.Rotation
 }
 
 // NewSphere returns a dynamic sphere of the given radius and mass.
@@ -80,6 +106,10 @@ type World struct {
 	Iterations int     // solver passes per step
 	MaxSteps   int     // per Update, to avoid a spiral of death after a hitch
 
+	// Velocity decay per second for dynamic bodies. Angular damping stands in
+	// for rolling resistance.
+	LinearDamping, AngularDamping float32
+
 	bodies  []*Body
 	acc     float32
 	impacts []Impact
@@ -93,7 +123,16 @@ func NewWorld() *World {
 		Iterations: 8,
 		MaxSteps:   8,
 		touched:    map[[2]*Body]bool{},
+
+		LinearDamping:  0.02,
+		AngularDamping: 1.0,
 	}
+}
+
+// NewHeightfield returns static terrain following height.
+func NewHeightfield(height HeightFunc) *Body {
+	return &Body{Kind: Static, Shape: Heightfield, Height: height,
+		Rotation: mathx.QuatIdentity(), Restitution: 0.1, Friction: 0.6}
 }
 
 // Add inserts a body. Dynamic bodies must be spheres with positive mass.
@@ -101,6 +140,8 @@ func (w *World) Add(b *Body) error {
 	switch {
 	case b.Kind == Dynamic && b.Shape != Sphere:
 		return errors.New("physics: dynamic bodies must be spheres")
+	case b.Shape == Heightfield && (b.Kind != Static || b.Height == nil):
+		return errors.New("physics: a heightfield must be static and have a height function")
 	case b.Kind == Dynamic && (b.Mass <= 0 || b.Radius <= 0):
 		return errors.New("physics: dynamic sphere needs positive mass and radius")
 	}
@@ -112,6 +153,7 @@ func (w *World) Add(b *Body) error {
 		b.invMass = 1 / b.Mass
 		b.invInertia = 1 / (0.4 * b.Mass * b.Radius * b.Radius) // solid sphere: 2/5 m r^2
 	}
+	b.Teleported()
 	w.bodies = append(w.bodies, b)
 	return nil
 }
@@ -134,6 +176,10 @@ func (w *World) Bodies() []*Body { return w.bodies }
 
 // Impacts lists the collisions that began during the last Update.
 func (w *World) Impacts() []Impact { return w.impacts }
+
+// Alpha is how far the unsimulated leftover time reaches into the next step
+// (0..1): pass it to Body.Interpolated when drawing.
+func (w *World) Alpha() float32 { return min(w.acc/w.FixedStep, 1) }
 
 // Update advances the simulation by dt using as many fixed steps as fit, and
 // returns how many ran. Leftover time carries over to the next call.
@@ -165,12 +211,13 @@ const (
 	bounceThreshold = 0.5   // m/s; slower hits don't bounce (stops jitter at rest)
 	slop            = 0.002 // allowed penetration before position correction
 	correction      = 0.6   // fraction of penetration removed per step
-	linearDamping   = 0.02  // per second
-	angularDamping  = 1.0   // per second: stands in for rolling resistance
 	impactSpeed     = 0.8   // m/s; slower new contacts aren't reported
 )
 
 func (w *World) step(h float32) {
+	for _, b := range w.bodies {
+		b.prevPosition, b.prevRotation = b.Position, b.Rotation
+	}
 	for _, b := range w.bodies {
 		if b.Kind == Dynamic {
 			b.Velocity = b.Velocity.Add(w.Gravity.Scale(h))
@@ -211,8 +258,8 @@ func (w *World) step(h float32) {
 		pushApart(&contacts[i])
 	}
 
-	lin := float32(math.Exp(-linearDamping * float64(h)))
-	ang := float32(math.Exp(-angularDamping * float64(h)))
+	lin := float32(math.Exp(-float64(w.LinearDamping * h)))
+	ang := float32(math.Exp(-float64(w.AngularDamping * h)))
 	for _, b := range w.bodies {
 		if b.Kind == Static {
 			continue
@@ -260,6 +307,10 @@ func collide(a, b *Body) (contact, bool) {
 	case a.Shape == Sphere && b.Shape == Box:
 		c, ok := boxSphere(b, a)
 		return c, ok
+	case a.Shape == Heightfield && b.Shape == Sphere:
+		return terrainSphere(a, b)
+	case a.Shape == Sphere && b.Shape == Heightfield:
+		return terrainSphere(b, a)
 	}
 	return contact{}, false // box-box: only static/kinematic boxes exist
 }
@@ -317,6 +368,75 @@ func boxSphere(box, s *Body) (contact, bool) {
 	n := box.Rotation.Rotate(nLocal)
 	point := box.Position.Add(box.Rotation.Rotate(closest))
 	return contact{a: box, b: s, normal: n, depth: depth, point: point}, true
+}
+
+// TerrainNormal is the unit surface normal of a height function at (x, z),
+// from central differences over +-eps.
+func TerrainNormal(h HeightFunc, x, z, eps float32) mathx.Vec3 {
+	dx := h(x+eps, z) - h(x-eps, z)
+	dz := h(x, z+eps) - h(x, z-eps)
+	return mathx.Vec3{-dx, 2 * eps, -dz}.Normalize()
+}
+
+// terrainSphere collides a heightfield (a) with a sphere (b).
+//
+// Where the terrain is smooth on the scale of the sphere, it is treated as the
+// tangent plane under the sphere's centre: exact for planes and free of
+// jitter on slopes. Near sharp features (a cliff lip, a crack's wall) that
+// plane is meaningless, so the contact is taken to the nearest of a ring of
+// surface samples instead, which lets balls roll off edges and hit walls. A
+// centre that has sunk below the surface is pushed back up through it.
+func terrainSphere(t, s *Body) (contact, bool) {
+	p, r := s.Position, s.Radius
+	under := mathx.Vec3{p[0], t.Height(p[0], p[2]), p[2]}
+	n := TerrainNormal(t.Height, p[0], p[2], max(0.25, r*0.5))
+	dist := p.Sub(under).Dot(n) // signed distance from the tangent plane
+	if p[1] < under[1] {
+		return contact{a: t, b: s, normal: n, depth: r - dist, point: under}, true
+	}
+	if p[1]-under[1] >= r/max(n[1], 0.2)+r { // well clear of anything below
+		return contact{}, false
+	}
+
+	// Sample a ring at the sphere's footprint; if any sample strays from the
+	// tangent plane, the terrain has an edge here.
+	const samples = 12
+	var ring [samples]mathx.Vec3
+	smooth := true
+	for i := range ring {
+		a := 2 * math.Pi * float64(i) / samples
+		x, z := p[0]+r*float32(math.Cos(a)), p[2]+r*float32(math.Sin(a))
+		ring[i] = mathx.Vec3{x, t.Height(x, z), z}
+		// Height of the tangent plane at (x, z).
+		plane := under[1] - (n[0]*(x-p[0])+n[2]*(z-p[2]))/max(n[1], 1e-3)
+		if abs32(ring[i][1]-plane) > 0.1*r {
+			smooth = false
+		}
+	}
+	if smooth {
+		if dist >= r {
+			return contact{}, false
+		}
+		return contact{a: t, b: s, normal: n, depth: r - dist, point: p.Sub(n.Scale(dist))}, true
+	}
+	nearest, best := under, p.Sub(under).Len()
+	for _, q := range ring {
+		if d := p.Sub(q).Len(); d < best {
+			nearest, best = q, d
+		}
+	}
+	if best >= r || best < 1e-6 {
+		return contact{}, false
+	}
+	n = p.Sub(nearest).Scale(1 / best)
+	return contact{a: t, b: s, normal: n, depth: r - best, point: nearest}, true
+}
+
+func abs32(v float32) float32 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 // velocityAt is the velocity of body b's material at world point p.

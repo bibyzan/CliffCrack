@@ -56,15 +56,25 @@ typedef struct RFrameParams {
     float sun_direction[4];  // world space, *towards* the light, w unused
     float sun_color[4];      // linear RGB * intensity, w unused
     float ambient_color[4];  // linear RGB, w unused
+    float fog_color[4];      // linear RGB haze/horizon colour, w = density per unit (0 = no fog)
     float clear_color[4];    // linear RGBA
 } RFrameParams;
 
+// Per-draw shading options (RDrawCmd::flags).
+enum {
+    R_DRAW_FLAT  = 1 << 0, // faceted: one normal per triangle, from screen-space derivatives
+    R_DRAW_SNOW  = 1 << 1, // colour only faces that point up; steep faces become darker rock
+    R_DRAW_UNLIT = 1 << 2, // colour as-is, no lighting (still fogged)
+    R_DRAW_SKY   = 1 << 3, // procedural sky: fog colour at the horizon to `color` overhead, sun disc; no fog
+};
+
 // One draw of one mesh. Must match render.DrawCmd in Go.
-// Everything before `mesh` (84 bytes) is sent as shader push constants.
+// Everything before `mesh` (88 bytes) is sent as shader push constants.
 typedef struct RDrawCmd {
     float    model[16]; // column-major object-to-world transform
     float    color[4];  // linear RGBA, multiplied with the texture
     RTexture texture;
+    uint32_t flags;     // R_DRAW_*
     RMesh    mesh;
 } RDrawCmd;
 
@@ -74,13 +84,26 @@ typedef struct RDrawCmd {
 // the commands), and widget results are written back into the same commands.
 
 enum {
-    R_UI_WINDOW = 1,    // begin a window: label = title, x/y = initial position (0,0 = auto)
+    R_UI_WINDOW = 1,    // begin a window: label = title, x/y = initial position (0,0 = auto),
+                        //   value = R_UI_WINDOW_* flags, max = font scale (0 = 1)
     R_UI_END,           // end the current window
-    R_UI_TEXT,          // label = text
+    R_UI_TEXT,          // label = text; if max > 0, drawn in colour (x, y, min, max) = linear RGBA
     R_UI_SLIDER,        // float slider: value in/out, min..max
     R_UI_CHECKBOX,      // value in/out: 0 or 1
-    R_UI_BUTTON,        // result = 1 on the frame it was clicked
+    R_UI_BUTTON,        // result = 1 on the frame it was clicked; value != 0 highlights it,
+                        //   min/max = size in pixels (0 = fit the label)
     R_UI_SEPARATOR,
+    R_UI_PROGRESS,      // bar filled to value (0..1), min/max = size in pixels (0 = default), label overlaid
+    R_UI_SAME_LINE,     // keep the next widget on this line, value = spacing in pixels (0 = default)
+};
+
+// Window options, passed in the R_UI_WINDOW command's value.
+enum {
+    R_UI_WINDOW_OVERLAY   = 1 << 0, // no title bar, can't be moved, resized or collapsed
+    R_UI_WINDOW_ANCHORED  = 1 << 1, // x/y are fractions of the screen, kept there every frame;
+                                    //   the same fraction of the window sits on that point
+    R_UI_WINDOW_NO_BACKGROUND = 1 << 2, // transparent; text gets a drop shadow to stay readable
+    R_UI_WINDOW_CENTERED  = 1 << 3,     // centre each line of text and each button in the window
 };
 
 // Must match gfx.UICmd in Go.
@@ -122,8 +145,9 @@ R_API void r_resize(uint32_t width, uint32_t height);
 R_API RMesh r_create_mesh(const RVertex* vertices, uint32_t vertex_count,
                           const uint32_t* indices, uint32_t index_count);
 
-// Frees a mesh. Waits for the GPU to go idle, so avoid calling it every frame.
-// Any meshes still alive at r_shutdown are freed there.
+// Frees a mesh. The handle is invalid immediately; the GPU memory is released
+// once the frames in flight that may use it have finished, so this never
+// stalls and is fine for streaming. Meshes still alive at r_shutdown are freed there.
 R_API void r_destroy_mesh(RMesh mesh);
 
 // Uploads tightly packed 8-bit RGBA pixels and builds a full mip chain
