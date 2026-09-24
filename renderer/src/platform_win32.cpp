@@ -3,6 +3,17 @@
 #define NOMINMAX
 #include <windows.h>
 
-void* platform_module_handle() {
-    return GetModuleHandleW(nullptr);
+#include "vk_common.h"
+
+#include <cstdio>
+
+bool platform_create_surface(VkInstance instance, void* native_window, VkSurfaceKHR* surface) {
+    VkWin32SurfaceCreateInfoKHR info{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
+    info.hinstance = GetModuleHandleW(nullptr);
+    info.hwnd = static_cast<HWND>(native_window);
+    return vkCreateWin32SurfaceKHR(instance, &info, nullptr, surface) == VK_SUCCESS;
+}
+
+void platform_log(const char* message) {
+    std::fprintf(stderr, "%s\n", message);
 }

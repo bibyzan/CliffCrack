@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"CliffCrack/engine/gfx"
+	"CliffCrack/engine/input"
 	"CliffCrack/engine/mathx"
 	"CliffCrack/engine/ui"
 )
@@ -57,8 +58,9 @@ func speedColor(kmh float32) [4]float32 {
 	return lerp(uiAccent, uiHot, (kmh-110)/60)
 }
 
-// UI draws the HUD, zone banners and the game-over card.
-func (r *Run) UI(b *ui.Builder) {
+// UI draws the HUD, zone banners and the game-over card. in picks keyboard
+// or gamepad prompts.
+func (r *Run) UI(b *ui.Builder, in *input.State) {
 	if r.attract {
 		return
 	}
@@ -90,7 +92,9 @@ func (r *Run) UI(b *ui.Builder) {
 	}
 	if r.ride.time < hintTime && !r.ride.crashed {
 		b.Panel("##hint", 0.5, 0.975, hudText, 1.1)
-		b.ColorText(uiMuted, "A / D  steer      W  tuck      S  brake      Space  jump      Esc  menu")
+		b.ColorText(uiMuted, "%s", prompt(in,
+			"A / D  steer      W  tuck      S  brake      Space  jump      Esc  menu",
+			"L-stick  steer      RT  tuck      LT  brake      A  jump      Start  menu"))
 		b.End()
 	}
 	if !r.ride.crashed || r.overTime < overDelay {
@@ -115,12 +119,14 @@ func (r *Run) UI(b *ui.Builder) {
 	if b.MenuButton("Main menu", 300, 46, r.choice == 1) {
 		r.wantsMenu = true
 	}
-	b.ColorText(withAlpha(uiMuted, 0.8), "Enter  choose      R  ride again")
+	b.ColorText(withAlpha(uiMuted, 0.8), "%s", prompt(in,
+		"Enter  choose      R  ride again",
+		"A  choose      Y  ride again      B  menu"))
 	b.End()
 }
 
 // ui draws the title screen and reports a clicked item.
-func (m *menu) ui(b *ui.Builder, best float32) (Mode, bool) {
+func (m *menu) ui(b *ui.Builder, best float32, in *input.State) (Mode, bool) {
 	// One line: the anchored window centres itself (per-item centring would
 	// centre "CLIFF" alone and hang "CRACK" off its end).
 	b.Panel("##title", 0.5, 0.2, hudText&^gfx.UICentered, 5.5)
@@ -146,7 +152,9 @@ func (m *menu) ui(b *ui.Builder, best float32) (Mode, bool) {
 	b.End()
 
 	b.Panel("##keys", 0.5, 0.975, hudText, 1.05)
-	b.ColorText(uiMuted, "W / S  choose      Enter  select      Esc  quit")
+	b.ColorText(uiMuted, "%s", prompt(in,
+		"W / S  choose      Enter  select      Esc  quit",
+		"D-pad  choose      A  select"))
 	b.End()
 	return chosen, clicked
 }

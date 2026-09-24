@@ -19,7 +19,9 @@
 #include <string>
 #include <vector>
 
-void* platform_module_handle(); // platform_win32.cpp
+// platform_win32.cpp / platform_android.cpp
+bool platform_create_surface(VkInstance instance, void* native_window, VkSurfaceKHR* surface);
+void platform_log(const char* message);
 
 namespace {
 
@@ -127,6 +129,12 @@ struct Renderer {
     uint32_t width = 0;
     uint32_t height = 0;
     bool     vsync = true;
+    float    ui_scale = 1.0f;
+
+    // Pre-rotation: the swapchain is created in the panel's native
+    // orientation and everything is drawn rotated by this transform, so the
+    // compositor doesn't have to rotate every frame (Android).
+    VkSurfaceTransformFlagBitsKHR transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
 
     // Frame capture (r_capture_next_frame / r_read_capture).
     bool         capture_requested = false;
@@ -145,8 +153,37 @@ std::string g_error;
 
 bool fail(std::string msg) {
     g_error = std::move(msg);
-    std::fprintf(stderr, "[renderer] %s\n", g_error.c_str());
+    platform_log(("[renderer] " + g_error).c_str());
     return false;
+}
+
+bool rotated_sideways(VkSurfaceTransformFlagBitsKHR t) {
+    return t == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR || t == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR;
+}
+
+// The swapchain extent as the player sees it (see r_display_size).
+VkExtent2D display_extent() {
+    VkExtent2D e = g->swapchain.extent;
+    if (rotated_sideways(g->transform)) std::swap(e.width, e.height);
+    return e;
+}
+
+// Folds the pre-rotation into a column-major view-projection matrix: clip
+// space is turned so the upright image lands correctly in the rotated swapchain.
+void pre_rotate(float m[16], VkSurfaceTransformFlagBitsKHR t) {
+    float c = 1, s = 0; // rotation about clip-space Z
+    switch (t) {
+    case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR:  c = 0;  s = 1;  break;
+    case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: c = -1; s = 0;  break;
+    case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: c = 0;  s = -1; break;
+    default: return;
+    }
+    for (int col = 0; col < 4; ++col) {
+        float* v = m + col * 4;
+        const float x = v[0], y = v[1];
+        v[0] = c * x - s * y;
+        v[1] = s * x + c * y;
+    }
 }
 
 #define VK_TRY(expr)                                                                   \
@@ -707,9 +744,20 @@ void destroy_swapchain_resources() {
 }
 
 bool create_swapchain() {
+    // Draw in the surface's native orientation (see Renderer::transform).
+    VkSurfaceCapabilitiesKHR caps{};
+    VK_TRY(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(g->device.physical_device.physical_device, g->surface, &caps));
+    g->transform = caps.currentTransform;
+    if (!(caps.supportedTransforms & g->transform)) g->transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+
     vkb::SwapchainBuilder builder{g->device, g->surface};
     auto built = builder
                      .set_desired_format({VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
+                     .add_fallback_format({VK_FORMAT_R8G8B8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
+                     .set_pre_transform_flags(g->transform)
+                     .set_composite_alpha_flags(caps.supportedCompositeAlpha & VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+                                                    ? VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR
+                                                    : VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR)
                      .set_desired_present_mode(g->vsync ? VK_PRESENT_MODE_FIFO_KHR : VK_PRESENT_MODE_MAILBOX_KHR)
                      .set_desired_extent(g->width, g->height)
                      .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_SRC_BIT) // frame capture
@@ -721,9 +769,12 @@ bool create_swapchain() {
     vkb::destroy_swapchain(g->swapchain); // no-op on the first call
     g->swapchain = built.value();
 
-    std::printf("[renderer] swapchain %ux%u format %d colorspace %d present mode %d\n",
-                g->swapchain.extent.width, g->swapchain.extent.height, static_cast<int>(g->swapchain.image_format),
-                static_cast<int>(g->swapchain.color_space), static_cast<int>(g->swapchain.present_mode));
+    char msg[160];
+    std::snprintf(msg, sizeof msg, "[renderer] swapchain %ux%u format %d colorspace %d present mode %d transform %d",
+                  g->swapchain.extent.width, g->swapchain.extent.height, static_cast<int>(g->swapchain.image_format),
+                  static_cast<int>(g->swapchain.color_space), static_cast<int>(g->swapchain.present_mode),
+                  static_cast<int>(g->transform));
+    platform_log(msg);
 
     auto images = g->swapchain.get_images();
     auto views = g->swapchain.get_image_views();
@@ -842,10 +893,37 @@ bool record_capture(VkCommandBuffer cmd) {
 // Init / shutdown
 // ---------------------------------------------------------------------------
 
+// Pre-rotation needs the swapchain in the surface's native orientation, but
+// Android reports currentExtent in the window's orientation (1920x1080 on a
+// portrait 1080x1920 panel used in landscape, with a ROTATE_90 transform).
+// vk-bootstrap always uses currentExtent, so it gets its surface capabilities
+// through this wrapper, which swaps the extents for 90/270-degree transforms.
+PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR g_real_surface_caps = nullptr;
+
+VKAPI_ATTR VkResult VKAPI_CALL native_surface_caps(VkPhysicalDevice device, VkSurfaceKHR surface,
+                                                   VkSurfaceCapabilitiesKHR* caps) {
+    const VkResult result = g_real_surface_caps(device, surface, caps);
+    if (result == VK_SUCCESS && rotated_sideways(caps->currentTransform)) {
+        std::swap(caps->currentExtent.width, caps->currentExtent.height);
+        std::swap(caps->minImageExtent.width, caps->minImageExtent.height);
+        std::swap(caps->maxImageExtent.width, caps->maxImageExtent.height);
+    }
+    return result;
+}
+
+VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL bootstrap_proc_addr(VkInstance instance, const char* name) {
+    if (instance && std::strcmp(name, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR") == 0) {
+        g_real_surface_caps = reinterpret_cast<PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR>(
+            vkGetInstanceProcAddr(instance, name));
+        return reinterpret_cast<PFN_vkVoidFunction>(native_surface_caps);
+    }
+    return vkGetInstanceProcAddr(instance, name);
+}
+
 bool init(const RInitDesc& desc) {
     VK_TRY(volkInitialize());
 
-    vkb::InstanceBuilder inst_builder(vkGetInstanceProcAddr);
+    vkb::InstanceBuilder inst_builder(bootstrap_proc_addr);
     inst_builder.set_app_name("Cliff Crack").require_api_version(1, 3, 0);
     if (desc.enable_validation) {
         inst_builder.request_validation_layers().use_default_debug_messenger();
@@ -855,10 +933,9 @@ bool init(const RInitDesc& desc) {
     g->instance = inst.value();
     volkLoadInstance(g->instance.instance);
 
-    VkWin32SurfaceCreateInfoKHR surface_info{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
-    surface_info.hinstance = static_cast<HINSTANCE>(platform_module_handle());
-    surface_info.hwnd = static_cast<HWND>(desc.native_window);
-    VK_TRY(vkCreateWin32SurfaceKHR(g->instance.instance, &surface_info, nullptr, &g->surface));
+    if (!platform_create_surface(g->instance.instance, desc.native_window, &g->surface)) {
+        return fail("surface creation failed");
+    }
 
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
@@ -880,7 +957,7 @@ bool init(const RInitDesc& desc) {
                     .set_required_features_13(features13)
                     .select();
     if (!phys.has_value()) return fail("no suitable GPU: " + phys.error().message());
-    std::printf("[renderer] GPU: %s\n", phys.value().name.c_str());
+    platform_log(("[renderer] GPU: " + phys.value().name).c_str());
     g->max_anisotropy = std::min(16.0f, phys.value().properties.limits.maxSamplerAnisotropy);
 
     auto device = vkb::DeviceBuilder(phys.value()).build();
@@ -919,9 +996,10 @@ bool init(const RInitDesc& desc) {
     ui.image_count = static_cast<uint32_t>(g->images.size());
     ui.color_format = g->swapchain.image_format;
     ui.depth_format = kDepthFormat;
+    ui.scale = g->ui_scale;
     std::string ui_error;
     g->ui_ready = ui_init(ui, &ui_error);
-    if (!g->ui_ready) std::fprintf(stderr, "[renderer] debug UI disabled: %s\n", ui_error.c_str());
+    if (!g->ui_ready) platform_log(("[renderer] debug UI disabled: " + ui_error).c_str());
     return true;
 }
 
@@ -989,6 +1067,7 @@ int32_t r_init(const RInitDesc* desc) {
     g->width = desc->width;
     g->height = desc->height;
     g->vsync = desc->vsync != 0;
+    g->ui_scale = desc->ui_scale > 0.0f ? desc->ui_scale : 1.0f;
     g->shader_dir = desc->shader_dir ? desc->shader_dir : "shaders";
 
     if (!init(*desc)) {
@@ -1002,6 +1081,36 @@ int32_t r_init(const RInitDesc* desc) {
 
 const char* r_last_error(void) {
     return g_error.c_str();
+}
+
+void r_set_window(void* native_window) {
+    if (!g) return;
+    vkDeviceWaitIdle(g->dev);
+    destroy_swapchain_resources();
+    vkb::destroy_swapchain(g->swapchain);
+    g->swapchain = vkb::Swapchain{};
+    if (g->surface) vkb::destroy_surface(g->instance, g->surface);
+    g->surface = VK_NULL_HANDLE;
+    if (!native_window) return;
+    if (!platform_create_surface(g->instance.instance, native_window, &g->surface)) {
+        fail("r_set_window: surface creation failed");
+        return;
+    }
+    VkBool32 supported = VK_FALSE;
+    vkGetPhysicalDeviceSurfaceSupportKHR(g->device.physical_device.physical_device, g->queue_family, g->surface,
+                                         &supported);
+    if (!supported) {
+        fail("r_set_window: the GPU can't present to the new window");
+        return;
+    }
+    if (!create_swapchain()) fail("r_set_window: " + g_error);
+}
+
+void r_display_size(uint32_t* width, uint32_t* height) {
+    VkExtent2D e{0, 0};
+    if (g && g->swapchain.swapchain) e = display_extent();
+    if (width) *width = e.width;
+    if (height) *height = e.height;
 }
 
 void r_resize(uint32_t width, uint32_t height) {
@@ -1095,6 +1204,7 @@ void r_destroy_texture(RTexture handle) {
 int32_t r_begin_frame(const RFrameParams* params) {
     if (!g || g->recording || !params) return 0;
     if (g->width == 0 || g->height == 0) return 0; // minimized
+    if (!g->surface) return 0;                       // no window (Android, in the background)
 
     if (g->swapchain_dirty && !recreate_swapchain()) return 0;
 
@@ -1118,7 +1228,9 @@ int32_t r_begin_frame(const RFrameParams* params) {
     }
 
     // Safe to overwrite: this frame's fence says the GPU is done with its uniforms.
-    std::memcpy(f.uniforms_mapped, params, kFrameUniformSize);
+    RFrameParams uniforms = *params;
+    pre_rotate(uniforms.view_proj, g->transform);
+    std::memcpy(f.uniforms_mapped, &uniforms, kFrameUniformSize);
     vmaFlushAllocation(g->allocator, f.uniforms.allocation, 0, VK_WHOLE_SIZE);
 
     vkResetFences(g->dev, 1, &f.in_flight);
@@ -1198,7 +1310,7 @@ void r_ui(const RUIInput* input, RUICmd* cmds, uint32_t count,
     if (out) *out = {};
     if (!g || !g->recording || !g->ui_ready || !input) return;
     if (count > 0 && !cmds) return;
-    ui_frame(g->frames[g->frame].cmd, g->swapchain.extent, *input, cmds, count,
+    ui_frame(g->frames[g->frame].cmd, display_extent(), g->transform, *input, cmds, count,
              text ? text : "", text ? text_length : 0, out);
     g->scene_state_bound = false; // ImGui bound its own pipeline, sets and viewport
 }

@@ -150,10 +150,13 @@ func (r *Run) Update(dt float32, in *input.State) {
 	case r.attract || r.Autopilot:
 		ctl = autopilot(r.ride)
 	default:
+		// Analog on a pad: the left stick steers, the triggers tuck and brake.
 		ctl = rideInput{
-			steer:    in.Axis(input.KeyA, input.KeyD) + in.Axis(input.KeyLeft, input.KeyRight),
-			throttle: in.Axis(input.KeyS, input.KeyW) + in.Axis(input.KeyDown, input.KeyUp),
-			jump:     in.Pressed(input.KeySpace),
+			steer: in.Axis(input.KeyA, input.KeyD) + in.Axis(input.KeyLeft, input.KeyRight) +
+				in.PadAxis(input.PadLeftX) + padDirX(in),
+			throttle: in.Axis(input.KeyS, input.KeyW) + in.Axis(input.KeyDown, input.KeyUp) +
+				in.PadAxis(input.PadRightTrigger) - in.PadAxis(input.PadLeftTrigger),
+			jump: in.Pressed(input.KeySpace) || in.PadPressed(input.PadA),
 		}
 	}
 	wasCrashed := r.ride.crashed
@@ -199,17 +202,17 @@ func (r *Run) Update(dt float32, in *input.State) {
 	if r.overTime < overDelay {
 		return
 	}
-	// Game-over card: W/S or arrows choose, Enter/Space confirm, R retries.
-	if in.Pressed(input.KeyW) || in.Pressed(input.KeyUp) || in.Pressed(input.KeyS) || in.Pressed(input.KeyDown) {
+	// Game-over card: up/down choose, Enter/A confirm, R/Y ride again, B menu.
+	if navY(in) != 0 {
 		r.choice = 1 - r.choice
 		r.play(r.sfx.move, 1)
 	}
-	if in.Pressed(input.KeyR) || ((in.Pressed(input.KeyEnter) || in.Pressed(input.KeySpace)) && r.choice == 0) {
+	if in.Pressed(input.KeyR) || in.PadPressed(input.PadY) || (confirmPressed(in) && r.choice == 0) {
 		r.play(r.sfx.pick, 1)
 		r.start(false)
 		return
 	}
-	if (in.Pressed(input.KeyEnter) || in.Pressed(input.KeySpace)) && r.choice == 1 {
+	if in.PadPressed(input.PadB) || (confirmPressed(in) && r.choice == 1) {
 		r.play(r.sfx.pick, 1)
 		r.wantsMenu = true
 	}

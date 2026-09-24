@@ -1,9 +1,15 @@
-// Package platform owns the OS window, input events and time, via GLFW.
+//go:build !android
+
+// Package platform owns the OS window, input events (keyboard, mouse,
+// gamepad) and time: via GLFW on desktop, via NativeActivity on Android.
 package platform
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"runtime"
+	"unsafe"
 
 	"github.com/go-gl/glfw/v3.3/glfw"
 
@@ -19,7 +25,11 @@ type Window struct {
 	win          *glfw.Window
 	input        input.State
 	cursorLocked bool
+	pad          glfw.Joystick // the gamepad being read, or -1
 }
+
+// current is the window whose input PollEvents feeds with gamepad state.
+var current *Window
 
 func NewWindow(title string, width, height int) (*Window, error) {
 	if err := glfw.Init(); err != nil {
@@ -33,7 +43,8 @@ func NewWindow(title string, width, height int) (*Window, error) {
 		glfw.Terminate()
 		return nil, fmt.Errorf("create window: %w", err)
 	}
-	w := &Window{win: win}
+	w := &Window{win: win, pad: -1}
+	current = w
 
 	win.SetKeyCallback(func(_ *glfw.Window, key glfw.Key, _ int, action glfw.Action, _ glfw.ModifierKey) {
 		w.input.KeyEvent(input.Key(key), action != glfw.Release)
@@ -107,8 +118,65 @@ func (w *Window) OnFramebufferResize(fn func(width, height int)) {
 	})
 }
 
-func PollEvents() { glfw.PollEvents() }
+// PollEvents processes pending window events and reads the gamepad.
+func PollEvents() {
+	glfw.PollEvents()
+	if current != nil {
+		current.pollGamepad()
+	}
+}
+
 func WaitEvents() { glfw.WaitEvents() }
+
+// pollGamepad feeds the first connected gamepad's state into the input. GLFW
+// maps controllers to a standard Xbox-style layout (it ships SDL's mapping
+// database), so buttons and axes convert with plain casts.
+func (w *Window) pollGamepad() {
+	if w.pad < 0 || !w.pad.IsGamepad() {
+		w.pad = -1
+		for j := glfw.Joystick1; j <= glfw.JoystickLast; j++ {
+			if j.IsGamepad() {
+				w.pad = j
+				break
+			}
+		}
+		if w.pad < 0 {
+			return
+		}
+	}
+	state := w.pad.GetGamepadState()
+	if state == nil {
+		return
+	}
+	for b, action := range state.Buttons {
+		w.input.PadEvent(input.PadButton(b), action == glfw.Press)
+	}
+	for a, v := range state.Axes {
+		if a := input.PadAxis(a); a == input.PadLeftTrigger || a == input.PadRightTrigger {
+			v = (v + 1) / 2 // GLFW triggers rest at -1
+		}
+		w.input.PadAxisEvent(input.PadAxis(a), v)
+	}
+}
+
+// ShaderDir is where the compiled shaders are: next to the executable.
+func ShaderDir() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(exe), "shaders"), nil
+}
+
+// UIScale is how much to enlarge the UI for the screen (1 on desktop).
+func UIScale() float32 { return 1 }
+
+// OnNativeWindow registers a function called when the OS replaces or removes
+// the native window (Android only; desktop windows live as long as the game).
+func (w *Window) OnNativeWindow(func(unsafe.Pointer)) {}
+
+// Exit ends the process once the game loop has returned (Android only).
+func Exit() {}
 
 // Time returns seconds since the platform was initialised.
 func Time() float64 { return glfw.GetTime() }

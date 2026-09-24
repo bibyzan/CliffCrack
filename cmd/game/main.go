@@ -1,5 +1,8 @@
 // Command game is the host executable: Go owns main, the loop and gameplay;
-// renderer.dll does the Vulkan work.
+// renderer.dll (librenderer.so on Android) does the Vulkan work.
+//
+// On Android this package is built as a shared library loaded by
+// NativeActivity; main_android.go starts run from there instead of main.
 package main
 
 import (
@@ -28,7 +31,7 @@ func main() {
 }
 
 func run() error {
-	validation := flag.Bool("validation", true, "enable Vulkan validation layers (if installed)")
+	validation := flag.Bool("validation", validationDefault, "enable Vulkan validation layers (if installed)")
 	vsync := flag.Bool("vsync", true, "wait for vertical sync")
 	model := flag.String("model", "", "optional .gltf/.glb file to show in the centre of the scene")
 	screenshot := flag.String("screenshot", "", "render -frames frames at a fixed 60 Hz step, save the last one to this PNG and exit")
@@ -52,7 +55,10 @@ func run() error {
 		return err
 	}
 	exeDir := filepath.Dir(exe)
-	shaderDir := filepath.Join(exeDir, "shaders")
+	shaderDir, err := platform.ShaderDir()
+	if err != nil {
+		return err
+	}
 
 	win, err := platform.NewWindow("Cliff Crack", 1280, 720)
 	if err != nil {
@@ -68,6 +74,7 @@ func run() error {
 		ShaderDir:  shaderDir,
 		Validation: *validation,
 		VSync:      *vsync,
+		UIScale:    platform.UIScale(),
 	})
 	if err != nil {
 		return err
@@ -75,6 +82,7 @@ func run() error {
 	defer render.Shutdown() // runs before win.Destroy: surface goes before window
 
 	win.OnFramebufferResize(render.Resize)
+	win.OnNativeWindow(render.SetWindow)
 
 	var mixer *audio.Mixer
 	if *sound {
@@ -144,9 +152,9 @@ func run() error {
 		}
 		win.SetCursorLocked(app.CursorLocked())
 
-		width, height := win.FramebufferSize()
-		if width == 0 || height == 0 { // minimized: sleep until something happens
-			platform.WaitEvents()
+		width, height := render.DisplaySize() // what the player sees (can be rotated from the window)
+		if fw, fh := win.FramebufferSize(); fw == 0 || fh == 0 || width == 0 || height == 0 {
+			platform.WaitEvents() // minimized or in the background: sleep until something happens
 			continue
 		}
 

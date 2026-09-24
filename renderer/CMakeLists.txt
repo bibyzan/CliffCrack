@@ -3,9 +3,18 @@ project(cliffcrack_renderer LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# The static dependencies end up inside a shared library (required on Android).
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-if(NOT WIN32)
-    message(FATAL_ERROR "Only the Win32 surface is implemented so far.")
+if(WIN32)
+    set(PLATFORM_SOURCE src/platform_win32.cpp)
+    set(VK_PLATFORM_DEFINE VK_USE_PLATFORM_WIN32_KHR)
+elseif(ANDROID)
+    # Configure with the NDK's toolchain file (see build-android.ps1).
+    set(PLATFORM_SOURCE src/platform_android.cpp)
+    set(VK_PLATFORM_DEFINE VK_USE_PLATFORM_ANDROID_KHR)
+else()
+    message(FATAL_ERROR "Only Windows and Android surfaces are implemented so far.")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -45,8 +54,9 @@ FetchContent_MakeAvailable(vulkan_headers)
 
 # Point volk at the fetched headers so every library agrees on one header version.
 set(VULKAN_HEADERS_INSTALL_DIR "${vulkan_headers_SOURCE_DIR}" CACHE PATH "" FORCE)
-set(VOLK_STATIC_DEFINES "VK_USE_PLATFORM_WIN32_KHR" CACHE STRING "" FORCE)
+set(VOLK_STATIC_DEFINES "${VK_PLATFORM_DEFINE}" CACHE STRING "" FORCE)
 set(VK_BOOTSTRAP_TEST OFF CACHE BOOL "" FORCE)
+set(VK_BOOTSTRAP_POSITION_INDEPENDENT_CODE ON CACHE BOOL "" FORCE) # it ignores CMAKE_POSITION_INDEPENDENT_CODE
 
 FetchContent_MakeAvailable(volk vk_bootstrap vma imgui)
 
@@ -71,7 +81,7 @@ add_library(renderer SHARED
     src/ui.cpp
     src/ui.h
     src/vma_impl.cpp
-    src/platform_win32.cpp
+    ${PLATFORM_SOURCE}
     src/vk_common.h
     include/renderer.h)
 
@@ -85,13 +95,18 @@ target_link_libraries(renderer PRIVATE
     vk-bootstrap::vk-bootstrap
     GPUOpen::VulkanMemoryAllocator
     imgui)
+if(ANDROID)
+    target_link_libraries(renderer PRIVATE android log)
+endif()
 
 # Output renderer.dll (+ import lib) into build/bin with no "lib" prefix, so the
-# Go side can link with -lrenderer and the exe can sit next to the DLL.
+# Go side can link with -lrenderer and the exe can sit next to the DLL. On
+# Android it's the usual librenderer.so, packed into the APK beside the game.
 set(VKGAME_BIN_DIR "${CMAKE_BINARY_DIR}/bin")
+if(WIN32)
+    set_target_properties(renderer PROPERTIES PREFIX "" IMPORT_PREFIX "")
+endif()
 set_target_properties(renderer PROPERTIES
-    PREFIX ""
-    IMPORT_PREFIX ""
     RUNTIME_OUTPUT_DIRECTORY "${VKGAME_BIN_DIR}"
     LIBRARY_OUTPUT_DIRECTORY "${VKGAME_BIN_DIR}"
     ARCHIVE_OUTPUT_DIRECTORY "${VKGAME_BIN_DIR}")

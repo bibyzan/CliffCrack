@@ -13,7 +13,19 @@ const (
 	flySpeed         = 5.0    // units per second; Shift triples it
 	autoOrbitSpeed   = 0.15   // radians per second while idle
 	autoOrbitDelay   = 3.0    // seconds without input before the orbit resumes
+	padOrbitSpeed    = 2.5    // radians per second at full right-stick tilt
 )
+
+// boolAxis is 1 when only pos is held, -1 when only neg is, else 0.
+func boolAxis(pos, neg bool) float32 {
+	switch {
+	case pos && !neg:
+		return 1
+	case neg && !pos:
+		return -1
+	}
+	return 0
+}
 
 // cameraRig switches between an orbit camera (default) and a fly camera.
 //
@@ -82,6 +94,15 @@ func (r *cameraRig) update(dt float32, in *input.State, mouseFree bool) {
 	}
 	if s := in.Scroll(); s != 0 && mouseFree {
 		r.orbit.Zoom(float32(math.Pow(0.9, s)))
+		r.idle = 0
+	}
+	// Gamepad: the right stick orbits, the shoulders zoom.
+	if x, y := in.PadStick(true); x != 0 || y != 0 {
+		r.orbit.Rotate(x*padOrbitSpeed*dt, -y*padOrbitSpeed*0.7*dt)
+		r.idle = 0
+	}
+	if zoom := boolAxis(in.PadDown(input.PadRB), in.PadDown(input.PadLB)); zoom != 0 {
+		r.orbit.Zoom(float32(math.Pow(0.3, float64(zoom*dt))))
 		r.idle = 0
 	}
 	if r.autoSpin && r.idle >= autoOrbitDelay {

@@ -9,3 +9,7 @@
 .idea/
 .vs/
 /build-dev/
+
+# Android build (build-android.ps1)
+/build-android/
+*.apk

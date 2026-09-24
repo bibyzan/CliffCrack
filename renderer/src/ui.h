@@ -16,6 +16,7 @@ struct UiInitInfo {
     uint32_t         image_count;
     VkFormat         color_format;
     VkFormat         depth_format;
+    float            scale; // UI size multiplier (1 = desktop)
 };
 
 // Returns false (with a message in *error) if the UI can't be created; the
@@ -26,9 +27,13 @@ bool ui_init(const UiInitInfo& info, std::string* error);
 void ui_set_formats(VkFormat color_format, VkFormat depth_format);
 
 // Runs the command list and records the UI into cmd, which must be inside a
-// dynamic rendering pass with the formats given above.
-void ui_frame(VkCommandBuffer cmd, VkExtent2D extent, const RUIInput& input,
-              RUICmd* cmds, uint32_t count, const char* text, uint32_t text_length, RUIOutput* out);
+// dynamic rendering pass with the formats given above. The UI is laid out in
+// `display` (what the player sees); `transform` is the swapchain's
+// pre-rotation, applied to the finished draw data so it lands upright in the
+// rotated image.
+void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBitsKHR transform,
+              const RUIInput& input, RUICmd* cmds, uint32_t count, const char* text, uint32_t text_length,
+              RUIOutput* out);
 
 // The device must be idle.
 void ui_shutdown();

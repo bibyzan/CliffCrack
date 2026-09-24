@@ -44,6 +44,8 @@ type Demo struct {
 	cubes    map[scene.ID]bool    // the ring cubes, which wobble when bumped
 	bumpedAt map[scene.ID]float32 // world time of each cube's last bump
 
+	in *input.State // the last frame's input, for choosing prompts
+
 	sound       *audio.Mixer // nil without audio
 	volume      float32
 	dropSound   *audio.Sound
@@ -199,6 +201,7 @@ func (g *Demo) addModel(path string, parent scene.ID) error {
 
 // Update advances the game. mouseFree is false while the debug UI has the mouse.
 func (g *Demo) Update(dt float32, in *input.State, mouseFree bool) {
+	g.in = in
 	if g.scripts != nil {
 		g.scripts.Poll() // errors are logged by the host
 	}
@@ -247,8 +250,14 @@ func (g *Demo) DebugUI(b *ui.Builder, s Stats) {
 		g.clearBalls()
 		g.playAtVolume(g.clearSound, mathx.Vec3{}, 1)
 	}
-	b.Text("WASD roll, Space jump, R reset")
-	b.Text("F1: hide this window, Esc: main menu")
+	if g.in != nil && g.in.UsingPad() {
+		b.Text("L-stick roll, R-stick camera, LB/RB zoom")
+		b.Text("A jump, X drop ball, Y reset")
+		b.Text("View: hide this window, B: main menu")
+	} else {
+		b.Text("WASD roll, Space jump, R reset")
+		b.Text("F1: hide this window, Esc: main menu")
+	}
 	b.End()
 }
 

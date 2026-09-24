@@ -24,6 +24,7 @@ const (
 	rideSteer       = 17.0  // m/s^2 of sideways push on the ground
 	rideAirSteer    = 5.0   // ... and in the air
 	rideSkipTime    = 0.3   // seconds after touching down that still count as on the ground (skipping over moguls)
+	rideJumpCool    = 0.35  // seconds before another jump: the ball can still touch the snow for a step after one
 	rideJump        = 6.5   // m/s straight up
 	rideStallSpeed  = 1.5   // slower than this for rideStallTime ends the run
 	rideStallTime   = 2.5   // seconds
@@ -60,28 +61,30 @@ type ride struct {
 	bodies  map[int][]*physics.Body // obstacle colliders by chunk index
 	chunkFn func(int) []course.Obstacle
 
-	heading  mathx.Vec3 // smoothed horizontal direction of travel
-	distance float32    // furthest s reached
-	time     float32
-	stalled  float32 // seconds spent below rideStallSpeed
-	airborne float32 // seconds since the ball last touched the ground
-	landed   bool    // the ball has touched down after the drop
-	crashed  bool
-	cause    string
-	crashPos mathx.Vec3
-	debris   []*physics.Body // the ball's pieces after a crash
-	lane     float32         // autopilot: chosen offset from the centre line
+	heading   mathx.Vec3 // smoothed horizontal direction of travel
+	distance  float32    // furthest s reached
+	time      float32
+	stalled   float32 // seconds spent below rideStallSpeed
+	airborne  float32 // seconds since the ball last touched the ground
+	sinceJump float32 // seconds since the last jump
+	landed    bool    // the ball has touched down after the drop
+	crashed   bool
+	cause     string
+	crashPos  mathx.Vec3
+	debris    []*physics.Body // the ball's pieces after a crash
+	lane      float32         // autopilot: chosen offset from the centre line
 }
 
 // newRide starts a run on c. obstacles returns a chunk's obstacles (cached
 // by the caller, which usually also builds the chunk's meshes).
 func newRide(c *course.Course, obstacles func(index int) []course.Obstacle) *ride {
 	r := &ride{
-		course:  c,
-		phys:    physics.NewWorld(),
-		bodies:  map[int][]*physics.Body{},
-		chunkFn: obstacles,
-		heading: mathx.Vec3{0, 0, -1},
+		course:    c,
+		phys:      physics.NewWorld(),
+		bodies:    map[int][]*physics.Body{},
+		chunkFn:   obstacles,
+		heading:   mathx.Vec3{0, 0, -1},
+		sinceJump: rideJumpCool,
 	}
 	r.phys.AngularDamping = 0.15 // snow is fast: little rolling resistance
 	r.phys.LinearDamping = 0     // air drag is applied by the ride itself
@@ -198,7 +201,9 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 	}
 	b.Velocity = b.Velocity.Scale(1 / (1 + drag*speed*dt))
 
-	if in.jump && onGround {
+	r.sinceJump += dt
+	if in.jump && onGround && r.sinceJump > rideJumpCool {
+		r.sinceJump = 0
 		b.Velocity[1] = max(b.Velocity[1], 0) + rideJump
 		r.airborne = rideSkipTime // a jump leaves the ground: no second jump off the same contact
 		ev.jumped = true

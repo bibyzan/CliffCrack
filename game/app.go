@@ -64,6 +64,7 @@ type App struct {
 
 	pending Mode // a menu click, applied on the next Update
 	picked  bool
+	in      *input.State // this frame's input, for choosing button prompts
 }
 
 func NewApp(opts Options) (*App, error) {
@@ -109,7 +110,8 @@ func (a *App) Quit() bool { return a.quit }
 
 // Update advances the active mode. mouseFree is false while the UI has the mouse.
 func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
-	if in.Pressed(input.KeyF1) {
+	a.in = in
+	if debugPressed(in) {
 		a.debug[a.mode] = !a.debug[a.mode]
 	}
 	if a.picked {
@@ -128,13 +130,13 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 			a.choose(item)
 		}
 	case ModeRun:
-		if in.Pressed(input.KeyEscape) || a.run.wantsMenu {
+		if pausePressed(in) || a.run.wantsMenu {
 			a.choose(ModeMenu)
 			return
 		}
 		a.run.Update(dt, in)
 	case ModeDemo:
-		if in.Pressed(input.KeyEscape) {
+		if pausePressed(in) || in.PadPressed(input.PadB) {
 			a.choose(ModeMenu)
 			return
 		}
@@ -171,11 +173,11 @@ func (a *App) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, 
 func (a *App) UI(b *ui.Builder, s Stats) {
 	switch a.mode {
 	case ModeMenu:
-		if item, ok := a.menu.ui(b, a.run.best); ok {
+		if item, ok := a.menu.ui(b, a.run.best, a.in); ok {
 			a.pending, a.picked = item, true
 		}
 	case ModeRun:
-		a.run.UI(b)
+		a.run.UI(b, a.in)
 		if a.debug[ModeRun] {
 			a.run.DebugUI(b, s)
 		}
@@ -214,18 +216,15 @@ func newMenu() menu {
 
 // update handles keyboard navigation and reports a chosen item.
 func (m *menu) update(in *input.State, r *Run) (Mode, bool) {
-	step := 0
-	if in.Pressed(input.KeyW) || in.Pressed(input.KeyUp) {
-		step = -1
-	}
-	if in.Pressed(input.KeyS) || in.Pressed(input.KeyDown) || in.Pressed(input.KeyTab) {
+	step := navY(in)
+	if in.Pressed(input.KeyTab) {
 		step = 1
 	}
 	if step != 0 {
 		m.choice = (m.choice + step + len(menuItems)) % len(menuItems)
 		r.play(m.move, 1)
 	}
-	if in.Pressed(input.KeyEnter) || in.Pressed(input.KeySpace) {
+	if confirmPressed(in) {
 		r.play(m.pick, 1)
 		return menuItems[m.choice].mode, true
 	}

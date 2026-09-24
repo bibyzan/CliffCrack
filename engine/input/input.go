@@ -1,4 +1,4 @@
-// Package input tracks keyboard and mouse state per frame. It is pure Go: the
+// Package input tracks keyboard, mouse and gamepad state per frame. It is pure Go: the
 // platform layer feeds it events, gameplay code queries it.
 package input
 
@@ -97,12 +97,16 @@ type State struct {
 	haveMouse      bool // false until the first move after start/reset
 	dx, dy         float64
 	scroll         float64
+
+	pad padState
 }
 
 // NewFrame starts a new frame: edges and deltas are relative to this point.
 func (s *State) NewFrame() {
 	s.prevKeys = s.keys
 	s.prevButtons = s.buttons
+	s.pad.prevButtons = s.pad.buttons
+	s.pad.prevAxes = s.pad.axes
 	s.dx, s.dy, s.scroll = 0, 0, 0
 }
 
@@ -110,6 +114,7 @@ func (s *State) NewFrame() {
 func (s *State) KeyEvent(k Key, down bool) {
 	if k >= 0 && k < keyCount {
 		s.keys[k] = down
+		s.pad.usingPad = false
 	}
 }
 
@@ -117,6 +122,7 @@ func (s *State) KeyEvent(k Key, down bool) {
 func (s *State) ButtonEvent(b MouseButton, down bool) {
 	if b >= 0 && b < buttonCount {
 		s.buttons[b] = down
+		s.pad.usingPad = false
 	}
 }
 
@@ -141,10 +147,13 @@ func (s *State) ResetMouse() {
 	s.haveMouse = false
 }
 
-// ReleaseAll marks every key and button as up (e.g. when the window loses focus).
+// ReleaseAll marks every key and button as up and centres the gamepad (e.g.
+// when the window loses focus).
 func (s *State) ReleaseAll() {
 	s.keys = [keyCount]bool{}
 	s.buttons = [buttonCount]bool{}
+	s.pad.buttons = [padButtonCount]bool{}
+	s.pad.axes = [padAxisCount]float32{}
 }
 
 func (s *State) Down(k Key) bool     { return valid(k) && s.keys[k] }

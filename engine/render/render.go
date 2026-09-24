@@ -4,7 +4,8 @@ package render
 
 /*
 #cgo CFLAGS: -I${SRCDIR}/../../renderer/include
-#cgo LDFLAGS: -L${SRCDIR}/../../build/bin -lrenderer
+#cgo windows LDFLAGS: -L${SRCDIR}/../../build/bin -lrenderer
+#cgo android LDFLAGS: -L${SRCDIR}/../../build-android/bin -lrenderer
 #include <stdlib.h>
 #include "renderer.h"
 */
@@ -61,6 +62,7 @@ type Config struct {
 	ShaderDir     string         // directory holding the compiled *.spv files
 	Validation    bool           // enable Vulkan validation layers if installed
 	VSync         bool
+	UIScale       float32 // UI size multiplier for dense screens (0 = 1)
 }
 
 func Init(cfg Config) error {
@@ -74,6 +76,7 @@ func Init(cfg Config) error {
 		shader_dir:        shaderDir,
 		enable_validation: cBool(cfg.Validation),
 		vsync:             cBool(cfg.VSync),
+		ui_scale:          C.float(cfg.UIScale),
 	}
 	if C.r_init(&desc) == 0 {
 		return fmt.Errorf("renderer init: %w", lastError())
@@ -83,6 +86,23 @@ func Init(cfg Config) error {
 
 func Resize(width, height int) {
 	C.r_resize(C.uint32_t(width), C.uint32_t(height))
+}
+
+// SetWindow replaces the native window the renderer presents to (Android
+// recreates it when the app returns from the background); nil drops the
+// surface and frames are skipped until a window is set again.
+func SetWindow(native unsafe.Pointer) {
+	C.r_set_window(native)
+}
+
+// DisplaySize is the size of the picture the player sees, in pixels: use it
+// for the aspect ratio and the UI. It can differ from the window's buffer size
+// when the renderer draws rotated (Android pre-rotation). 0, 0 while there is
+// no swapchain.
+func DisplaySize() (width, height int) {
+	var w, h C.uint32_t
+	C.r_display_size(&w, &h)
+	return int(w), int(h)
 }
 
 // CreateMesh uploads mesh data to the GPU (blocking). The data is copied, so

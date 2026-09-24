@@ -84,7 +84,7 @@ func (g *Demo) updatePlayer(dt float32, in *input.State) {
 	if b == nil {
 		return
 	}
-	if in.Pressed(input.KeyR) || b.Position[1] < -5 {
+	if in.Pressed(input.KeyR) || in.PadPressed(input.PadY) || b.Position[1] < -5 {
 		b.Position, b.Velocity, b.AngularVelocity = playerSpawn, mathx.Vec3{}, mathx.Vec3{}
 		b.Teleported()
 	}
@@ -95,11 +95,18 @@ func (g *Demo) updatePlayer(dt float32, in *input.State) {
 	// Directions are relative to where the camera looks, flattened onto the ground.
 	forward := camera.Direction(g.camera.orbit.Yaw, 0)
 	right := forward.Cross(mathx.Vec3{0, 1, 0}).Normalize()
-	move := forward.Scale(in.Axis(input.KeyS, input.KeyW)).Add(right.Scale(in.Axis(input.KeyA, input.KeyD)))
+	stickX, stickY := in.PadStick(false)
+	ahead := in.Axis(input.KeyS, input.KeyW) - stickY - padDirY(in) // stick +Y is down
+	side := in.Axis(input.KeyA, input.KeyD) + stickX + padDirX(in)
+	move := forward.Scale(ahead).Add(right.Scale(side))
 	if l := move.Len(); l > 1 {
 		move = move.Scale(1 / l)
 	}
-	jump := in.Pressed(input.KeySpace)
+	jump := in.Pressed(input.KeySpace) || in.PadPressed(input.PadA)
+	if in.PadPressed(input.PadX) {
+		g.dropBall()
+		g.playAtVolume(g.dropSound, mathx.Vec3{0, 6, 0}, 1)
+	}
 	if move.Len() > 0 || jump {
 		g.camera.idle = 0 // no auto-orbit while playing: controls are camera-relative
 	}

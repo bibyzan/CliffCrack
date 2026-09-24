@@ -81,6 +81,68 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | Any | **F1** | show / hide the debug window (stats and tuning; Run's has the seed and an autopilot toggle) |
 | | **F12** | save `screenshot-<time>.png` (read back from the GPU) |
 
+#### Gamepad
+
+Any controller GLFW recognises works on the desktop, and on Android any gamepad works,
+including a handheld's built-in controller. The layout is Xbox-style: A is the bottom face
+button. The on-screen hints switch to gamepad buttons as soon as you use one.
+
+| Where | Input | Action |
+|---|---|---|
+| Menu | d-pad / left stick | choose |
+| | **A** / **Start** | select |
+| Run | left stick, d-pad | steer (analog on the stick) |
+| | **RT** / **LT** | tuck / brake (analog) |
+| | **A** | jump |
+| | **Start** | back to the menu |
+| Wipeout card | d-pad, **A** | choose |
+| | **Y** / **B** | ride again / main menu |
+| Engine Demo | left stick | roll the ball |
+| | right stick, **LB / RB** | orbit, zoom |
+| | **A** / **X** / **Y** | jump / drop a ball / reset |
+| | **B** / **Start** | back to the menu |
+| Any | **View** (Select) | show / hide the debug window |
+
+On Android the back button works like Esc, and touching the screen works like the mouse,
+so you can tap menu buttons.
+
+## Android
+
+`build-android.ps1` builds an arm64 APK. It needs the Android SDK with an NDK, build-tools
+and a platform, plus a JDK (Android Studio installs all of these). It finds the SDK through
+`ANDROID_HOME` or the usual install locations.
+
+```powershell
+./build-android.ps1 -Run        # build, install on the USB-connected device and start it
+./build-android.ps1 -Run -Log   # ... and follow the game's log (logcat, tag CliffCrack)
+```
+
+There is no Gradle and no Java of our own. The app is a `NativeActivity`:
+
+1. The renderer is built with CMake using the NDK's toolchain, giving `librenderer.so`.
+2. The Go code is built with `-buildmode=c-shared`, giving `libcliffcrack.so`. It contains
+   `engine/platform`'s NativeActivity glue.
+3. `aapt2`, `zipalign` and `apksigner` package the two libraries and the SPIR-V shaders into
+   `build-android/CliffCrack.apk`, signed with the debug key.
+
+Specifics:
+
+- **Pre-rotation**: a phone or handheld panel is usually portrait, even when the game is
+  played in landscape. The renderer draws into a swapchain in the panel's native orientation
+  and rotates everything itself, so the compositor doesn't rotate every frame. The scene
+  gets the rotation folded into its view-projection matrix. The ImGui draw data is remapped
+  after layout. The game sees the upright size through `render.DisplaySize`.
+- **Window lifecycle**: Android destroys the window when the app goes to the background.
+  `render.SetWindow` drops the Vulkan surface before the window is released, and makes a
+  new one when the app returns.
+- **Fullscreen**: the activity runs in sticky immersive mode and keeps the screen on. It is
+  locked to landscape, either way up. The UI is scaled up for the screen's density.
+- **Logs**: stdout and stderr go to logcat.
+- **Quitting**: quitting from the menu ends the process, so the next launch starts clean.
+
+Tested on an AYANEO (Konkr) Pocket FIT: Snapdragon 8 Gen 3, Adreno 750, Android 14. It
+runs at 144 fps, the display's full refresh rate. Scripts and `-model` are desktop-only.
+
 ### Run mode
 
 The course comes from `game/course` and is pure Go. It is a function of a seed: one
@@ -183,8 +245,8 @@ engine/
   audio/               Go mixer (voices, pan, loops, WAV, synth blips) -> oto/WASAPI
   physics/             rigid bodies: dynamic spheres vs spheres/oriented boxes/heightfields
   noise/               seeded gradient noise, FBM and ridged noise for procedural content
-  platform/            GLFW window; feeds OS events into input
-  input/               per-frame keyboard/mouse state (pressed/released edges, deltas)
+  platform/            GLFW window (desktop) or NativeActivity (Android); feeds OS events into input
+  input/               per-frame keyboard/mouse/gamepad state (edges, deltas, deadzones)
   camera/              fly + orbit cameras, perspective lens
   mathx/               Vulkan-convention vectors, matrices, colours
   geom/                CPU mesh data + procedural shapes (cube, plane, sphere, grid, cone, icosphere)
@@ -193,7 +255,8 @@ engine/
 game/                gameplay code (pure Go, no cgo): app/menu, Run mode, Engine Demo
   course/              Run mode's seeded level generator (no GPU; testable on its own)
 scripts/             hot-reloadable behaviours (interpreted at runtime)
-cmd/game/            main package
+cmd/game/            main package (an .exe on desktop, a c-shared library on Android)
+android/             AndroidManifest.xml for the APK
 ```
 
 ## Roadmap
@@ -213,6 +276,8 @@ cmd/game/            main package
 - [x] Heightfield terrain collider, seeded noise, streamed procedural terrain (Run mode)
 - [x] Per-draw shading flags (flat, snow, unlit, sky), distance fog, deferred mesh freeing
 - [x] Main menu, HUD and game-over card (anchored/overlay UI windows, scaled fonts)
+- [x] Gamepad support (GLFW on desktop, Android input), touch as mouse
+- [x] Android build: NativeActivity + c-shared Go, pre-rotated swapchain, window lifecycle
 
 ### Next ideas
 

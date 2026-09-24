@@ -22,12 +22,13 @@ extern "C" {
 #endif
 
 typedef struct RInitDesc {
-    void*       native_window;     // HWND on Windows
+    void*       native_window;     // HWND on Windows, ANativeWindow* on Android
     uint32_t    width;             // framebuffer size in pixels
     uint32_t    height;
     const char* shader_dir;        // directory containing the compiled *.spv files
     int32_t     enable_validation; // non-zero: request Vulkan validation layers
     int32_t     vsync;             // non-zero: FIFO present mode
+    float       ui_scale;          // UI size multiplier for dense screens (0 = 1)
 } RInitDesc;
 
 // Interleaved vertex. Must match geom.Vertex in Go.
@@ -139,6 +140,18 @@ R_API const char* r_last_error(void);
 
 // Call when the framebuffer size changes. The swapchain is rebuilt lazily.
 R_API void r_resize(uint32_t width, uint32_t height);
+
+// Replaces the native window (Android: the OS destroys it when the app goes to
+// the background and makes a new one when it returns). NULL drops the surface;
+// frames are skipped until a window is set again. Call before the old window
+// is released.
+R_API void r_set_window(void* native_window);
+
+// The size of the image the game sees, in pixels: the swapchain extent as
+// displayed. On a display the renderer draws rotated (Android pre-rotation,
+// e.g. a portrait panel used in landscape) width and height are swapped
+// relative to the swapchain. 0 x 0 while there is no swapchain.
+R_API void r_display_size(uint32_t* width, uint32_t* height);
 
 // Uploads a triangle-list mesh to GPU memory (blocking). The arrays are copied,
 // so the caller may free them immediately. Returns 0 on failure.

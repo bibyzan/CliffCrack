@@ -11,6 +11,7 @@
 namespace {
 
 bool     g_ready = false;
+float    g_scale = 1.0f; // UI size multiplier
 VkFormat g_color_format = VK_FORMAT_UNDEFINED; // the backend keeps a pointer to these
 VkFormat g_depth_format = VK_FORMAT_UNDEFINED;
 
@@ -75,7 +76,8 @@ void apply_style() {
 // size is asked for, so scaled text stays sharp.
 void load_font() {
     ImGuiIO& io = ImGui::GetIO();
-    for (const char* path : {"C:/Windows/Fonts/bahnschrift.ttf", "C:/Windows/Fonts/segoeui.ttf"}) {
+    for (const char* path : {"C:/Windows/Fonts/bahnschrift.ttf", "C:/Windows/Fonts/segoeui.ttf",
+                             "/system/fonts/Roboto-Regular.ttf"}) {
         if (FILE* f = std::fopen(path, "rb")) {
             std::fclose(f);
             if (io.Fonts->AddFontFromFileTTF(path, 18.0f)) return;
@@ -120,6 +122,9 @@ bool ui_init(const UiInitInfo& info, std::string* error) {
     apply_style();
     linearize_style();
     load_font();
+    g_scale = info.scale > 0.0f ? info.scale : 1.0f;
+    ImGui::GetStyle().ScaleAllSizes(g_scale);
+    ImGui::GetStyle().FontScaleMain = g_scale;
 
     // The backend has no prototypes: hand it the loader volk already opened.
     const bool loaded = ImGui_ImplVulkan_LoadFunctions(
@@ -167,12 +172,39 @@ void ui_set_formats(VkFormat color_format, VkFormat depth_format) {
     ImGui_ImplVulkan_CreateMainPipeline(&info);
 }
 
-void ui_frame(VkCommandBuffer cmd, VkExtent2D extent, const RUIInput& input,
-              RUICmd* cmds, uint32_t count, const char* text, uint32_t text_length, RUIOutput* out) {
+// Rotates finished draw data from the upright display into the swapchain's
+// native orientation (Android pre-rotation). Vertices and clip rectangles are
+// remapped; a 90-degree turn keeps rectangles axis-aligned.
+void rotate_draw_data(ImDrawData* data, VkSurfaceTransformFlagBitsKHR transform) {
+    const float w = data->DisplaySize.x, h = data->DisplaySize.y;
+    auto map = [&](ImVec2 p) -> ImVec2 {
+        switch (transform) {
+        case VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR:  return ImVec2(h - p.y, p.x);
+        case VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR: return ImVec2(w - p.x, h - p.y);
+        case VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR: return ImVec2(p.y, w - p.x);
+        default:                                      return p;
+        }
+    };
+    for (ImDrawList* list : data->CmdLists) {
+        for (ImDrawVert& v : list->VtxBuffer) v.pos = map(v.pos);
+        for (ImDrawCmd& c : list->CmdBuffer) {
+            const ImVec2 a = map(ImVec2(c.ClipRect.x, c.ClipRect.y));
+            const ImVec2 b = map(ImVec2(c.ClipRect.z, c.ClipRect.w));
+            c.ClipRect = ImVec4(std::min(a.x, b.x), std::min(a.y, b.y), std::max(a.x, b.x), std::max(a.y, b.y));
+        }
+    }
+    if (transform == VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR || transform == VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR) {
+        data->DisplaySize = ImVec2(h, w);
+    }
+}
+
+void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBitsKHR transform,
+              const RUIInput& input, RUICmd* cmds, uint32_t count, const char* text, uint32_t text_length,
+              RUIOutput* out) {
     if (!g_ready) return;
 
     ImGuiIO& io = ImGui::GetIO();
-    io.DisplaySize = ImVec2(static_cast<float>(extent.width), static_cast<float>(extent.height));
+    io.DisplaySize = ImVec2(static_cast<float>(display.width), static_cast<float>(display.height));
     io.DeltaTime = input.delta_time > 0.0f ? input.delta_time : 1.0f / 60.0f;
     if (input.mouse_x < 0.0f || input.mouse_y < 0.0f) {
         io.AddMousePosEvent(-FLT_MAX, -FLT_MAX); // no mouse (e.g. captured for camera look)
@@ -231,6 +263,7 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D extent, const RUIInput& input,
             shadowed = (options & R_UI_WINDOW_NO_BACKGROUND) != 0;
             centered = (options & R_UI_WINDOW_CENTERED) != 0;
             if (c.max > 0.0f && c.max != 1.0f) {
+                // FontSizeBase is unscaled; the style's FontScaleMain (UI scale) applies on top.
                 ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * c.max); // rasterised at that size
                 font_pushed = true;
             }
@@ -279,9 +312,10 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D extent, const RUIInput& input,
         case R_UI_BUTTON: {
             const bool   highlight = c.value != 0.0f;
             const ImVec2 text = ImGui::CalcTextSize(label.c_str(), nullptr, true);
-            centre(c.min > 0.0f ? c.min : text.x + ImGui::GetStyle().FramePadding.x * 2.0f);
+            const ImVec2 size(c.min * g_scale, c.max * g_scale);
+            centre(size.x > 0.0f ? size.x : text.x + ImGui::GetStyle().FramePadding.x * 2.0f);
             if (highlight) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered));
-            if (ImGui::Button(label.c_str(), ImVec2(c.min, c.max))) c.result = 1;
+            if (ImGui::Button(label.c_str(), size)) c.result = 1;
             if (highlight) ImGui::PopStyleColor();
             break;
         }
@@ -289,13 +323,13 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D extent, const RUIInput& input,
             ImGui::Separator();
             break;
         case R_UI_PROGRESS: {
-            centre(c.min);
-            ImGui::ProgressBar(std::clamp(c.value, 0.0f, 1.0f), ImVec2(c.min > 0.0f ? c.min : -FLT_MIN, c.max),
-                               label.c_str());
+            centre(c.min * g_scale);
+            ImGui::ProgressBar(std::clamp(c.value, 0.0f, 1.0f),
+                               ImVec2(c.min > 0.0f ? c.min * g_scale : -FLT_MIN, c.max * g_scale), label.c_str());
             break;
         }
         case R_UI_SAME_LINE:
-            ImGui::SameLine(0.0f, c.value > 0.0f ? c.value : -1.0f);
+            ImGui::SameLine(0.0f, c.value > 0.0f ? c.value * g_scale : -1.0f);
             break;
         default:
             break;
@@ -304,6 +338,7 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D extent, const RUIInput& input,
     if (window_open) end_window();
 
     ImGui::Render();
+    rotate_draw_data(ImGui::GetDrawData(), transform);
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 
     if (out) {
