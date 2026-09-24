@@ -9,6 +9,7 @@ import (
 
 	"vkgame/engine/asset"
 	"vkgame/engine/geom"
+	"vkgame/engine/input"
 	"vkgame/engine/mathx"
 	"vkgame/engine/render"
 )
@@ -25,12 +26,13 @@ type object struct {
 type Game struct {
 	time    float32
 	objects []object
+	camera  cameraRig
 }
 
 // New builds the demo scene. If modelPath is set, that glTF file is shown in
 // the centre instead of the sphere.
 func New(modelPath string) (*Game, error) {
-	g := &Game{}
+	g := &Game{camera: newCameraRig()}
 
 	ground, err := render.CreateMesh(scaledUVs(geom.Plane(1), 7))
 	if err != nil {
@@ -111,19 +113,21 @@ func (g *Game) addModel(path string) error {
 	return nil
 }
 
-func (g *Game) Update(dt float32) {
+func (g *Game) Update(dt float32, in *input.State) {
 	g.time += dt
+	g.camera.update(dt, in)
 }
+
+// CursorLocked reports whether the mouse should be captured (mouse-look).
+func (g *Game) CursorLocked() bool { return g.camera.locked }
 
 // Render returns this frame's scene parameters and draw list. The draw list is
 // appended to out[:0], so the caller can reuse one slice every frame.
 func (g *Game) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
-	orbit := float64(g.time * 0.15)
-	eye := mathx.Vec3{float32(math.Cos(orbit)) * 9, 4.5, float32(math.Sin(orbit)) * 9}
-	view := mathx.LookAt(eye, mathx.Vec3{0, 0.75, 0}, mathx.Vec3{0, 1, 0})
+	view, eye := g.camera.view()
 
 	params := render.FrameParams{
-		ViewProj:     mathx.Perspective(math.Pi/4, aspect, 0.1, 100).Mul(view),
+		ViewProj:     g.camera.lens.Projection(aspect).Mul(view),
 		CameraPos:    eye,
 		SunDirection: mathx.Vec3{0.4, 1, 0.3},
 		SunColor:     mathx.Vec3{1, 0.95, 0.85},

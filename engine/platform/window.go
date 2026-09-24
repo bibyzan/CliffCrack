@@ -1,4 +1,4 @@
-// Package platform owns the OS window, input and time, via GLFW.
+// Package platform owns the OS window, input events and time, via GLFW.
 package platform
 
 import (
@@ -6,6 +6,8 @@ import (
 	"runtime"
 
 	"github.com/go-gl/glfw/v3.3/glfw"
+
+	"vkgame/engine/input"
 )
 
 // GLFW (and the Win32 message loop) must stay on the main OS thread.
@@ -13,16 +15,10 @@ func init() {
 	runtime.LockOSThread()
 }
 
-type Key = glfw.Key
-
-const (
-	KeyEscape = glfw.KeyEscape
-	KeySpace  = glfw.KeySpace
-	KeyF12    = glfw.KeyF12
-)
-
 type Window struct {
-	win *glfw.Window
+	win          *glfw.Window
+	input        input.State
+	cursorLocked bool
 }
 
 func NewWindow(title string, width, height int) (*Window, error) {
@@ -37,7 +33,26 @@ func NewWindow(title string, width, height int) (*Window, error) {
 		glfw.Terminate()
 		return nil, fmt.Errorf("create window: %w", err)
 	}
-	return &Window{win: win}, nil
+	w := &Window{win: win}
+
+	win.SetKeyCallback(func(_ *glfw.Window, key glfw.Key, _ int, action glfw.Action, _ glfw.ModifierKey) {
+		w.input.KeyEvent(input.Key(key), action != glfw.Release)
+	})
+	win.SetMouseButtonCallback(func(_ *glfw.Window, b glfw.MouseButton, action glfw.Action, _ glfw.ModifierKey) {
+		w.input.ButtonEvent(input.MouseButton(b), action != glfw.Release)
+	})
+	win.SetCursorPosCallback(func(_ *glfw.Window, x, y float64) {
+		w.input.MoveEvent(x, y)
+	})
+	win.SetScrollCallback(func(_ *glfw.Window, _, dy float64) {
+		w.input.ScrollEvent(dy)
+	})
+	win.SetFocusCallback(func(_ *glfw.Window, focused bool) {
+		if !focused {
+			w.input.ReleaseAll() // key-up events are lost while unfocused
+		}
+	})
+	return w, nil
 }
 
 func (w *Window) Destroy() {
@@ -45,9 +60,30 @@ func (w *Window) Destroy() {
 	glfw.Terminate()
 }
 
+// Input is the window's input state. Call NewFrame on it before PollEvents.
+func (w *Window) Input() *input.State { return &w.input }
+
 func (w *Window) ShouldClose() bool     { return w.win.ShouldClose() }
 func (w *Window) SetShouldClose(v bool) { w.win.SetShouldClose(v) }
-func (w *Window) KeyDown(k Key) bool    { return w.win.GetKey(k) == glfw.Press }
+
+// SetCursorLocked hides the cursor and gives unbounded (raw, if supported)
+// mouse motion, for mouse-look. Unlocking restores the normal cursor.
+func (w *Window) SetCursorLocked(locked bool) {
+	if locked == w.cursorLocked {
+		return
+	}
+	w.cursorLocked = locked
+	if locked {
+		w.win.SetInputMode(glfw.CursorMode, glfw.CursorDisabled)
+		if glfw.RawMouseMotionSupported() {
+			w.win.SetInputMode(glfw.RawMouseMotion, glfw.True)
+		}
+	} else {
+		w.win.SetInputMode(glfw.RawMouseMotion, glfw.False)
+		w.win.SetInputMode(glfw.CursorMode, glfw.CursorNormal)
+	}
+	w.input.ResetMouse() // the cursor position jumps when the mode changes
+}
 
 // FramebufferSize is the drawable size in pixels (differs from window size on high-DPI).
 func (w *Window) FramebufferSize() (int, int) { return w.win.GetFramebufferSize() }

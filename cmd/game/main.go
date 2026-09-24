@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"vkgame/engine/input"
 	"vkgame/engine/platform"
 	"vkgame/engine/render"
 	"vkgame/game"
@@ -67,20 +68,19 @@ func run() error {
 	var (
 		rendered    int    // frames completed so far
 		capturePath string // non-empty: capture the next frame to this file
-		f12WasDown  bool
 	)
 
+	in := win.Input()
 	last := platform.Time()
 	for !win.ShouldClose() {
+		in.NewFrame()
 		platform.PollEvents()
-		if win.KeyDown(platform.KeyEscape) {
+		if in.Pressed(input.KeyEscape) {
 			win.SetShouldClose(true)
 		}
-		f12 := win.KeyDown(platform.KeyF12)
-		if f12 && !f12WasDown && capturePath == "" {
+		if in.Pressed(input.KeyF12) && capturePath == "" {
 			capturePath = time.Now().Format("screenshot-20060102-150405.png")
 		}
-		f12WasDown = f12
 		if *screenshot != "" && rendered >= *frames-1 {
 			capturePath = *screenshot
 		}
@@ -88,7 +88,8 @@ func run() error {
 		now := platform.Time()
 		dt := float32(now - last)
 		last = now
-		g.Update(dt)
+		g.Update(dt, in)
+		win.SetCursorLocked(g.CursorLocked())
 
 		width, height := win.FramebufferSize()
 		if width == 0 || height == 0 { // minimized: sleep until something happens

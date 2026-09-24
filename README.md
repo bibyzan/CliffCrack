@@ -44,8 +44,18 @@ go test ./engine/...          # math, geometry and glTF tests (no GPU needed)
 ```
 
 The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv`.
-In game: **F12** saves `screenshot-<time>.png` (read back from the GPU, so it works
-even when the desktop can't be screen-captured), **Esc** quits.
+### Controls
+
+| Mode | Input | Action |
+|---|---|---|
+| Orbit (default) | left/right mouse drag | rotate around the scene |
+| | scroll | zoom |
+| | *(no input for 3 s)* | slow auto-spin |
+| Fly | **Tab** | toggle orbit / fly |
+| | hold right mouse | look around |
+| | **W A S D**, **Q / E** | move, down / up (**Shift** = faster) |
+| Any | **F12** | save `screenshot-<time>.png` (read back from the GPU) |
+| | **Esc** | quit |
 
 Colours: the swapchain is sRGB and shaders work in linear space, so write colours
 with `mathx.Hex(0xRRGGBB)` / `mathx.SRGB(...)` — they convert picker values to linear.
@@ -59,7 +69,9 @@ renderer/            C++ Vulkan renderer (CMake project)
   shaders/             GLSL, compiled to SPIR-V at build time
 engine/
   render/              cgo wrapper around renderer.h (the only cgo package)
-  platform/            GLFW window, input, time
+  platform/            GLFW window; feeds OS events into input
+  input/               per-frame keyboard/mouse state (pressed/released edges, deltas)
+  camera/              fly + orbit cameras, perspective lens
   mathx/               Vulkan-convention vectors, matrices, colours
   geom/                CPU mesh data + procedural shapes (cube, plane, sphere)
   asset/               file loaders (glTF / GLB)
@@ -76,6 +88,7 @@ cmd/game/            main package
 - [x] glTF materials (base colour factor + texture), parts grouped by material
 - [x] Frame capture (`-screenshot`, F12)
 - [ ] Dear ImGui overlay (renderer side, toggled from Go)
-- [ ] Input abstraction, ECS or entity model on the Go side
+- [x] Input abstraction + orbit/fly camera controls
+- [ ] Entity model on the Go side (transforms, components) instead of the demo's object list
 - [ ] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)
 - [ ] Audio (miniaudio / oto), physics
