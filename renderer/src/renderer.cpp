@@ -5,7 +5,9 @@
 
 #include "renderer.h"
 
+#include <cstddef>
 #include <cstdio>
+#include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
@@ -15,12 +17,33 @@ void* platform_module_handle(); // platform_win32.cpp
 namespace {
 
 constexpr uint32_t kFramesInFlight = 2;
+constexpr VkFormat kDepthFormat = VK_FORMAT_D32_SFLOAT;
+constexpr uint32_t kPushConstantSize = offsetof(RDrawCmd, mesh); // mvp + normal_matrix + color
+static_assert(kPushConstantSize == 128, "push constants must fit the 128-byte guaranteed minimum");
+static_assert(sizeof(RVertex) == 32, "RVertex layout changed; update the pipeline vertex input");
 
 struct FrameData {
     VkCommandPool   pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkSemaphore     image_acquired = VK_NULL_HANDLE;
     VkFence         in_flight = VK_NULL_HANDLE;
+};
+
+struct Buffer {
+    VkBuffer      buffer = VK_NULL_HANDLE;
+    VmaAllocation allocation = VK_NULL_HANDLE;
+};
+
+struct Mesh {
+    Buffer   vertices;
+    Buffer   indices;
+    uint32_t index_count = 0; // 0 = free slot
+};
+
+struct Image {
+    VkImage       image = VK_NULL_HANDLE;
+    VmaAllocation allocation = VK_NULL_HANDLE;
+    VkImageView   view = VK_NULL_HANDLE;
 };
 
 struct Renderer {
@@ -37,6 +60,15 @@ struct Renderer {
     std::vector<VkImageView> views;
     std::vector<VkSemaphore> render_done; // one per swapchain image
     bool                     swapchain_dirty = false;
+    Image                    depth;       // shared by all frames; barriers serialize use
+
+    // Blocking uploads (mesh creation) use their own command buffer + fence.
+    VkCommandPool   upload_pool = VK_NULL_HANDLE;
+    VkCommandBuffer upload_cmd = VK_NULL_HANDLE;
+    VkFence         upload_fence = VK_NULL_HANDLE;
+
+    std::vector<Mesh>     meshes;     // RMesh handle = index + 1
+    std::vector<uint32_t> free_meshes;
 
     std::string      shader_dir;
     VkFormat         pipeline_format = VK_FORMAT_UNDEFINED;
@@ -103,7 +135,7 @@ bool create_pipeline(VkFormat color_format) {
 
     VkPushConstantRange push{};
     push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    push.size = sizeof(RDrawCmd);
+    push.size = kPushConstantSize;
 
     VkPipelineLayoutCreateInfo layout_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     layout_info.pushConstantRangeCount = 1;
@@ -111,8 +143,8 @@ bool create_pipeline(VkFormat color_format) {
     VK_TRY(vkCreatePipelineLayout(g->dev, &layout_info, nullptr, &g->pipeline_layout));
 
     VkShaderModule vert = VK_NULL_HANDLE, frag = VK_NULL_HANDLE;
-    if (!create_shader_module("triangle.vert.spv", vert)) return false;
-    if (!create_shader_module("triangle.frag.spv", frag)) {
+    if (!create_shader_module("mesh.vert.spv", vert)) return false;
+    if (!create_shader_module("mesh.frag.spv", frag)) {
         vkDestroyShaderModule(g->dev, vert, nullptr);
         return false;
     }
@@ -127,7 +159,17 @@ bool create_pipeline(VkFormat color_format) {
     stages[1].module = frag;
     stages[1].pName = "main";
 
+    VkVertexInputBindingDescription vertex_binding{0, sizeof(RVertex), VK_VERTEX_INPUT_RATE_VERTEX};
+    // uv (offset 24) stays in the vertex layout but isn't bound until textures land.
+    const VkVertexInputAttributeDescription vertex_attributes[] = {
+        {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(RVertex, position)},
+        {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(RVertex, normal)},
+    };
     VkPipelineVertexInputStateCreateInfo vertex_input{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    vertex_input.vertexBindingDescriptionCount = 1;
+    vertex_input.pVertexBindingDescriptions = &vertex_binding;
+    vertex_input.vertexAttributeDescriptionCount = 2;
+    vertex_input.pVertexAttributeDescriptions = vertex_attributes;
 
     VkPipelineInputAssemblyStateCreateInfo input_assembly{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
     input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
@@ -138,7 +180,8 @@ bool create_pipeline(VkFormat color_format) {
 
     VkPipelineRasterizationStateCreateInfo raster{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
     raster.polygonMode = VK_POLYGON_MODE_FILL;
-    raster.cullMode = VK_CULL_MODE_NONE;
+    // glTF winding (CCW = front). mathx projections flip Y, so on-screen winding is preserved.
+    raster.cullMode = VK_CULL_MODE_BACK_BIT;
     raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     raster.lineWidth = 1.0f;
 
@@ -161,6 +204,9 @@ bool create_pipeline(VkFormat color_format) {
     blend.pAttachments = &blend_attachment;
 
     VkPipelineDepthStencilStateCreateInfo depth{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    depth.depthTestEnable = VK_TRUE;
+    depth.depthWriteEnable = VK_TRUE;
+    depth.depthCompareOp = VK_COMPARE_OP_LESS;
 
     const VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dynamic{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
@@ -171,6 +217,7 @@ bool create_pipeline(VkFormat color_format) {
     VkPipelineRenderingCreateInfo rendering{VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO};
     rendering.colorAttachmentCount = 1;
     rendering.pColorAttachmentFormats = &color_format;
+    rendering.depthAttachmentFormat = kDepthFormat;
 
     VkGraphicsPipelineCreateInfo info{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
     info.pNext = &rendering;
@@ -195,6 +242,129 @@ bool create_pipeline(VkFormat color_format) {
     return true;
 }
 
+void destroy_image(Image& img) {
+    if (img.view) vkDestroyImageView(g->dev, img.view, nullptr);
+    if (img.image) vmaDestroyImage(g->allocator, img.image, img.allocation);
+    img = {};
+}
+
+bool create_depth(VkExtent2D extent) {
+    destroy_image(g->depth);
+
+    VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    info.imageType = VK_IMAGE_TYPE_2D;
+    info.format = kDepthFormat;
+    info.extent = {extent.width, extent.height, 1};
+    info.mipLevels = 1;
+    info.arrayLayers = 1;
+    info.samples = VK_SAMPLE_COUNT_1_BIT;
+    info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    info.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo alloc{};
+    alloc.usage = VMA_MEMORY_USAGE_AUTO;
+    alloc.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
+    VK_TRY(vmaCreateImage(g->allocator, &info, &alloc, &g->depth.image, &g->depth.allocation, nullptr));
+
+    VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    view.image = g->depth.image;
+    view.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    view.format = kDepthFormat;
+    view.subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, 1};
+    VK_TRY(vkCreateImageView(g->dev, &view, nullptr, &g->depth.view));
+    return true;
+}
+
+void destroy_buffer(Buffer& b) {
+    if (b.buffer) vmaDestroyBuffer(g->allocator, b.buffer, b.allocation);
+    b = {};
+}
+
+bool create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VmaAllocationCreateFlags flags,
+                   Buffer& out, void** mapped = nullptr) {
+    VkBufferCreateInfo info{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    info.size = size;
+    info.usage = usage;
+
+    VmaAllocationCreateInfo alloc{};
+    alloc.usage = VMA_MEMORY_USAGE_AUTO;
+    alloc.flags = flags;
+
+    VmaAllocationInfo alloc_info{};
+    VK_TRY(vmaCreateBuffer(g->allocator, &info, &alloc, &out.buffer, &out.allocation, &alloc_info));
+    if (mapped) *mapped = alloc_info.pMappedData;
+    return true;
+}
+
+// Records `record` into the upload command buffer, submits it and waits.
+template <typename F>
+bool submit_and_wait(F&& record) {
+    VK_TRY(vkResetCommandPool(g->dev, g->upload_pool, 0));
+    VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_TRY(vkBeginCommandBuffer(g->upload_cmd, &begin));
+    record(g->upload_cmd);
+    VK_TRY(vkEndCommandBuffer(g->upload_cmd));
+
+    VkCommandBufferSubmitInfo cmd_info{VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO};
+    cmd_info.commandBuffer = g->upload_cmd;
+    VkSubmitInfo2 submit{VK_STRUCTURE_TYPE_SUBMIT_INFO_2};
+    submit.commandBufferInfoCount = 1;
+    submit.pCommandBufferInfos = &cmd_info;
+    VK_TRY(vkQueueSubmit2(g->queue, 1, &submit, g->upload_fence));
+    VK_TRY(vkWaitForFences(g->dev, 1, &g->upload_fence, VK_TRUE, UINT64_MAX));
+    VK_TRY(vkResetFences(g->dev, 1, &g->upload_fence));
+    return true;
+}
+
+// Creates a device-local buffer and fills it through a staging buffer (blocking).
+bool upload_buffer(const void* data, VkDeviceSize size, VkBufferUsageFlags usage, Buffer& out) {
+    Buffer staging;
+    void*  mapped = nullptr;
+    if (!create_buffer(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                       staging, &mapped)) {
+        return false;
+    }
+    std::memcpy(mapped, data, static_cast<size_t>(size));
+    vmaFlushAllocation(g->allocator, staging.allocation, 0, VK_WHOLE_SIZE);
+
+    bool ok = create_buffer(size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0, out);
+    if (ok) {
+        ok = submit_and_wait([&](VkCommandBuffer cmd) {
+            VkBufferCopy region{0, 0, size};
+            vkCmdCopyBuffer(cmd, staging.buffer, out.buffer, 1, &region);
+
+            // Make the copy visible to vertex/index fetches in later submissions.
+            VkMemoryBarrier2 barrier{VK_STRUCTURE_TYPE_MEMORY_BARRIER_2};
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_COPY_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_VERTEX_INPUT_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_VERTEX_ATTRIBUTE_READ_BIT | VK_ACCESS_2_INDEX_READ_BIT;
+            VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
+            dep.memoryBarrierCount = 1;
+            dep.pMemoryBarriers = &barrier;
+            vkCmdPipelineBarrier2(cmd, &dep);
+        });
+        if (!ok) destroy_buffer(out);
+    }
+    destroy_buffer(staging);
+    return ok;
+}
+
+Mesh* lookup_mesh(RMesh handle) {
+    if (handle == 0 || handle > g->meshes.size()) return nullptr;
+    Mesh& mesh = g->meshes[handle - 1];
+    return mesh.index_count ? &mesh : nullptr;
+}
+
+void destroy_mesh(Mesh& mesh) {
+    destroy_buffer(mesh.vertices);
+    destroy_buffer(mesh.indices);
+    mesh.index_count = 0;
+}
+
 void destroy_swapchain_resources() {
     for (VkSemaphore s : g->render_done) vkDestroySemaphore(g->dev, s, nullptr);
     g->render_done.clear();
@@ -217,6 +387,10 @@ bool create_swapchain() {
     vkb::destroy_swapchain(g->swapchain); // no-op on the first call
     g->swapchain = built.value();
 
+    std::printf("[renderer] swapchain %ux%u format %d colorspace %d present mode %d\n",
+                g->swapchain.extent.width, g->swapchain.extent.height, static_cast<int>(g->swapchain.image_format),
+                static_cast<int>(g->swapchain.color_space), static_cast<int>(g->swapchain.present_mode));
+
     auto images = g->swapchain.get_images();
     auto views = g->swapchain.get_image_views();
     if (!images.has_value() || !views.has_value()) return fail("failed to get swapchain images");
@@ -226,6 +400,8 @@ bool create_swapchain() {
     VkSemaphoreCreateInfo sem_info{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     g->render_done.resize(g->images.size(), VK_NULL_HANDLE);
     for (VkSemaphore& s : g->render_done) VK_TRY(vkCreateSemaphore(g->dev, &sem_info, nullptr, &s));
+
+    if (!create_depth(g->swapchain.extent)) return false;
 
     if (g->swapchain.image_format != g->pipeline_format) {
         if (!create_pipeline(g->swapchain.image_format)) return false;
@@ -259,10 +435,19 @@ bool create_frames() {
         VK_TRY(vkCreateSemaphore(g->dev, &sem_info, nullptr, &f.image_acquired));
         VK_TRY(vkCreateFence(g->dev, &fence_info, nullptr, &f.in_flight));
     }
+
+    VK_TRY(vkCreateCommandPool(g->dev, &pool_info, nullptr, &g->upload_pool));
+    VkCommandBufferAllocateInfo alloc{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    alloc.commandPool = g->upload_pool;
+    alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc.commandBufferCount = 1;
+    VK_TRY(vkAllocateCommandBuffers(g->dev, &alloc, &g->upload_cmd));
+    VkFenceCreateInfo upload_fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VK_TRY(vkCreateFence(g->dev, &upload_fence_info, nullptr, &g->upload_fence));
     return true;
 }
 
-void image_barrier(VkCommandBuffer cmd, VkImage image,
+void image_barrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,
                    VkImageLayout old_layout, VkImageLayout new_layout,
                    VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                    VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access) {
@@ -276,7 +461,7 @@ void image_barrier(VkCommandBuffer cmd, VkImage image,
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
-    barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    barrier.subresourceRange = {aspect, 0, 1, 0, 1};
 
     VkDependencyInfo dep{VK_STRUCTURE_TYPE_DEPENDENCY_INFO};
     dep.imageMemoryBarrierCount = 1;
@@ -325,7 +510,6 @@ bool init(const RInitDesc& desc) {
     g->queue = queue.value();
     g->queue_family = family.value();
 
-    // VMA isn't used by the triangle yet; it's here for buffers/textures next.
     VmaVulkanFunctions vma_funcs{};
     vma_funcs.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
     vma_funcs.vkGetDeviceProcAddr = vkGetDeviceProcAddr;
@@ -349,10 +533,16 @@ void destroy_all() {
             if (f.image_acquired) vkDestroySemaphore(g->dev, f.image_acquired, nullptr);
             if (f.pool) vkDestroyCommandPool(g->dev, f.pool, nullptr);
         }
+        if (g->upload_fence) vkDestroyFence(g->dev, g->upload_fence, nullptr);
+        if (g->upload_pool) vkDestroyCommandPool(g->dev, g->upload_pool, nullptr);
         destroy_pipeline();
         destroy_swapchain_resources();
         vkb::destroy_swapchain(g->swapchain);
-        if (g->allocator) vmaDestroyAllocator(g->allocator);
+        if (g->allocator) {
+            for (Mesh& mesh : g->meshes) destroy_mesh(mesh);
+            destroy_image(g->depth);
+            vmaDestroyAllocator(g->allocator);
+        }
         vkb::destroy_device(g->device);
     }
     if (g->surface) vkb::destroy_surface(g->instance, g->surface);
@@ -423,10 +613,20 @@ int32_t r_begin_frame(const float clear_color[4]) {
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(f.cmd, &begin);
 
-    image_barrier(f.cmd, g->images[g->image],
+    image_barrier(f.cmd, g->images[g->image], VK_IMAGE_ASPECT_COLOR_BIT,
                   VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0,
                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT);
+
+    // The depth image is shared by both frames in flight: wait for the previous
+    // frame's depth writes before this frame clears it.
+    constexpr VkPipelineStageFlags2 kDepthStages =
+        VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    image_barrier(f.cmd, g->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT,
+                  VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                  kDepthStages, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                  kDepthStages, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT |
+                                    VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT);
 
     VkRenderingAttachmentInfo color{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
     color.imageView = g->views[g->image];
@@ -437,12 +637,20 @@ int32_t r_begin_frame(const float clear_color[4]) {
         for (int i = 0; i < 4; ++i) color.clearValue.color.float32[i] = clear_color[i];
     }
 
+    VkRenderingAttachmentInfo depth{VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO};
+    depth.imageView = g->depth.view;
+    depth.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    depth.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    depth.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    depth.clearValue.depthStencil.depth = 1.0f;
+
     const VkExtent2D extent = g->swapchain.extent;
     VkRenderingInfo rendering{VK_STRUCTURE_TYPE_RENDERING_INFO};
     rendering.renderArea = {{0, 0}, extent};
     rendering.layerCount = 1;
     rendering.colorAttachmentCount = 1;
     rendering.pColorAttachments = &color;
+    rendering.pDepthAttachment = &depth;
     vkCmdBeginRendering(f.cmd, &rendering);
 
     VkViewport viewport{0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f};
@@ -458,10 +666,62 @@ int32_t r_begin_frame(const float clear_color[4]) {
 void r_draw(const RDrawCmd* cmds, uint32_t count) {
     if (!g || !g->recording || !cmds) return;
     VkCommandBuffer cmd = g->frames[g->frame].cmd;
+    const Mesh*     bound = nullptr;
     for (uint32_t i = 0; i < count; ++i) {
-        vkCmdPushConstants(cmd, g->pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(RDrawCmd), &cmds[i]);
-        vkCmdDraw(cmd, 3, 1, 0, 0);
+        const Mesh* mesh = lookup_mesh(cmds[i].mesh);
+        if (!mesh) continue;
+        if (mesh != bound) {
+            const VkDeviceSize offset = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &mesh->vertices.buffer, &offset);
+            vkCmdBindIndexBuffer(cmd, mesh->indices.buffer, 0, VK_INDEX_TYPE_UINT32);
+            bound = mesh;
+        }
+        vkCmdPushConstants(cmd, g->pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, kPushConstantSize, &cmds[i]);
+        vkCmdDrawIndexed(cmd, mesh->index_count, 1, 0, 0, 0);
     }
+}
+
+RMesh r_create_mesh(const RVertex* vertices, uint32_t vertex_count,
+                    const uint32_t* indices, uint32_t index_count) {
+    if (!g) return fail("r_create_mesh: renderer not initialized"), 0;
+    if (!vertices || !indices || vertex_count == 0 || index_count == 0 || index_count % 3 != 0) {
+        return fail("r_create_mesh: need vertices and a non-empty triangle list"), 0;
+    }
+    for (uint32_t i = 0; i < index_count; ++i) {
+        if (indices[i] >= vertex_count) return fail("r_create_mesh: index out of range"), 0;
+    }
+
+    Mesh mesh;
+    if (!upload_buffer(vertices, VkDeviceSize{sizeof(RVertex)} * vertex_count,
+                       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, mesh.vertices)) {
+        return 0;
+    }
+    if (!upload_buffer(indices, VkDeviceSize{sizeof(uint32_t)} * index_count,
+                       VK_BUFFER_USAGE_INDEX_BUFFER_BIT, mesh.indices)) {
+        destroy_buffer(mesh.vertices);
+        return 0;
+    }
+    mesh.index_count = index_count;
+
+    uint32_t slot;
+    if (!g->free_meshes.empty()) {
+        slot = g->free_meshes.back();
+        g->free_meshes.pop_back();
+        g->meshes[slot] = mesh;
+    } else {
+        slot = static_cast<uint32_t>(g->meshes.size());
+        g->meshes.push_back(mesh);
+    }
+    return slot + 1;
+}
+
+void r_destroy_mesh(RMesh handle) {
+    if (!g) return;
+    Mesh* mesh = lookup_mesh(handle);
+    if (!mesh) return;
+    vkDeviceWaitIdle(g->dev); // it may still be referenced by frames in flight
+    destroy_mesh(*mesh);
+    g->free_meshes.push_back(handle - 1);
 }
 
 void r_end_frame(void) {
@@ -471,7 +731,7 @@ void r_end_frame(void) {
     FrameData& f = g->frames[g->frame];
     vkCmdEndRendering(f.cmd);
 
-    image_barrier(f.cmd, g->images[g->image],
+    image_barrier(f.cmd, g->images[g->image], VK_IMAGE_ASPECT_COLOR_BIT,
                   VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                   VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                   VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, 0);

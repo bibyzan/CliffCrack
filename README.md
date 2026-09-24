@@ -38,9 +38,14 @@ You don't need to link against the Vulkan loader: volk loads `vulkan-1.dll` from
 ./build.ps1 -Run              # Debug build, validation layers on
 ./build.ps1 -Config Release
 build/bin/game.exe -validation=false -vsync=false
+build/bin/game.exe -model path/to/model.glb   # show a glTF model in the centre
+go test ./engine/...          # math, geometry and glTF tests (no GPU needed)
 ```
 
 The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv`.
+
+Colours: the swapchain is sRGB and shaders work in linear space, so write colours
+with `mathx.Hex(0xRRGGBB)` / `mathx.SRGB(...)` — they convert picker values to linear.
 
 ## Layout
 
@@ -50,18 +55,22 @@ renderer/            C++ Vulkan renderer (CMake project)
   src/                 implementation
   shaders/             GLSL, compiled to SPIR-V at build time
 engine/
-  render/              cgo wrapper around renderer.h
+  render/              cgo wrapper around renderer.h (the only cgo package)
   platform/            GLFW window, input, time
-  mathx/               Vulkan-convention matrix math
+  mathx/               Vulkan-convention vectors, matrices, colours
+  geom/                CPU mesh data + procedural shapes (cube, plane, sphere)
+  asset/               file loaders (glTF / GLB)
 game/                gameplay code (pure Go, no cgo)
 cmd/game/            main package
 ```
 
 ## Roadmap
 
-- [ ] Meshes: `r_load_mesh` (glTF via fastgltf) + vertex/index buffers through VMA
-- [ ] Textures: `r_load_texture` + bindless descriptors
-- [ ] Depth buffer, 3D camera
+- [x] Meshes: `r_create_mesh` uploads vertex/index buffers through VMA; glTF parsed in Go
+- [x] Depth buffer, perspective camera, directional lighting
+- [ ] Per-frame uniforms (camera, lights) instead of hard-coded light
+- [ ] Textures: `r_load_texture` + bindless descriptors (UVs are already in the vertex format)
+- [ ] glTF materials (base colour / texture) and multiple meshes per file
 - [ ] Dear ImGui overlay (renderer side, toggled from Go)
 - [ ] Input abstraction, ECS or entity model on the Go side
 - [ ] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)

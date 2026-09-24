@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"vkgame/engine/mathx"
 	"vkgame/engine/platform"
 	"vkgame/engine/render"
 	"vkgame/game"
@@ -23,6 +24,7 @@ func main() {
 func run() error {
 	validation := flag.Bool("validation", true, "enable Vulkan validation layers (if installed)")
 	vsync := flag.Bool("vsync", true, "wait for vertical sync")
+	model := flag.String("model", "", "optional .gltf/.glb file to show in the centre of the scene")
 	flag.Parse()
 
 	exe, err := os.Executable()
@@ -53,8 +55,11 @@ func run() error {
 
 	win.OnFramebufferResize(render.Resize)
 
-	g := game.New()
-	clearColor := [4]float32{0.02, 0.02, 0.04, 1}
+	g, err := game.New(*model)
+	if err != nil {
+		return err
+	}
+	skyColor := mathx.Hex(0x9cc3e6)
 	var draws []render.DrawCmd
 
 	last := platform.Time()
@@ -75,7 +80,7 @@ func run() error {
 			continue
 		}
 
-		if !render.BeginFrame(clearColor) {
+		if !render.BeginFrame(skyColor) {
 			continue
 		}
 		draws = g.Draw(float32(width)/float32(height), draws)
