@@ -35,6 +35,11 @@ FetchContent_Declare(vma
     GIT_TAG        v3.3.0
     GIT_SHALLOW    TRUE
     SYSTEM)
+FetchContent_Declare(imgui
+    GIT_REPOSITORY https://github.com/ocornut/imgui.git
+    GIT_TAG        v1.92.9
+    GIT_SHALLOW    TRUE
+    SYSTEM)
 
 FetchContent_MakeAvailable(vulkan_headers)
 
@@ -43,13 +48,28 @@ set(VULKAN_HEADERS_INSTALL_DIR "${vulkan_headers_SOURCE_DIR}" CACHE PATH "" FORC
 set(VOLK_STATIC_DEFINES "VK_USE_PLATFORM_WIN32_KHR" CACHE STRING "" FORCE)
 set(VK_BOOTSTRAP_TEST OFF CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(volk vk_bootstrap vma)
+FetchContent_MakeAvailable(volk vk_bootstrap vma imgui)
+
+# Dear ImGui ships no CMake project. Its Vulkan backend gets its function
+# pointers from volk at runtime (ImGui_ImplVulkan_LoadFunctions), so it is
+# compiled without prototypes and never links the loader.
+add_library(imgui STATIC
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
+target_include_directories(imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
+target_compile_definitions(imgui PUBLIC IMGUI_IMPL_VULKAN_NO_PROTOTYPES IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
+target_link_libraries(imgui PUBLIC Vulkan::Headers)
 
 # ---------------------------------------------------------------------------
 # Renderer DLL
 # ---------------------------------------------------------------------------
 add_library(renderer SHARED
     src/renderer.cpp
+    src/ui.cpp
+    src/ui.h
     src/vma_impl.cpp
     src/platform_win32.cpp
     src/vk_common.h
@@ -63,7 +83,8 @@ target_compile_definitions(renderer PRIVATE
 target_link_libraries(renderer PRIVATE
     volk::volk
     vk-bootstrap::vk-bootstrap
-    GPUOpen::VulkanMemoryAllocator)
+    GPUOpen::VulkanMemoryAllocator
+    imgui)
 
 # Output renderer.dll (+ import lib) into build/bin with no "lib" prefix, so the
 # Go side can link with -lrenderer and the exe can sit next to the DLL.

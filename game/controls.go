@@ -20,12 +20,13 @@ const (
 //	Orbit: drag with left/right mouse to rotate, scroll to zoom. Idles into a slow spin.
 //	Fly:   Tab to toggle; hold right mouse to look, WASD to move, Q/E down/up, Shift faster.
 type cameraRig struct {
-	fly    bool
-	orbit  camera.Orbit
-	free   camera.Fly
-	lens   camera.Lens
-	idle   float32 // seconds since the last orbit input
-	locked bool    // the mouse cursor should be captured
+	fly      bool
+	orbit    camera.Orbit
+	free     camera.Fly
+	lens     camera.Lens
+	idle     float32 // seconds since the last orbit input
+	locked   bool    // the mouse cursor should be captured
+	autoSpin bool    // orbit slowly when idle
 }
 
 func newCameraRig() cameraRig {
@@ -38,12 +39,15 @@ func newCameraRig() cameraRig {
 			MinDist:  1.5,
 			MaxDist:  60,
 		},
-		lens: camera.DefaultLens(),
-		idle: autoOrbitDelay, // start spinning straight away
+		lens:     camera.DefaultLens(),
+		idle:     autoOrbitDelay, // start spinning straight away
+		autoSpin: true,
 	}
 }
 
-func (r *cameraRig) update(dt float32, in *input.State) {
+// update applies this frame's input. mouseFree is false while the debug UI is
+// using the mouse; clicks, drags and scrolling then belong to the UI.
+func (r *cameraRig) update(dt float32, in *input.State, mouseFree bool) {
 	if in.Pressed(input.KeyTab) {
 		r.fly = !r.fly
 		if r.fly {
@@ -54,7 +58,7 @@ func (r *cameraRig) update(dt float32, in *input.State) {
 	yaw, pitch := float32(dx)*mouseSensitivity, float32(-dy)*mouseSensitivity
 
 	if r.fly {
-		r.locked = in.MouseDown(input.MouseRight)
+		r.locked = in.MouseDown(input.MouseRight) && (mouseFree || r.locked)
 		if r.locked {
 			r.free.Look(yaw, pitch)
 		}
@@ -68,18 +72,19 @@ func (r *cameraRig) update(dt float32, in *input.State) {
 		return
 	}
 
-	dragging := in.MouseDown(input.MouseLeft) || in.MouseDown(input.MouseRight)
+	// A drag that started in the scene keeps going even if it crosses a UI window.
+	dragging := (in.MouseDown(input.MouseLeft) || in.MouseDown(input.MouseRight)) && (mouseFree || r.locked)
 	r.locked = dragging
 	r.idle += dt
 	if dragging {
 		r.orbit.Rotate(yaw, pitch)
 		r.idle = 0
 	}
-	if s := in.Scroll(); s != 0 {
+	if s := in.Scroll(); s != 0 && mouseFree {
 		r.orbit.Zoom(float32(math.Pow(0.9, s)))
 		r.idle = 0
 	}
-	if r.idle >= autoOrbitDelay {
+	if r.autoSpin && r.idle >= autoOrbitDelay {
 		r.orbit.Rotate(autoOrbitSpeed*dt, 0)
 	}
 }

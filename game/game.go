@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"math/rand/v2"
 	"strings"
 
 	"vkgame/engine/asset"
@@ -15,6 +16,7 @@ import (
 	"vkgame/engine/render"
 	"vkgame/engine/scene"
 	"vkgame/engine/script"
+	"vkgame/engine/ui"
 )
 
 var worldUp = mathx.Vec3{0, 1, 0}
@@ -23,6 +25,23 @@ type Game struct {
 	world   *scene.World
 	camera  cameraRig
 	scripts *script.Host // nil when running without scripts
+
+	// Tunables exposed in the debug UI.
+	sunIntensity float32
+	ambientLevel float32
+	timeScale    float32
+
+	cubeMesh render.Mesh
+	cubeTex  render.Texture
+	spawned  []scene.ID
+	rng      *rand.Rand
+}
+
+// Stats are engine numbers shown in the debug UI.
+type Stats struct {
+	FPS     float32
+	FrameMS float32
+	Draws   int
 }
 
 type Options struct {
@@ -32,7 +51,14 @@ type Options struct {
 
 // New builds the demo scene.
 func New(opts Options) (*Game, error) {
-	g := &Game{world: scene.NewWorld(), camera: newCameraRig()}
+	g := &Game{
+		world:        scene.NewWorld(),
+		camera:       newCameraRig(),
+		sunIntensity: 1,
+		ambientLevel: 1,
+		timeScale:    1,
+		rng:          rand.New(rand.NewPCG(1, 2)),
+	}
 	w := g.world
 	modelPath := opts.Model
 
@@ -92,6 +118,7 @@ func New(opts Options) (*Game, error) {
 		c.Transform.Position = mathx.Vec3{float32(math.Cos(angle)) * 3.5, 0.5, float32(math.Sin(angle)) * 3.5}
 		c.Renderable = &scene.Renderable{Mesh: cube, Texture: panelTex, Color: mathx.Hex(hex)}
 	}
+	g.cubeMesh, g.cubeTex = cube, panelTex
 
 	w.UpdateTransforms()
 	return g, nil
@@ -130,12 +157,62 @@ func (g *Game) addModel(path string, parent scene.ID) error {
 	return nil
 }
 
-func (g *Game) Update(dt float32, in *input.State) {
+// Update advances the game. mouseFree is false while the debug UI has the mouse.
+func (g *Game) Update(dt float32, in *input.State, mouseFree bool) {
 	if g.scripts != nil {
 		g.scripts.Poll() // errors are logged by the host
 	}
-	g.camera.update(dt, in)
-	g.world.Update(dt)
+	g.camera.update(dt, in, mouseFree)
+	g.world.Update(dt * g.timeScale)
+}
+
+// DebugUI describes the game's debug window.
+func (g *Game) DebugUI(b *ui.Builder, s Stats) {
+	b.Window("vkgame", 12, 12)
+	b.Text("%.0f fps  %.2f ms", s.FPS, s.FrameMS)
+	b.Text("%d entities, %d draws", g.world.Len(), s.Draws)
+	mode := "orbit (Tab: fly)"
+	if g.camera.fly {
+		mode = "fly (Tab: orbit)"
+	}
+	b.Text("camera: %s", mode)
+	if g.scripts != nil {
+		b.Text("scripts: v%d %s", g.scripts.Version(), strings.Join(g.scripts.Names(), ", "))
+	}
+	b.Separator()
+	b.Slider("sun", &g.sunIntensity, 0, 3)
+	b.Slider("ambient", &g.ambientLevel, 0, 3)
+	b.Slider("time scale", &g.timeScale, 0, 4)
+	b.Checkbox("auto orbit", &g.camera.autoSpin)
+	b.Separator()
+	if b.Button("spawn cube") {
+		g.spawnCube()
+	}
+	if b.Button("clear spawned") {
+		for _, id := range g.spawned {
+			g.world.Destroy(id)
+		}
+		g.spawned = g.spawned[:0]
+	}
+	b.Text("F1: hide this window")
+	b.End()
+}
+
+// spawnCube drops a randomly coloured spinning cube somewhere on the ground.
+func (g *Game) spawnCube() {
+	angle := g.rng.Float64() * 2 * math.Pi
+	dist := 1.5 + g.rng.Float64()*5
+	size := 0.3 + g.rng.Float32()*0.5
+	e := g.world.Spawn(fmt.Sprintf("spawned%d", len(g.spawned)), scene.ID{}).
+		AddBehaviour(spin(g.rng.Float32()*4 - 2))
+	e.Transform.Position = mathx.Vec3{float32(math.Cos(angle) * dist), size / 2, float32(math.Sin(angle) * dist)}
+	e.Transform.Scale = mathx.Vec3{size, size, size}
+	e.Renderable = &scene.Renderable{
+		Mesh:    g.cubeMesh,
+		Texture: g.cubeTex,
+		Color:   mathx.SRGB(g.rng.Float32(), g.rng.Float32(), g.rng.Float32(), 1),
+	}
+	g.spawned = append(g.spawned, e.ID())
 }
 
 // script returns the named script behaviour, or a no-op without scripts.
@@ -161,8 +238,8 @@ func (g *Game) Render(aspect float32, out []render.DrawCmd) (render.FrameParams,
 		ViewProj:     g.camera.lens.Projection(aspect).Mul(view),
 		CameraPos:    eye,
 		SunDirection: mathx.Vec3{0.4, 1, 0.3},
-		SunColor:     mathx.Vec3{1, 0.95, 0.85},
-		Ambient:      mathx.Vec3{0.18, 0.2, 0.25},
+		SunColor:     mathx.Vec3{1, 0.95, 0.85}.Scale(g.sunIntensity),
+		Ambient:      mathx.Vec3{0.18, 0.2, 0.25}.Scale(g.ambientLevel),
 		Clear:        mathx.Hex(0x9cc3e6),
 	}
 	return params, g.world.AppendDraws(out[:0])

@@ -68,6 +68,46 @@ typedef struct RDrawCmd {
     RMesh    mesh;
 } RDrawCmd;
 
+// ---- Debug UI (Dear ImGui) -------------------------------------------------
+// The UI is described as a flat command list each frame, drawn by the renderer
+// in a single call. Labels live in one shared text buffer (no pointers inside
+// the commands), and widget results are written back into the same commands.
+
+enum {
+    R_UI_WINDOW = 1,    // begin a window: label = title, x/y = initial position (0,0 = auto)
+    R_UI_END,           // end the current window
+    R_UI_TEXT,          // label = text
+    R_UI_SLIDER,        // float slider: value in/out, min..max
+    R_UI_CHECKBOX,      // value in/out: 0 or 1
+    R_UI_BUTTON,        // result = 1 on the frame it was clicked
+    R_UI_SEPARATOR,
+};
+
+// Must match gfx.UICmd in Go.
+typedef struct RUICmd {
+    uint32_t kind;
+    uint32_t label_offset; // into the text buffer
+    uint32_t label_length;
+    uint32_t result;       // out: 1 if the widget was changed/clicked this frame
+    float    value;        // in/out
+    float    min, max;
+    float    x, y;
+} RUICmd;
+
+// Must match gfx.UIInput in Go.
+typedef struct RUIInput {
+    float    mouse_x, mouse_y; // framebuffer pixels; negative = no mouse (e.g. cursor captured)
+    float    wheel;            // vertical scroll this frame
+    uint32_t mouse_buttons;    // bit 0 left, bit 1 right, bit 2 middle
+    float    delta_time;       // seconds
+} RUIInput;
+
+// Must match gfx.UIOutput in Go.
+typedef struct RUIOutput {
+    int32_t want_mouse;        // the UI is using the mouse: don't send it to the game
+    int32_t want_keyboard;
+} RUIOutput;
+
 // Returns 1 on success, 0 on failure (see r_last_error).
 R_API int32_t r_init(const RInitDesc* desc);
 
@@ -98,6 +138,11 @@ R_API void r_destroy_texture(RTexture texture);
 R_API int32_t r_begin_frame(const RFrameParams* params);
 
 R_API void r_draw(const RDrawCmd* cmds, uint32_t count);
+
+// Draws the debug UI over the frame. Call between r_begin_frame and
+// r_end_frame, normally after the scene's r_draw. text holds all labels.
+R_API void r_ui(const RUIInput* input, RUICmd* cmds, uint32_t count,
+                const char* text, uint32_t text_length, RUIOutput* out);
 
 R_API void r_end_frame(void);
 

@@ -43,6 +43,9 @@ func init() {
 	checkSize("render.DrawCmd", unsafe.Sizeof(DrawCmd{}), uintptr(C.sizeof_RDrawCmd))
 	checkSize("render.frameParams", unsafe.Sizeof(frameParams{}), uintptr(C.sizeof_RFrameParams))
 	checkSize("geom.Vertex", unsafe.Sizeof(geom.Vertex{}), uintptr(C.sizeof_RVertex))
+	checkSize("gfx.UICmd", unsafe.Sizeof(gfx.UICmd{}), uintptr(C.sizeof_RUICmd))
+	checkSize("gfx.UIInput", unsafe.Sizeof(gfx.UIInput{}), uintptr(C.sizeof_RUIInput))
+	checkSize("gfx.UIOutput", unsafe.Sizeof(gfx.UIOutput{}), uintptr(C.sizeof_RUIOutput))
 }
 
 func checkSize(name string, got, want uintptr) {
@@ -148,6 +151,24 @@ func Draw(cmds []DrawCmd) {
 		return
 	}
 	C.r_draw((*C.RDrawCmd)(unsafe.Pointer(&cmds[0])), C.uint32_t(len(cmds)))
+}
+
+// UI draws the debug UI over the frame (between BeginFrame and EndFrame) and
+// writes widget results back into cmds. labels is the text buffer the commands
+// point into (see package ui).
+func UI(in gfx.UIInput, cmds []gfx.UICmd, labels []byte) gfx.UIOutput {
+	var out gfx.UIOutput
+	var cmdPtr *C.RUICmd
+	if len(cmds) > 0 {
+		cmdPtr = (*C.RUICmd)(unsafe.Pointer(&cmds[0]))
+	}
+	var textPtr *C.char
+	if len(labels) > 0 {
+		textPtr = (*C.char)(unsafe.Pointer(&labels[0]))
+	}
+	C.r_ui((*C.RUIInput)(unsafe.Pointer(&in)), cmdPtr, C.uint32_t(len(cmds)),
+		textPtr, C.uint32_t(len(labels)), (*C.RUIOutput)(unsafe.Pointer(&out)))
+	return out
 }
 
 func EndFrame() {

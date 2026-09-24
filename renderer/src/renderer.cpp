@@ -9,6 +9,7 @@
 #include <VkBootstrap.h>
 
 #include "renderer.h"
+#include "ui.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -111,6 +112,8 @@ struct Renderer {
     uint32_t  frame = 0;
     uint32_t  image = 0;
     bool      recording = false;
+    bool      scene_state_bound = false; // our pipeline/sets/viewport are bound (UI rebinds its own)
+    bool      ui_ready = false;
 
     uint32_t width = 0;
     uint32_t height = 0;
@@ -716,6 +719,7 @@ bool create_swapchain() {
 
     if (g->swapchain.image_format != g->pipeline_format) {
         if (!create_pipeline(g->swapchain.image_format)) return false;
+        if (g->ui_ready) ui_set_formats(g->swapchain.image_format, kDepthFormat);
     }
 
     g->swapchain_dirty = false;
@@ -884,12 +888,40 @@ bool init(const RInitDesc& desc) {
 
     if (!create_frames()) return false;
     if (!create_descriptors()) return false;
-    return create_swapchain(); // also builds the pipeline for the swapchain format
+    if (!create_swapchain()) return false; // also builds the pipeline for the swapchain format
+
+    UiInitInfo ui{};
+    ui.instance = g->instance.instance;
+    ui.physical_device = g->device.physical_device.physical_device;
+    ui.device = g->dev;
+    ui.queue_family = g->queue_family;
+    ui.queue = g->queue;
+    ui.image_count = static_cast<uint32_t>(g->images.size());
+    ui.color_format = g->swapchain.image_format;
+    ui.depth_format = kDepthFormat;
+    std::string ui_error;
+    g->ui_ready = ui_init(ui, &ui_error);
+    if (!g->ui_ready) std::fprintf(stderr, "[renderer] debug UI disabled: %s\n", ui_error.c_str());
+    return true;
+}
+
+// Binds the scene pipeline, descriptor sets and viewport for the current frame.
+void bind_scene_state(VkCommandBuffer cmd) {
+    const VkExtent2D extent = g->swapchain.extent;
+    VkViewport viewport{0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f};
+    VkRect2D   scissor{{0, 0}, extent};
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->pipeline);
+    const VkDescriptorSet sets[] = {g->frames[g->frame].frame_set, g->texture_set};
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->pipeline_layout, 0, 2, sets, 0, nullptr);
+    g->scene_state_bound = true;
 }
 
 void destroy_all() {
     if (g->dev) {
         vkDeviceWaitIdle(g->dev);
+        if (g->ui_ready) ui_shutdown();
         for (FrameData& f : g->frames) {
             if (f.in_flight) vkDestroyFence(g->dev, f.in_flight, nullptr);
             if (f.image_acquired) vkDestroySemaphore(g->dev, f.image_acquired, nullptr);
@@ -1107,15 +1139,7 @@ int32_t r_begin_frame(const RFrameParams* params) {
     rendering.pColorAttachments = &color;
     rendering.pDepthAttachment = &depth;
     vkCmdBeginRendering(f.cmd, &rendering);
-
-    VkViewport viewport{0.0f, 0.0f, static_cast<float>(extent.width), static_cast<float>(extent.height), 0.0f, 1.0f};
-    VkRect2D scissor{{0, 0}, extent};
-    vkCmdSetViewport(f.cmd, 0, 1, &viewport);
-    vkCmdSetScissor(f.cmd, 0, 1, &scissor);
-    vkCmdBindPipeline(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->pipeline);
-
-    const VkDescriptorSet sets[] = {f.frame_set, g->texture_set};
-    vkCmdBindDescriptorSets(f.cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g->pipeline_layout, 0, 2, sets, 0, nullptr);
+    bind_scene_state(f.cmd);
 
     g->recording = true;
     return 1;
@@ -1124,6 +1148,7 @@ int32_t r_begin_frame(const RFrameParams* params) {
 void r_draw(const RDrawCmd* cmds, uint32_t count) {
     if (!g || !g->recording || !cmds) return;
     VkCommandBuffer cmd = g->frames[g->frame].cmd;
+    if (!g->scene_state_bound) bind_scene_state(cmd); // r_ui ran earlier this frame
     const Mesh*     bound = nullptr;
     for (uint32_t i = 0; i < count; ++i) {
         const Mesh* mesh = lookup_mesh(cmds[i].mesh);
@@ -1140,6 +1165,16 @@ void r_draw(const RDrawCmd* cmds, uint32_t count) {
                            0, kPushConstantSize, &push);
         vkCmdDrawIndexed(cmd, mesh->index_count, 1, 0, 0, 0);
     }
+}
+
+void r_ui(const RUIInput* input, RUICmd* cmds, uint32_t count,
+          const char* text, uint32_t text_length, RUIOutput* out) {
+    if (out) *out = {};
+    if (!g || !g->recording || !g->ui_ready || !input) return;
+    if (count > 0 && !cmds) return;
+    ui_frame(g->frames[g->frame].cmd, g->swapchain.extent, *input, cmds, count,
+             text ? text : "", text ? text_length : 0, out);
+    g->scene_state_bound = false; // ImGui bound its own pipeline, sets and viewport
 }
 
 void r_end_frame(void) {

@@ -88,6 +88,19 @@ func (w *Window) SetCursorLocked(locked bool) {
 // FramebufferSize is the drawable size in pixels (differs from window size on high-DPI).
 func (w *Window) FramebufferSize() (int, int) { return w.win.GetFramebufferSize() }
 
+// CursorLocked reports whether SetCursorLocked(true) is in effect.
+func (w *Window) CursorLocked() bool { return w.cursorLocked }
+
+// ToFramebuffer converts a cursor position (window coordinates) to framebuffer pixels.
+func (w *Window) ToFramebuffer(x, y float64) (float64, float64) {
+	ww, wh := w.win.GetSize()
+	fw, fh := w.win.GetFramebufferSize()
+	if ww == 0 || wh == 0 {
+		return x, y
+	}
+	return x * float64(fw) / float64(ww), y * float64(fh) / float64(wh)
+}
+
 func (w *Window) OnFramebufferResize(fn func(width, height int)) {
 	w.win.SetFramebufferSizeCallback(func(_ *glfw.Window, width, height int) {
 		fn(width, height)

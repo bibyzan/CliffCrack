@@ -54,8 +54,17 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | Fly | **Tab** | toggle orbit / fly |
 | | hold right mouse | look around |
 | | **W A S D**, **Q / E** | move, down / up (**Shift** = faster) |
-| Any | **F12** | save `screenshot-<time>.png` (read back from the GPU) |
+| Any | **F1** | show / hide the debug UI (stats, lighting, time scale, spawn cubes) |
+| | **F12** | save `screenshot-<time>.png` (read back from the GPU) |
 | | **Esc** | quit |
+
+### Debug UI
+
+Dear ImGui runs inside the renderer, but Go describes the UI: `engine/ui.Builder`
+turns `b.Slider("sun", &sun, 0, 3)`-style calls into a flat command list (labels packed
+into one byte buffer), `render.UI` draws it in a single cgo call, and `Builder.Apply`
+writes edits back to your variables. Buttons report their click on the next frame.
+While the UI has the mouse, the camera ignores clicks and scrolling.
 
 ### Hot-reloadable scripts
 
@@ -86,6 +95,7 @@ engine/
   render/              cgo wrapper around renderer.h (the only cgo package)
   gfx/                 renderer data types (handles, DrawCmd, FrameParams), pure Go
   scene/               entity world: hierarchy, transforms, renderables, behaviours
+  ui/                  debug UI builder (immediate-mode widgets -> command list)
   platform/            GLFW window; feeds OS events into input
   input/               per-frame keyboard/mouse state (pressed/released edges, deltas)
   camera/              fly + orbit cameras, perspective lens
@@ -106,7 +116,7 @@ cmd/game/            main package
 - [x] Textures: `r_create_texture` with mipmaps, bindless descriptor table
 - [x] glTF materials (base colour factor + texture), parts grouped by material
 - [x] Frame capture (`-screenshot`, F12)
-- [ ] Dear ImGui overlay (renderer side, toggled from Go)
+- [x] Dear ImGui debug overlay driven by a Go-built command list (F1)
 - [x] Input abstraction + orbit/fly camera controls
 - [x] Entity model: scene.World with hierarchy, generational IDs, behaviours
 - [x] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)

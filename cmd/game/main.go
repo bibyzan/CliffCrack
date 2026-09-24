@@ -10,9 +10,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"vkgame/engine/gfx"
 	"vkgame/engine/input"
 	"vkgame/engine/platform"
 	"vkgame/engine/render"
+	uiPkg "vkgame/engine/ui"
 	"vkgame/game"
 )
 
@@ -29,6 +31,7 @@ func run() error {
 	model := flag.String("model", "", "optional .gltf/.glb file to show in the centre of the scene")
 	screenshot := flag.String("screenshot", "", "render -frames frames, save the last one to this PNG and exit")
 	frames := flag.Int("frames", 120, "number of frames to render before taking -screenshot")
+	ui := flag.Bool("ui", true, "show the debug UI at startup (F1 toggles)")
 	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
 	flag.Parse()
 
@@ -70,6 +73,10 @@ func run() error {
 	var (
 		rendered    int    // frames completed so far
 		capturePath string // non-empty: capture the next frame to this file
+		showUI      = *ui
+		uiBuilder   uiPkg.Builder
+		uiWantMouse bool    // the debug UI used the mouse last frame
+		fps         float32 // smoothed
 	)
 
 	in := win.Input()
@@ -79,6 +86,10 @@ func run() error {
 		platform.PollEvents()
 		if in.Pressed(input.KeyEscape) {
 			win.SetShouldClose(true)
+		}
+		if in.Pressed(input.KeyF1) {
+			showUI = !showUI
+			uiWantMouse = false
 		}
 		if in.Pressed(input.KeyF12) && capturePath == "" {
 			capturePath = time.Now().Format("screenshot-20060102-150405.png")
@@ -90,7 +101,10 @@ func run() error {
 		now := platform.Time()
 		dt := float32(now - last)
 		last = now
-		g.Update(dt, in)
+		if dt > 0 {
+			fps += (1/dt - fps) * 0.05
+		}
+		g.Update(dt, in, !uiWantMouse)
 		win.SetCursorLocked(g.CursorLocked())
 
 		width, height := win.FramebufferSize()
@@ -108,7 +122,16 @@ func run() error {
 			continue // the capture request carries over to the next frame
 		}
 		render.Draw(draws)
+		if showUI {
+			uiBuilder.Reset()
+			g.DebugUI(&uiBuilder, game.Stats{FPS: fps, FrameMS: 1000 / max(fps, 1), Draws: len(draws)})
+			out := render.UI(uiInput(win, dt), uiBuilder.Cmds, uiBuilder.Labels)
+			uiWantMouse = out.WantMouse != 0
+		}
 		render.EndFrame()
+		if showUI {
+			uiBuilder.Apply()
+		}
 		rendered++
 
 		if capturePath != "" {
@@ -122,6 +145,25 @@ func run() error {
 		}
 	}
 	return nil
+}
+
+// uiInput converts this frame's mouse state for the debug UI. While the cursor
+// is captured for camera look, the UI gets no mouse at all.
+func uiInput(win *platform.Window, dt float32) gfx.UIInput {
+	in := win.Input()
+	u := gfx.UIInput{MouseX: -1, MouseY: -1, Wheel: float32(in.Scroll()), DeltaTime: dt}
+	if win.CursorLocked() {
+		u.Wheel = 0
+		return u
+	}
+	x, y := win.ToFramebuffer(in.MousePos())
+	u.MouseX, u.MouseY = float32(x), float32(y)
+	for i, b := range []input.MouseButton{input.MouseLeft, input.MouseRight, input.MouseMiddle} {
+		if in.MouseDown(b) {
+			u.MouseButtons |= 1 << i
+		}
+	}
+	return u
 }
 
 // scriptsDir resolves the -scripts flag. By default it prefers ./scripts and
