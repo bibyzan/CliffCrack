@@ -51,6 +51,7 @@ const (
 
 // Grenade is a grenade in flight, or stuck to something.
 type Grenade struct {
+	ID    int // unique in the arena
 	Body  *physics.Body
 	Owner *Player
 	Kind  GrenadeKind

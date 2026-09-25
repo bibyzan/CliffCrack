@@ -32,6 +32,8 @@ func (a *Arena) damageChunk(c *Chunk, damage float32, push mathx.Vec3, by *Playe
 	}
 	if c.HP <= 0 {
 		a.breakChunk(c, push, by, ev)
+	} else {
+		ev.Chipped = append(ev.Chipped, c)
 	}
 }
 
@@ -64,7 +66,7 @@ func (a *Arena) breakChunk(c *Chunk, push mathx.Vec3, by *Player, ev *Events) {
 		d := a.addDebris(at, half, c.Mat, push.Add(spray))
 		d.By = by
 	}
-	ev.Breaks = append(ev.Breaks, Break{At: c.Centre, Half: c.Half, Mat: c.Mat})
+	ev.Breaks = append(ev.Breaks, Break{At: c.Centre, Half: c.Half, Mat: c.Mat, Chunk: c, Push: push})
 }
 
 // removeChunk takes a chunk out of its structure and the physics world.
@@ -97,7 +99,7 @@ func (a *Arena) settle(ev *Events) {
 		d := a.addDebris(c.Centre, c.Half, c.Mat, drift)
 		d.By = a.lastBreaker
 		d.Collapsed = true
-		ev.Breaks = append(ev.Breaks, Break{At: c.Centre, Half: c.Half, Mat: c.Mat, Collapsed: true})
+		ev.Breaks = append(ev.Breaks, Break{At: c.Centre, Half: c.Half, Mat: c.Mat, Collapsed: true, Chunk: c})
 	}
 	for _, s := range a.Structures {
 		s.dirty = false // the fallen chunks don't hold anything up either

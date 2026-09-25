@@ -19,7 +19,18 @@ type Settings struct {
 	// HUDWidth is how much of the screen's width the HUD spans, in percent,
 	// centred: on an ultrawide, bring it in to where you're looking.
 	HUDWidth float32 `json:"hud_width"`
+	// Online: the name to go by (empty: the computer's account name) and
+	// the coordinator to find rooms on.
+	Name   string `json:"name,omitempty"`
+	Server string `json:"server,omitempty"`
 }
+
+// DefaultServer is the coordinator used when none is set: one running on
+// this machine (go run ./cmd/coordinator). A build can bake in another,
+// e.g. a LAN address for a phone (build-android.ps1 -Server):
+//
+//	-ldflags "-X CliffCrack/game.DefaultServer=192.168.1.20:8080"
+var DefaultServer = "localhost:8080"
 
 // Setting ranges.
 const (

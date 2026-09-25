@@ -36,7 +36,7 @@ func run() error {
 	model := flag.String("model", "", "optional .gltf/.glb file to show in the centre of the scene")
 	screenshot := flag.String("screenshot", "", "render -frames frames at a fixed 60 Hz step, save the last one to this PNG and exit")
 	frames := flag.Int("frames", 120, "number of frames to render before taking -screenshot")
-	mode := flag.String("mode", "menu", `start in "menu", "run", "arena", "range" (the firing range) or "demo"`)
+	mode := flag.String("mode", "menu", `start in "menu", "run", "arena", "range" (the firing range), "online" (the lobby browser) or "demo"`)
 	seed := flag.Uint64("seed", 0, "Run mode course seed (0 = a new course every run)")
 	autopilot := flag.Bool("autopilot", false, "Run mode steers itself (for demos and scripted tests)")
 	from := flag.Float64("from", 0, "Run mode: start this many metres down the course (with -seed, to try a particular section)")
@@ -46,13 +46,17 @@ func run() error {
 	hold := flag.String("hold", "", `keys to hold down every frame, e.g. "W" or "WD" (for scripted tests)`)
 	click := flag.Bool("click", false, "hold the left mouse button every frame (for scripted tests)")
 	weapon := flag.String("weapon", "", `Arena: start holding this weapon ("rifle", "pistol", "shotgun", "sniper" or "launcher"; for screenshots)`)
+	server := flag.String("server", "", `online: the coordinator, e.g. "192.168.1.20:8080" (default: the setting, else localhost:8080)`)
+	name := flag.String("name", "", "online: the name to go by (default: the setting, else your account name)")
+	hostRoom := flag.Bool("host", false, "online: make a room, and start the match as soon as someone's connected")
+	joinRoom := flag.Bool("join", false, "online: join the first open room")
 	tap := flag.String("tap", "", `keys to press on given frames, e.g. "R@60,G@90" (for scripted tests)`)
 	aim := flag.Bool("aim", false, "hold the right mouse button every frame: aim down the sights (for scripted tests)")
 	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
 	flag.Parse()
 	startMode, ok := game.ParseMode(*mode)
 	if !ok {
-		return fmt.Errorf("unknown -mode %q (want menu, run, arena, range or demo)", *mode)
+		return fmt.Errorf("unknown -mode %q (want menu, run, arena, range, online or demo)", *mode)
 	}
 
 	exe, err := os.Executable()
@@ -111,6 +115,10 @@ func run() error {
 		Seed:      *seed,
 		Autopilot: *autopilot,
 		Weapon:    *weapon,
+		Server:    *server,
+		AutoHost:  *hostRoom,
+		AutoJoin:  *joinRoom,
+		Name:      *name,
 		StartAt:   float32(*from),
 		DebugUI:   *ui,
 		Audio:     mixer,

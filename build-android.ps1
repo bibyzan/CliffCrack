@@ -9,6 +9,7 @@
     aapt2, zipalign and apksigner (debug key) from the Android SDK: no Gradle.
 .EXAMPLE
     ./build-android.ps1 -Run          # build, install on the connected device, start
+    ./build-android.ps1 -Run -Server 192.168.1.20:8080   # ... finding online rooms on that coordinator
     ./build-android.ps1 -Run -Log     # ... then follow the game's log
 #>
 param(
@@ -16,7 +17,10 @@ param(
     [string] $Config = 'Release',
     [switch] $Install,
     [switch] $Run,
-    [switch] $Log
+    [switch] $Log,
+    # The online coordinator the game uses unless its settings say otherwise
+    # (a phone has no command line): e.g. a PC on the same network.
+    [string] $Server = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -78,6 +82,11 @@ try {
     $env:CC = Join-Path $clangBin "aarch64-linux-android$minApi-clang.cmd"
     $env:CXX = Join-Path $clangBin "aarch64-linux-android$minApi-clang++.cmd"
     $ldflags = if ($Config -eq 'Release') { '-s -w' } else { '' }
+    if ($Server) { $ldflags += " -X CliffCrack/game.DefaultServer=$Server" }
+    # pion's WebRTC finds the network interfaces through wlynxg/anet (Go's own
+    # way is blocked on Android 11+), which links to a private part of package
+    # net: newer Go refuses that unless told not to check.
+    $ldflags += ' -checklinkname=0'
     Invoke-Step 'Build game (Go, c-shared)' {
         go build -buildmode=c-shared -trimpath "-ldflags=$ldflags" -o (Join-Path $libDir 'libcliffcrack.so') ./cmd/game
     }

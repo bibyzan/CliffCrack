@@ -26,11 +26,15 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 		// Score, top left under the visor's corner (the armour bar has the
 		// top middle): YOU 1 : 0 BOT, the round and its clock.
 		b.Panel("##score", m.hudX(0.035), 0.075, anchored, 1.5)
-		b.ColorText(suitColor[0], "YOU")
-		b.SameLine(14)
-		b.Text("%d : %d", mt.Wins[0], mt.Wins[1])
-		b.SameLine(14)
-		b.ColorText(suitColor[1], "BOT")
+		// You first; then everyone else, by name online.
+		b.ColorText(suitColor[0], "YOU %d", mt.Wins[local])
+		for _, p := range m.sim().Players {
+			if p.ID == local {
+				continue
+			}
+			b.SameLine(18)
+			b.ColorText(suitColor[1], "%d %s", mt.Wins[p.ID], m.playerName(p))
+		}
 		b.End()
 		b.Panel("##round", m.hudX(0.035), 0.135, anchored, 1.0)
 		clock := ""
@@ -129,6 +133,18 @@ func (m *Arena) banner(b *ui.Builder, in *input.State) {
 	mt := m.match
 	var title, sub string
 	colour := uiWhite
+	if m.net != nil && m.net.over != "" {
+		b.Panel("##banner", 0.5, 0.3, hudText, 3)
+		b.ColorText(uiAccent, "MATCH OVER")
+		b.End()
+		b.Panel("##bannersub", 0.5, 0.38, hudText, 1.5)
+		b.ColorText(uiMuted, "%s", m.net.over)
+		b.End()
+		b.Panel("##rematch", 0.5, 0.45, hudText, 1.2)
+		b.ColorText(uiWhite, "%s", prompt(in, "Enter / click  main menu", "A  main menu"))
+		b.End()
+		return
+	}
 	switch mt.Phase {
 	case arena.PhaseCountdown:
 		title = fmt.Sprintf("%d", int(math.Ceil(float64(mt.Timer))))
@@ -163,7 +179,12 @@ func (m *Arena) banner(b *ui.Builder, in *input.State) {
 	}
 	if mt.Phase == arena.PhaseMatchOver && mt.Timer < -1 {
 		b.Panel("##rematch", 0.5, 0.45, hudText, 1.2)
-		b.ColorText(uiWhite, "%s", prompt(in, "Enter / click  rematch     Esc  menu", "A  rematch     Start  menu"))
+		switch {
+		case m.net != nil && !m.net.host:
+			b.ColorText(uiWhite, "waiting for the host to start a rematch   ·   Esc  menu")
+		default:
+			b.ColorText(uiWhite, "%s", prompt(in, "Enter / click  rematch     Esc  menu", "A  rematch     Start  menu"))
+		}
 		b.End()
 	}
 }
@@ -186,6 +207,9 @@ func (m *Arena) roundResult() (title, sub string, colour [4]float32) {
 		if p.Dead && p.ID == local {
 			return title, "you were taken down", colour
 		}
+	}
+	if m.net != nil {
+		return title, "everyone else is down", colour
 	}
 	return title, "the bot is down", colour
 }

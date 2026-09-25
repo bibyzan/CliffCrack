@@ -87,7 +87,8 @@ type Stats struct {
 // Player is a first-person fighter: a fixed-rotation sphere at the feet, a
 // view on top, a loadout and health.
 type Player struct {
-	ID         int // index in Arena.Players
+	ID         int    // index in Arena.Players
+	Name       string // online: the player's name
 	Body       *physics.Body
 	Yaw, Pitch float32
 	Weapons
@@ -180,6 +181,8 @@ type Break struct {
 	At, Half  mathx.Vec3
 	Mat       Material
 	Collapsed bool // fell because nothing held it up, rather than broken
+	Chunk     *Chunk
+	Push      mathx.Vec3 // what it was hit with (its pieces fly with it)
 }
 
 // Smash is a sledgehammer blow landing.
@@ -253,6 +256,7 @@ type Events struct {
 	Explosions []Explosion
 	Stuck      []Stick
 	Actions    []Action
+	Chipped    []*Chunk // damaged but still standing
 }
 
 func (ev *Events) act(p *Player, k ActionKind, v float32) {
@@ -288,6 +292,7 @@ func (ev *Events) Merge(o Events) {
 	ev.Smashes = append(ev.Smashes, o.Smashes...)
 	ev.Explosions = append(ev.Explosions, o.Explosions...)
 	ev.Stuck = append(ev.Stuck, o.Stuck...)
+	ev.Chipped = append(ev.Chipped, o.Chipped...)
 	ev.Actions = append(ev.Actions, o.Actions...)
 }
 
@@ -314,6 +319,7 @@ type Arena struct {
 	FreeAmmo     bool // reloads don't use up reserves (the firing range)
 
 	rng         *rand.Rand
+	nextGrenade int      // the last grenade's ID
 	chunks      []*Chunk // every structure's, linked together
 	lastBreaker *Player  // who last damaged a structure: collapses are theirs
 }

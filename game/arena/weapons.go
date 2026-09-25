@@ -468,7 +468,8 @@ func (a *Arena) launch(p *Player, kind GrenadeKind, at, vel mathx.Vec3) *Grenade
 	b.Velocity = vel.Add(p.Body.Velocity)
 	b.Restitution = spec.Bounce
 	b.Ignore = p.Body // it leaves from inside your own collider
-	g := &Grenade{Body: b, Owner: p, Kind: kind}
+	a.nextGrenade++
+	g := &Grenade{ID: a.nextGrenade, Body: b, Owner: p, Kind: kind}
 	b.UserData = g
 	if err := a.Phys.Add(b); err != nil {
 		panic(err)

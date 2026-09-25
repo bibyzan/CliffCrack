@@ -30,8 +30,11 @@ const (
 	breakSounds = 3   // per frame, so a collapse doesn't deafen
 	pulseRise   = 0.7 // m a launch pad's pulses climb
 
-	local = 0 // the player on this machine is player 0; the bot is player 1
 )
+
+// local is the player on this machine: player 0, except for a guest in an
+// online match.
+var local = 0
 
 // Bot difficulty choices, for the debug window.
 var botSkills = []struct {
@@ -111,6 +114,11 @@ type Arena struct {
 	debugOpen bool // the F1 window is up: the mouse is for the UI unless the right button is held
 	locked    bool
 
+	net          *netPlay // an online match (nil: against the bot)
+	inputBlocked bool     // a menu's open over an online match: it plays on, without us
+	lastIn       *input.State
+	wantsMenu    bool // back to the main menu (the online match is over for us)
+
 	// Practice is the firing range rather than a match against the bot.
 	Practice    bool
 	startWeapon string // hand the local player this weapon each round (for screenshots)
@@ -189,18 +197,23 @@ func (m *Arena) start() error {
 	m.inputs = make([]arena.Input, n)
 	m.strides = make([]float32, n)
 
+	if err := m.buildLevel(); err != nil {
+		return err
+	}
+	m.feed = m.feed[:0]
+	m.newRound()
+	return nil
+}
+
+// buildLevel makes the meshes for the match's site.
+func (m *Arena) buildLevel() error {
 	for _, mesh := range m.owned {
 		render.DestroyMesh(mesh)
 	}
 	draws, meshes, err := m.as.levelDraws(m.sim().Level)
 	m.owned = meshes
-	if err != nil {
-		return err
-	}
 	m.level = draws
-	m.feed = m.feed[:0]
-	m.newRound()
-	return nil
+	return err
 }
 
 // newRound clears the last round's effects and the bots' memories.
@@ -250,8 +263,13 @@ func (m *Arena) me() *arena.Player { return m.match.Arena.Players[local] }
 // Esc is handled by the App.
 func (m *Arena) Update(dt float32, in *input.State, mouseFree bool) {
 	m.elapsed += dt
+	m.lastIn = in
 	held := in.MouseDown(input.MouseRight) && (mouseFree || m.locked)
-	m.locked = !m.debugOpen || held
+	m.locked = (!m.debugOpen || held) && !m.inputBlocked
+	if m.net != nil {
+		m.updateOnline(dt, in, mouseFree)
+		return
+	}
 
 	if m.match.Phase == arena.PhaseMatchOver && m.match.Timer < -1 &&
 		(confirmPressed(in) || (m.locked && in.MousePressed(input.MouseLeft))) {
@@ -388,6 +406,9 @@ func (m *Arena) playerName(p *arena.Player) string {
 		return "THE SITE"
 	case p.ID == local:
 		return "YOU"
+	case m.net != nil:
+		name, _ := m.netName(p)
+		return strings.ToUpper(name)
 	case m.Practice:
 		return "DUMMY"
 	}

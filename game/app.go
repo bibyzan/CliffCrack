@@ -10,6 +10,7 @@ import (
 	"CliffCrack/engine/input"
 	"CliffCrack/engine/render"
 	"CliffCrack/engine/ui"
+	"CliffCrack/online"
 )
 
 // Mode is what the App is showing.
@@ -20,7 +21,8 @@ const (
 	ModeRun
 	ModeDemo
 	ModeArena
-	ModeRange // the Arena's firing range
+	ModeRange  // the Arena's firing range
+	ModeOnline // the lobby browser; an online match itself plays in ModeArena
 )
 
 // ParseMode maps "menu", "run", "arena", "range" or "demo" to a Mode.
@@ -36,6 +38,8 @@ func ParseMode(s string) (Mode, bool) {
 		return ModeArena, true
 	case "range":
 		return ModeRange, true
+	case "online":
+		return ModeOnline, true
 	}
 	return ModeMenu, false
 }
@@ -57,6 +61,10 @@ type Options struct {
 	Audio     *audio.Mixer
 	Demo      DemoOptions
 	DataDir   string // where settings are saved ("" = don't save)
+	Server    string // online: the coordinator (overrides the setting)
+	Name      string // online: the name to go by (overrides the setting)
+	AutoHost  bool   // online: make a room and start as soon as someone's in (-host)
+	AutoJoin  bool   // online: join the first open room (-join)
 }
 
 // overlay is a screen shown over the frozen (or, on the main menu, idling) game.
@@ -77,6 +85,7 @@ type App struct {
 	run   *Run   // the menu backdrop and the Run mode share one Run
 	demo  *Demo  // built the first time it is opened
 	arena *Arena // likewise
+	lobby onlineScreen
 	debug map[Mode]bool
 	quit  bool
 
@@ -122,6 +131,9 @@ func NewApp(opts Options) (*App, error) {
 
 // enter switches to mode.
 func (a *App) enter(mode Mode) error {
+	if a.arena != nil && a.arena.Online() {
+		a.arena.leaveOnline() // leaving an online match, for whatever's next
+	}
 	switch mode {
 	case ModeMenu:
 		a.run.start(true)
@@ -135,6 +147,23 @@ func (a *App) enter(mode Mode) error {
 			}
 			a.demo = d
 		}
+	case ModeOnline:
+		if a.run.ride == nil {
+			a.run.start(true) // the menu's ride, behind the lobby (when started straight into it)
+		}
+		server := a.settings.Server
+		if a.opts.Server != "" {
+			server = a.opts.Server
+		}
+		if server == "" {
+			server = DefaultServer
+		}
+		name := a.settings.playerName()
+		if a.opts.Name != "" {
+			name = a.opts.Name
+		}
+		a.lobby.open(server, name)
+		a.lobby.autoHost, a.lobby.autoJoin = a.opts.AutoHost, a.opts.AutoJoin
 	case ModeArena, ModeRange:
 		practice := mode == ModeRange
 		if m := a.arena; m != nil {
@@ -189,10 +218,27 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 		if act, ok := a.pause.update(in, a.pauseItems()); ok {
 			a.pauseAction(act)
 		}
-		return // the game stays frozen
+		// The game stays frozen, unless it's online: then it plays on
+		// without us.
+		if a.mode == ModeArena && a.arena.Online() {
+			a.arena.inputBlocked = true
+			a.arena.Update(dt, in, false)
+			a.arena.inputBlocked = false
+		}
+		return
 	}
 
 	switch a.mode {
+	case ModeOnline:
+		start, back := a.lobby.update(in)
+		switch {
+		case back:
+			a.lobby.close()
+			a.enter(ModeMenu)
+		case start != nil:
+			a.startOnline(start)
+		}
+		a.run.Update(dt, in, false) // the menu's ride carries on behind
 	case ModeMenu:
 		if in.Pressed(input.KeyEscape) {
 			a.quit = true
@@ -220,6 +266,11 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 		}
 		a.demo.Update(dt, in, mouseFree)
 	case ModeArena, ModeRange:
+		if a.arena.wantsMenu {
+			a.arena.wantsMenu = false
+			a.choose(ModeMenu)
+			return
+		}
 		if pausePressed(in) {
 			a.openPause()
 			return
@@ -245,6 +296,9 @@ func (a *App) openSettings(from overlay) {
 
 // pauseItems are the pause menu's entries for the current mode.
 func (a *App) pauseItems() []pauseAction {
+	if a.mode == ModeArena && a.arena.Online() {
+		return []pauseAction{pauseResume, pauseSettings, pauseMainMenu} // (Main menu leaves the match)
+	}
 	if a.mode == ModeRun || a.mode == ModeArena || a.mode == ModeRange {
 		return []pauseAction{pauseResume, pauseRestart, pauseSettings, pauseMainMenu}
 	}
@@ -348,6 +402,8 @@ func (a *App) UI(b *ui.Builder, s Stats) {
 		if a.debug[ModeDemo] {
 			a.demo.DebugUI(b, s)
 		}
+	case ModeOnline:
+		a.lobby.ui(b, a.in)
 	case ModeArena, ModeRange:
 		m := a.arena
 		m.UI(b, a.in)
@@ -359,7 +415,7 @@ func (a *App) UI(b *ui.Builder, s Stats) {
 
 // Main-menu items that aren't modes.
 const (
-	menuSettings Mode = ModeRange + 1 + iota
+	menuSettings Mode = ModeOnline + 1 + iota
 	menuQuit
 )
 
@@ -377,6 +433,7 @@ var menuItems = []struct {
 	{"Run", ModeRun},
 	{"Arena", ModeArena},
 	{"Firing Range", ModeRange},
+	{"Online", ModeOnline},
 	{"Engine Demo", ModeDemo},
 	{"Settings", menuSettings},
 	{"Quit", menuQuit},
@@ -404,4 +461,21 @@ func (m *menu) update(in *input.State, r *Run) (Mode, bool) {
 		return menuItems[m.choice].mode, true
 	}
 	return 0, false
+}
+
+// startOnline leaves the lobby for the Arena mode, playing the match the
+// host started over the lobby's session.
+func (a *App) startOnline(start *online.StartMsg) {
+	if a.arena == nil {
+		m, err := newArena(a.sc, a.opts.Audio, &a.settings, a.opts.Seed, false)
+		if err != nil {
+			logf("online: %v", err)
+			return
+		}
+		a.arena = m
+	}
+	session := a.lobby.session
+	a.lobby.session = nil // the match owns it now
+	a.arena.startOnline(session, start)
+	a.mode = ModeArena
 }

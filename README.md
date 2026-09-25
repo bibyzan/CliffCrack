@@ -11,7 +11,8 @@ The main menu offers three modes:
   launched from a cliff across a chasm into a Halo 5 Breakout-style arena of white
   panels and team-coloured light, hung on girders over a bottomless drop. Nearly all of
   it breaks, in the spirit of THE FINALS, and you get a sledgehammer, rifle and grenade
-  launcher to tear it apart. It's the groundwork for an online multiplayer arena game.
+  launcher to tear it apart. Play the bot, or **online**: find or make a room in the
+  lobby browser and play up to four players, the site's destruction and all shared.
 - **Engine Demo**, the physics sandbox. Roll the checker ball around the arena, bump the
   spinning cubes and drop piles of balls.
 
@@ -515,6 +516,70 @@ chunks cheap. Short rays (up to 12 m) only test the statics in the grid cells th
 unrotated boxes skip the rotation maths, and dynamic bodies find each other by sort and
 sweep, so hundreds of pieces of rubble can fall at once.
 
+### Online multiplayer
+
+Up to four players, one of them hosting. Pick **Online** on the main menu: the lobby
+browser lists the rooms on the server; **Create a room**, or pick one to join. In a
+room you see who's in it and whether each player's connected; the host starts the match
+once everyone is. A room drops out of the list once it's playing.
+
+```
+            coordinator (Go; fly.io)                  GET /rooms, /healthz, /ws
+             lobby: rooms, join codes
+             WebRTC signalling only
+            /                      \
+   host (runs the match)  <== WebRTC data channels ==>  guests (up to 3)
+     steps arena.Match with            fast: inputs up / snapshots down
+     everyone's inputs                 reliable: every event down
+```
+
+- **The coordinator** (`coordinator`, `cmd/coordinator`) is a small HTTP and WebSocket
+  server: it lists rooms, lets players create and join them (by a four-letter code),
+  and relays WebRTC offers, answers and ICE candidates between a room's host and its
+  guests. No game traffic passes through it. It's ready for fly.io (`Dockerfile`,
+  `fly.toml`, a `/healthz` check); for now run it on your network:
+
+  ```powershell
+  go run ./cmd/coordinator             # listens on :8080 and prints this machine's LAN address
+  build/bin/game.exe -server 192.168.1.20:8080                   # everyone else points at it
+  build/bin/game.exe -mode online -server 192.168.1.20:8080 -host   # make a room, start when someone joins
+  build/bin/game.exe -mode online -server 192.168.1.20:8080 -join   # join the first open room
+  ```
+
+  A phone has no command line, so bake the server into the Android build:
+  `./build-android.ps1 -Run -Server 192.168.1.20:8080` (the APK now asks for network
+  access, and links with `-checklinkname=0` for pion's Android interface lookup).
+  The server and your name can also go in `settings.json` (`"server"`, `"name"`); by
+  default the server is `localhost:8080` and your name is your account's. An address
+  on a private network or `localhost` uses plain `ws://`; a public name uses `wss://`.
+- **Links** (`online`) are WebRTC data channels (pion, pure Go) from the host to each
+  guest: an unordered, unreliable channel for the stream of inputs and snapshots, and a
+  reliable, ordered one for events and control. On a LAN the players' own addresses are
+  enough; across the internet we'll add a STUN server, and TURN for strict NATs.
+- **The host runs the match.** Each guest sends its input every frame (held buttons as
+  they are, presses as running counts, so a lost packet never loses a jump or a reload;
+  aim as an absolute direction, applied at once on the guest so looking never lags).
+  The host steps `arena.Match` with everyone's input and sends back, every step, the
+  events (reliably) and, every other step, a snapshot of everything else.
+- **Everything is shared.** Snapshots carry every player's movement, aim, recoil, scope
+  sway, armour and health, weapons, magazines, reserves, reloads, hammer swings and
+  grenades, plus every grenade in flight or stuck, and every pickup. Events carry every
+  shot, hit, kill, hammer blow, explosion, sticky sticking and action, and **every chunk
+  of the site that is chipped, breaks or collapses**, by ID. Each guest builds the same
+  site from the match's seed, so chunk IDs agree, and applies the host's breaks and
+  collapses itself (throwing its own rubble, which is cosmetic): the destruction is the
+  same on every screen. Round changes, the score and rematches come from the host too.
+- If a guest leaves, their player stands still; if the host leaves, the match ends for
+  everyone with a message. Menus don't pause an online match: it plays on behind them.
+- Tests: the coordinator's rooms and signalling; a real WebRTC link on this machine;
+  two sessions finding each other through a coordinator and linking; presses surviving
+  lost packets; and whole matches mirrored from a host to a client, through JSON and
+  over a link that drops a fifth of the fast packets, ending with every chunk of the
+  site (hundreds broken and collapsed) and every player's state identical.
+- Not yet: client-side prediction (on a LAN the guest's movement is a frame or two
+  behind; over the internet it'll need predicting and reconciling), a binary wire
+  format (it's JSON for now), host migration, and TURN.
+
 ### UI
 
 The menu, HUD and debug windows are Dear ImGui with a custom theme: navy translucent
@@ -622,6 +687,6 @@ android/             AndroidManifest.xml for the APK
 - Dynamic boxes in physics (debris is sphere-collided for now); physics bodies as scene components
 - Text input and more widgets in the debug UI; an entity inspector
 - Frustum culling and instancing once scenes get large
-- Arena online: a dedicated server stepping `arena.Match` from clients' `Input`s,
-  snapshots of player state and chunk deaths, client-side prediction and interpolation
+- Online: client-side prediction and reconciliation, a binary wire format, STUN/TURN
+  and deploying the coordinator to fly.io, team modes for four players
 - Run: saved best distances, a daily seed, snow spray and wind audio, more obstacle kinds

@@ -50,7 +50,8 @@ var Materials = [MaterialCount]MaterialInfo{
 // Chunk is one breakable piece of a structure: an axis-aligned box.
 type Chunk struct {
 	Structure *Structure
-	Index     int
+	Index     int // in its structure
+	ID        int // in the whole arena (the same on every machine: see linkAll)
 	Centre    mathx.Vec3
 	Half      mathx.Vec3
 	Mat       Material
@@ -224,6 +225,7 @@ func linkAll(structures []*Structure, level []Block) []*Chunk {
 	var all []*Chunk
 	for _, s := range structures {
 		for _, c := range s.Chunks {
+			c.ID = len(all)
 			c.links = c.links[:0]
 			c.anchored = false
 			for _, b := range level {
