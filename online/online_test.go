@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"CliffCrack/coordinator"
+	"CliffCrack/engine/mathx"
 	"CliffCrack/game/arena"
 )
 
@@ -120,21 +121,23 @@ func TestAMatchOverALossyLink(t *testing.T) {
 	bots := []*arena.Bot{arena.NewBot(1), arena.NewBot(2)}
 	var sender InputSender
 	var receiver InputReceiver
+	var batch InputBatch
 	const dt = 1.0 / 60
 	for step := 0; step < 60*30; step++ {
 		// The guest (player 1) plays by bot, through the link.
 		g := guest.Arena
 		gin := bots[1].Think(g, g.Players[1], dt)
 		yaw, pitch := g.Players[1].Yaw+gin.Look[0], g.Players[1].Pitch+gin.Look[1]
-		guestEnd.Send(Fast, Encode(Msg{Input: ptr(sender.Next(gin, yaw, pitch))}))
+		guestEnd.Send(Fast, Encode(Msg{Inputs: batch.Add(sender.Next(gin, yaw, pitch))}))
 
 		// The host takes whatever arrived, steps and sends.
 	drain:
 		for {
 			select {
 			case p := <-hostEnd.Recv():
-				if m, _ := Decode(p.Data); m.Input != nil {
-					receiver.Receive(*m.Input)
+				m, _ := Decode(p.Data)
+				for _, in := range m.Inputs {
+					receiver.Receive(in)
 				}
 			default:
 				break drain
@@ -165,7 +168,7 @@ func TestAMatchOverALossyLink(t *testing.T) {
 				guest.Arena.ApplySnapshot(&m.Snap.Snap, 1)
 			}
 		}
-		guest.Arena.StepCosmetic(dt)
+		guest.Arena.StepCosmetic(dt, nil)
 	}
 	if host.Round != guest.Round {
 		t.Fatalf("host round %d, guest %d", host.Round, guest.Round)
@@ -195,16 +198,179 @@ func TestInputsSurviveARematch(t *testing.T) {
 	// The rematch: the same sender and receiver carry on.
 	recv.Receive(straggler)
 	recv.Receive(send.Next(arena.Input{Jump: true, Move: [2]float32{0, 1}}, 0, 0))
+	recv.Input(p) // the straggler's step
 	if in := recv.Input(p); !in.Jump || in.Move[1] != 1 {
 		t.Errorf("after the rematch: %+v; want the new jump and movement", in)
 	}
 
-	// What went wrong before: a fresh sender behind a straggler is ignored.
+	// What went wrong before: a fresh stream after a straggler. The host
+	// uses the fresh input, then the straggler, and after that every new
+	// input looks old: the guest's controls freeze.
 	var fresh InputSender
 	var reset InputReceiver
 	reset.Receive(straggler)
+	reset.Receive(fresh.Next(arena.Input{}, 0, 0))
+	reset.Input(p)
+	reset.Input(p)
 	reset.Receive(fresh.Next(arena.Input{Jump: true}, 0, 0))
 	if in := reset.Input(p); in.Jump {
 		t.Error("expected a restarted stream to be shadowed by the straggler (the bug this guards)")
+	}
+}
+
+// TestPredictionTracksTheHost plays a guest through a link with a delay
+// each way (steady, then jittery with lost packets, like a phone hotspot):
+// running, turning and jumping. With prediction, where the guest has its
+// player after each input stays close to where the host has it after the
+// same input; without, it's a round trip behind.
+func TestPredictionTracksTheHost(t *testing.T) {
+	for _, c := range []struct {
+		name           string
+		lag, jitter    int // steps each way, and up to this many more
+		loss           int // 1 in loss inputs lost (0: none)
+		worst, typical float32
+	}{
+		{"steady 100 ms", 6, 0, 0, 0.05, 0.05},
+		{"hotspot: 60-150 ms, 10% loss", 4, 5, 10, 1.0, 0.25},
+	} {
+		t.Run(c.name, func(t *testing.T) { predictionOver(t, c.lag, c.jitter, c.loss, c.worst, c.typical) })
+	}
+}
+
+func predictionOver(t *testing.T, lag, jitter, loss int, worstOK, typicalOK float32) {
+	rng := rand.New(rand.NewPCG(9, 9))
+	delay := func() int { return lag + rng.IntN(jitter+1) }
+	const dt = float32(1.0 / 60)
+	host, guest := arena.NewMatch(3, 2), arena.NewMatch(3, 2)
+	for _, m := range []*arena.Match{host, guest} {
+		m.Phase, m.Arena.Live = arena.PhaseFight, true
+	}
+	hp, gp := host.Arena.Players[1], guest.Arena.Players[1]
+	var send InputSender
+	var recv InputReceiver
+	var pred Predictor
+	var batch InputBatch
+	type inFlight struct {
+		due int
+		in  []InputMsg
+		snp SnapMsg
+	}
+	var up, down []inFlight
+	hostAt := map[uint32]mathx.Vec3{} // host's position after each input
+	guestAt := map[uint32]mathx.Vec3{}
+	var worst, typical, naive float32
+	var lastSnap uint32
+	n := 0
+	for step := 0; step < 60*6; step++ {
+		// The guest: aim, move, send, predict.
+		in := arena.Input{Move: [2]float32{0.3, 1}, Sprint: true, Jump: step%70 == 0}
+		gp.Yaw += 0.01
+		msg := send.Next(in, gp.Yaw, gp.Pitch)
+		if loss == 0 || rng.IntN(loss) != 0 {
+			up = append(up, inFlight{due: step + delay(), in: batch.Add(msg)})
+		} else {
+			batch.Add(msg) // lost, but it goes again in the next packets
+		}
+		pred.Step(guest.Arena, gp, msg.Seq, in, dt)
+		guestAt[msg.Seq] = gp.Body.Position
+
+		// The host: take what's arrived, step, snapshot.
+		keep := up[:0]
+		for _, f := range up {
+			if f.due <= step {
+				for _, in := range f.in {
+					recv.Receive(in)
+				}
+			} else {
+				keep = append(keep, f)
+			}
+		}
+		up = keep
+		inputs := []arena.Input{{}, recv.Input(hp)}
+		host.Step(dt, inputs)
+		ack := recv.Acked()
+		hostAt[ack] = hp.Body.Position
+		down = append(down, inFlight{due: step + delay(), snp: SnapMsg{Seq: uint32(step), Acks: []uint32{0, ack}, Snap: host.Arena.Snapshot()}})
+
+		// The guest gets the snapshots due.
+		var arrived []SnapMsg
+		keepDown := down[:0]
+		for _, f := range down {
+			if f.due <= step {
+				arrived = append(arrived, f.snp)
+			} else {
+				keepDown = append(keepDown, f)
+			}
+		}
+		down = keepDown
+		for _, s := range arrived {
+			if s.Seq <= lastSnap && lastSnap > 0 {
+				continue // older than one already applied
+			}
+			lastSnap = s.Seq
+			before := gp.Body.Position
+			guest.Arena.ApplySnapshot(&s.Snap, 1)
+			pred.Reconcile(guest.Arena, gp, s.Acks[1], before)
+			if h, ok := hostAt[s.Acks[1]]; ok && step > 60 {
+				// Compare where the guest had predicted it for that input
+				// with where the host put it; and how far behind the plain
+				// snapshot (no prediction) would have shown it.
+				e := guestAt[s.Acks[1]].Sub(h).Len()
+				worst = max(worst, e)
+				typical += e
+				naive += h.Sub(guestAt[msg.Seq]).Len()
+				n++
+			}
+		}
+		pred.Ease(dt)
+	}
+	naive /= float32(n)
+	typical /= float32(n)
+	t.Logf("prediction error: %.3f m on average, %.3f m at worst; without prediction the player would show %.2f m behind on average",
+		typical, worst, naive)
+	if worst > worstOK || typical > typicalOK {
+		t.Errorf("prediction drifted from the host: %.2f m on average, %.2f m at worst", typical, worst)
+	}
+	if naive < 1 {
+		t.Errorf("the test isn't moving fast enough to show lag (%.2f m)", naive)
+	}
+}
+
+func TestSnapshotsCompress(t *testing.T) {
+	m := arena.NewMatch(3, 2)
+	for range 300 {
+		m.Step(1.0/60, nil)
+	}
+	msg := Msg{Snap: &SnapMsg{Round: 1, Seq: 9, Acks: []uint32{0, 7}, Snap: m.Arena.Snapshot()}}
+	data := Encode(msg)
+	back, err := Decode(data)
+	if err != nil || back.Snap == nil || back.Snap.Seq != 9 || len(back.Snap.Snap.Players) != 2 {
+		t.Fatalf("round trip: %+v, %v", back.Snap, err)
+	}
+	t.Logf("a snapshot is %d bytes on the wire", len(data))
+	if len(data) > 1100 {
+		t.Errorf("a snapshot is %d bytes: more than one packet", len(data))
+	}
+}
+
+// The guest's view time is the host's time, interpDelay back, and follows
+// a new round's clock.
+func TestInterpViewTime(t *testing.T) {
+	var ip Interp
+	if ip.ViewTime() != 0 {
+		t.Error("a view time before any snapshot")
+	}
+	for i := range 60 {
+		ip.Tick(1.0 / 60)
+		ip.Add(&arena.Snapshot{Time: 10 + float32(i)/60, Players: []arena.NetPlayer{{}}})
+	}
+	if v := ip.ViewTime(); abs(v-(10+59.0/60-interpDelay)) > 0.02 {
+		t.Errorf("view time %.3f, want ~%.3f", v, 10+59.0/60-interpDelay)
+	}
+	ip.Reset()
+	ip.Tick(1.0 / 60)
+	ip.Add(&arena.Snapshot{Time: 0.5, Players: []arena.NetPlayer{{}}})
+	if v := ip.ViewTime(); abs(v-(0.5-interpDelay)) > 0.02 {
+		t.Errorf("after a new round: view time %.3f, want ~%.3f", v, 0.5-interpDelay)
 	}
 }

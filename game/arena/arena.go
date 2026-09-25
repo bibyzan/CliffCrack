@@ -66,6 +66,11 @@ type Input struct {
 	Throw         bool // pressed: throw a grenade
 	SwitchGrenade bool // pressed: frags / stickies
 	Interact      bool // pressed: take the weapon at your feet
+
+	// ViewTime (online) is the moment of the match (Arena.Time) the player
+	// was seeing everyone else at when they made this input: their shots
+	// are judged there (see lagcomp.go). Zero: now.
+	ViewTime float32
 }
 
 // LookOnly keeps just the aiming and weapon choice: players can look around
@@ -319,9 +324,10 @@ type Arena struct {
 	FreeAmmo     bool // reloads don't use up reserves (the firing range)
 
 	rng         *rand.Rand
-	nextGrenade int      // the last grenade's ID
-	chunks      []*Chunk // every structure's, linked together
-	lastBreaker *Player  // who last damaged a structure: collapses are theirs
+	past        []pastFrame // where everyone was, recently (lag compensation)
+	nextGrenade int         // the last grenade's ID
+	chunks      []*Chunk    // every structure's, linked together
+	lastBreaker *Player     // who last damaged a structure: collapses are theirs
 }
 
 // New generates the site for seed with players at the spawns: player i
@@ -409,7 +415,9 @@ func (a *Arena) Step(dt float32, inputs []Input) Events {
 		}
 		a.movePlayer(p, dt, in, &ev)
 		a.stepUp(p, dt)
+		undo := a.rewind(p, in.ViewTime)
 		a.updateWeapons(p, dt, in, &ev)
+		undo()
 		fall[i] = -p.Body.Velocity[1]
 	}
 
@@ -425,19 +433,7 @@ func (a *Arena) Step(dt float32, inputs []Input) Events {
 		if p.Dead {
 			continue
 		}
-		was := p.onGround
-		p.onGround = p.Body.Grounded && p.sincePad > padGrace // just launched: still leaving the pad
-		if p.onGround {
-			p.boosted, p.airborne = false, 0
-		} else {
-			p.airborne += dt
-		}
-		if p.onGround && !was {
-			p.sinceLand = 0
-		} else {
-			p.sinceLand += dt
-		}
-		if p.onGround && !was && fall[i] > 2 {
+		if a.touchDown(p, dt) && fall[i] > 2 {
 			ev.act(p, ActLand, fall[i])
 		}
 		if p.Body.Position[1] < fallDeath {
@@ -453,6 +449,7 @@ func (a *Arena) Step(dt float32, inputs []Input) Events {
 	a.updatePickups(dt)
 	a.settle(&ev)
 	a.ageDebris(dt)
+	a.recordPast()
 	return ev
 }
 
@@ -595,6 +592,24 @@ func (a *Arena) breathe(p *Player, dt float32, in Input) {
 	for i := range p.sway {
 		p.sway[i] += (target[i] - p.sway[i]) * k
 	}
+}
+
+// touchDown updates p's footing after physics: on the ground or in the air,
+// and for how long. It reports whether p just landed.
+func (a *Arena) touchDown(p *Player, dt float32) bool {
+	was := p.onGround
+	p.onGround = p.Body.Grounded && p.sincePad > padGrace // just launched: still leaving the pad
+	if p.onGround {
+		p.boosted, p.airborne = false, 0
+	} else {
+		p.airborne += dt
+	}
+	if p.onGround && !was {
+		p.sinceLand = 0
+		return true
+	}
+	p.sinceLand += dt
+	return false
 }
 
 // stepUp lifts a walking player onto a step in their way: a stair, a kerb

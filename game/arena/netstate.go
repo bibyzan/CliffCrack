@@ -47,6 +47,10 @@ type NetPlayer struct {
 	OnGround     bool
 	Boosted      bool
 	BoostTop     float32
+	Airborne     float32
+	SinceLand    float32
+	JumpQueue    float32
+	OnSlope      bool
 	SincePad     float32
 	SinceJump    float32
 	Slots        [2]WeaponKind
@@ -90,7 +94,7 @@ type NetPickup struct {
 	Yaw     float32
 	Table   bool
 	Spot    int
-	Age     float32
+	Age     float32 `json:"-"` // (the host's business: when a dropped one clears)
 }
 
 // Snapshot is the state of the arena at a moment.
@@ -99,7 +103,10 @@ type Snapshot struct {
 	Live     bool
 	Players  []NetPlayer
 	Grenades []NetGrenade
-	Pickups  []NetPickup
+	Pickups  []NetPickup `json:",omitempty"`
+	// KeepPickups: the pickups haven't changed since the last snapshot sent
+	// (so they're left out, keeping snapshots small).
+	KeepPickups bool `json:",omitempty"`
 }
 
 // Snapshot captures the arena's state.
@@ -110,7 +117,8 @@ func (a *Arena) Snapshot() Snapshot {
 			Pos: v3(p.Body.Position), Vel: v3(p.Body.Velocity), Yaw: p.Yaw, Pitch: p.Pitch, Recoil: p.recoil,
 			Sway: p.sway, Breath: p.Breath, Shield: p.Shield, Health: p.Health, Dead: p.Dead, DiedAt: p.DiedAt,
 			Flash: p.Flash, OnGround: p.onGround, Boosted: p.boosted, BoostTop: p.boostTop, SincePad: p.sincePad,
-			SinceJump: p.sinceJump, Slots: p.Slots, Active: p.Active, Current: p.Current, Switching: p.Switching,
+			SinceJump: p.sinceJump, Airborne: p.airborne, SinceLand: p.sinceLand, JumpQueue: p.jumpQueue, OnSlope: p.onSlope,
+			Slots: p.Slots, Active: p.Active, Current: p.Current, Switching: p.Switching,
 			ADS: p.ADS, Descope: p.descope, HammerSwing: p.Hammer.Swing, HammerStruck: p.Hammer.struck,
 			Grenades: p.Grenades, GrenadeKind: p.GrenadeKind, ThrowWait: p.throwWait, Stats: p.Stats,
 			Launcher: NetGun{Ammo: p.Launcher.Ammo, Reserve: p.Launcher.Reserve, Reloading: p.Launcher.Reloading,
@@ -161,8 +169,12 @@ func (a *Arena) ApplySnapshot(s *Snapshot, keepAim int) {
 		p.recoil, p.sway, p.Breath = np.Recoil, np.Sway, np.Breath
 		p.Shield, p.Health, p.Dead, p.DiedAt, p.Flash = np.Shield, np.Health, np.Dead, np.DiedAt, np.Flash
 		p.onGround, p.boosted, p.boostTop, p.sincePad, p.sinceJump = np.OnGround, np.Boosted, np.BoostTop, np.SincePad, np.SinceJump
+		p.airborne, p.sinceLand, p.jumpQueue, p.onSlope = np.Airborne, np.SinceLand, np.JumpQueue, np.OnSlope
 		w := &p.Weapons
-		w.Slots, w.Active, w.Current, w.Switching, w.ADS, w.descope = np.Slots, np.Active, np.Current, np.Switching, np.ADS, np.Descope
+		w.Slots, w.Active, w.Current, w.Switching, w.descope = np.Slots, np.Active, np.Current, np.Switching, np.Descope
+		if i != keepAim {
+			w.ADS = np.ADS // (the local player's sights go up and down at once, predicted)
+		}
 		w.Hammer = HammerState{Swing: np.HammerSwing, struck: np.HammerStruck}
 		w.Grenades, w.GrenadeKind, w.throwWait = np.Grenades, np.GrenadeKind, np.ThrowWait
 		l := np.Launcher
@@ -195,6 +207,9 @@ func (a *Arena) ApplySnapshot(s *Snapshot, keepAim int) {
 		a.Grenades = append(a.Grenades, g)
 	}
 
+	if s.KeepPickups {
+		return
+	}
 	a.Pickups = a.Pickups[:0]
 	for _, np := range s.Pickups {
 		a.Pickups = append(a.Pickups, &Pickup{Weapon: np.Weapon, Grenade: np.Grenade, Count: np.Count, Ammo: np.Ammo,
@@ -395,11 +410,39 @@ func (a *Arena) ApplyEvents(n *NetEvents) Events {
 	return ev
 }
 
+// Predict moves p (a network client's own player) through one step of in
+// as the host's Step would: movement, jumps, stairs and ceilings, landing
+// and launch pads. Its look should already be applied; nothing else
+// happens (the host decides hits, weapons and all the rest). Replaying the
+// inputs the host hasn't had yet from its last snapshot puts the player
+// where the host will have it.
+func (a *Arena) Predict(p *Player, in Input, dt float32) {
+	if p.Dead {
+		return
+	}
+	var ev Events
+	a.movePlayer(p, dt, in, &ev)
+	a.stepUp(p, dt)
+	a.Phys.StepBody(p.Body, dt)
+	a.headRoom(p)
+	a.touchDown(p, dt)
+	a.usePads(p, &ev)
+}
+
 // StepCosmetic advances a client's copy between the host's updates: the
 // players carry on along their velocities, rubble flies and settles, and
-// old pieces clear. Nothing that matters to the match happens here.
-func (a *Arena) StepCosmetic(dt float32) {
+// old pieces clear. Nothing that matters to the match happens here. keep
+// (the client's own, predicted player; nil for none) isn't moved.
+func (a *Arena) StepCosmetic(dt float32, keep *Player) {
+	var pos, vel mathx.Vec3
+	var grounded bool
+	if keep != nil {
+		pos, vel, grounded = keep.Body.Position, keep.Body.Velocity, keep.Body.Grounded
+	}
 	a.Phys.Update(dt)
+	if keep != nil {
+		keep.Body.Position, keep.Body.Velocity, keep.Body.Grounded = pos, vel, grounded
+	}
 	a.ageDebris(dt)
 	for _, g := range a.Grenades {
 		if !g.Stuck {

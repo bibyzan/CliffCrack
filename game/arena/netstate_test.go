@@ -75,7 +75,7 @@ func TestAClientMirrorsTheHost(t *testing.T) {
 			snap := wire(t, host.Arena.Snapshot())
 			client.Arena.ApplySnapshot(&snap, -1)
 		}
-		client.Arena.StepCosmetic(frame)
+		client.Arena.StepCosmetic(frame, nil)
 
 		if client.Round != host.Round {
 			t.Fatalf("step %d: client on round %d, host on %d", step, client.Round, host.Round)

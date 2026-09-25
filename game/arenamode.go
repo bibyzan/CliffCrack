@@ -351,12 +351,19 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 		yaw += float32(dx) * arenaMouseSens
 		pitch -= float32(dy) * arenaMouseSens
 	}
-	if x, y := in.PadStick(true); x != 0 || y != 0 {
-		yaw += x * arenaStickYaw * dt
-		pitch -= y * arenaStickPch * dt
+	x, y := in.PadStick(true)
+	slow, assist := float32(1), [2]float32{}
+	if in.UsingPad() {
+		stickMoving := x*x+y*y > 0.01
+		lx, ly := in.PadAxis(input.PadLeftX), in.PadAxis(input.PadLeftY)
+		slow, assist = m.aimAssist(stickMoving || lx*lx+ly*ly > 0.04, dt)
+	}
+	if x != 0 || y != 0 {
+		yaw += x * arenaStickYaw * dt * slow
+		pitch -= y * arenaStickPch * dt * slow
 	}
 	s := m.settings.LookSensitivity / m.me().Zoom() // finer through a scope
-	c.Look = [2]float32{yaw * s, pitch * s * m.settings.lookSign()}
+	c.Look = [2]float32{yaw*s + assist[0], pitch*s*m.settings.lookSign() + assist[1]}
 	// Aim down the sights: the right button (unless it's holding the look
 	// with the F1 window open) or the left trigger.
 	c.Aim = (m.locked && !m.debugOpen && in.MouseDown(input.MouseRight)) || in.PadAxis(input.PadLeftTrigger) > 0.4
@@ -713,6 +720,9 @@ func (m *Arena) playAt(s *audio.Sound, pos mathx.Vec3, volume float32) {
 func (m *Arena) eye() mathx.Vec3 {
 	me := m.me()
 	eye := me.Eye(m.sim().Phys.Alpha())
+	if np := m.net; np != nil && !np.host {
+		eye = me.Eye(1).Add(np.pred.Offset) // predicted, a correction easing out
+	}
 	if me.Dead {
 		t := clampf((m.sim().Time-me.DiedAt)/0.6, 0, 1)
 		eye[1] -= (arena.EyeHeight + arena.PlayerRadius - 0.35) * smooth(t)

@@ -1,6 +1,7 @@
 package game
 
 import (
+	"encoding/json"
 	"math"
 
 	"CliffCrack/engine/camera"
@@ -23,6 +24,14 @@ type netPlay struct {
 	seq     uint32 // host: steps sent; guest: the newest snapshot applied
 	left    []bool // players whose link went down
 	over    string // why the match ended for us (the host left)
+
+	acc      float32     // time towards the next tick
+	pending  arena.Input // our input for the next tick
+	batch    online.InputBatch
+	pred     online.Predictor // guest: our own movement, predicted
+	interp   online.Interp    // guest: everyone else, smoothed
+	standing arena.NetMatch   // host: the match standing last sent
+	pickups  []byte           // host: the pickups last sent
 }
 
 const snapEvery = 2 // host steps per snapshot
@@ -41,7 +50,7 @@ func (m *Arena) startOnline(s *online.Session, start *online.StartMsg) {
 	// (numbered higher than anything new) arrive first and make every later
 	// input look stale: the guest's controls would freeze.
 	if old := m.net; old != nil && old.session == s && len(old.recv) == len(np.recv) {
-		np.sender, np.recv, np.seq, np.left = old.sender, old.recv, old.seq, old.left
+		np.sender, np.recv, np.seq, np.left, np.batch = old.sender, old.recv, old.seq, old.left, old.batch
 	}
 	for i, mb := range room.Members {
 		if i < len(np.peers) && mb.ID != s.ID() {
@@ -86,6 +95,15 @@ func (m *Arena) leaveOnline() {
 	local = 0
 }
 
+// Online matches run on a fixed tick, the same on every machine, so the
+// host takes each guest's inputs one per tick exactly as the guest made
+// them (and the guest's prediction matches). Looking still happens every
+// frame, locally.
+const (
+	netTick     = float32(1.0 / 60)
+	maxNetTicks = 5 // per frame, before the backlog is dropped
+)
+
 // updateOnline is Update for an online match.
 func (m *Arena) updateOnline(dt float32, in *input.State, mouseFree bool) {
 	np := m.net
@@ -100,85 +118,170 @@ func (m *Arena) updateOnline(dt float32, in *input.State, mouseFree bool) {
 	if !m.inputBlocked {
 		c = m.input(in, dt, mouseFree)
 	}
-	if np.host {
-		m.hostStep(dt, c)
-	} else {
-		m.guestStep(dt, c)
+	// Look now; everything else waits for the tick (presses held until then).
+	me := m.me()
+	if !me.Dead {
+		me.Yaw = float32(math.Remainder(float64(me.Yaw+c.Look[0]), 2*math.Pi))
+		me.Pitch = clampf(me.Pitch+c.Look[1], -camera.MaxPitch, camera.MaxPitch)
 	}
+	c.Look = [2]float32{}
+	np.pending = mergePresses(np.pending, c)
+
+	var ev arena.Events
+	if np.host {
+		ev = m.hostFrame(dt)
+	} else {
+		ev = m.guestFrame(dt)
+	}
+	m.effects(dt, ev)
 	m.announce()
 }
 
-// hostStep reads the guests' inputs, steps the match and sends the result.
-func (m *Arena) hostStep(dt float32, mine arena.Input) {
+// mergePresses is the latest input's held buttons, with any press since
+// the last tick kept.
+func mergePresses(pending, c arena.Input) arena.Input {
+	c.Jump = c.Jump || pending.Jump
+	c.FirePressed = c.FirePressed || pending.FirePressed
+	c.Reload = c.Reload || pending.Reload
+	c.Melee = c.Melee || pending.Melee
+	c.Throw = c.Throw || pending.Throw
+	c.SwitchGrenade = c.SwitchGrenade || pending.SwitchGrenade
+	c.Interact = c.Interact || pending.Interact
+	if c.Select == 0 {
+		c.Select = pending.Select
+	}
+	if c.Cycle == 0 {
+		c.Cycle = pending.Cycle
+	}
+	return c
+}
+
+// ticks runs tick for each fixed tick due this frame, the first with the
+// frame's presses.
+func (np *netPlay) ticks(dt float32, tick func(in arena.Input)) {
+	np.acc += dt
+	n := 0
+	for np.acc >= netTick {
+		np.acc -= netTick
+		if n++; n > maxNetTicks {
+			np.acc = 0 // too far behind (a hitch): let it go
+			break
+		}
+		tick(np.pending)
+		// Held buttons carry on; presses are used up.
+		np.pending = arena.Input{Move: np.pending.Move, Fire: np.pending.Fire, Aim: np.pending.Aim, Sprint: np.pending.Sprint}
+	}
+}
+
+// hostFrame reads the guests' inputs and runs the ticks due: stepping the
+// match with everyone's input and sending the guests what happened.
+func (m *Arena) hostFrame(dt float32) arena.Events {
 	np := m.net
-	a := m.sim()
 	for i, l := range np.links {
 		if l == nil || np.left[i] {
 			continue
 		}
 		m.drain(l, func(msg online.Msg) {
-			switch {
-			case msg.Input != nil:
-				np.recv[i].Receive(*msg.Input)
-			case msg.Bye:
+			for _, in := range msg.Inputs {
+				np.recv[i].Receive(in)
+			}
+			if msg.Bye {
 				m.playerLeft(i)
 			}
 		}, func() { m.playerLeft(i) })
 	}
 	if m.match.Phase == arena.PhaseMatchOver && m.match.Timer < -1 && confirmPressed(m.lastIn) {
 		m.rematch()
-		return
+		return arena.Events{}
 	}
-	for i, p := range a.Players {
-		switch {
-		case i == local:
-			m.inputs[i] = mine
-		case np.links[i] != nil && !np.left[i]:
-			m.inputs[i] = np.recv[i].Input(p)
-		default:
-			m.inputs[i] = arena.Input{}
+	var all arena.Events
+	np.ticks(dt, func(mine arena.Input) {
+		a := m.sim()
+		for i, p := range a.Players {
+			switch {
+			case i == local:
+				m.inputs[i] = mine
+			case np.links[i] != nil && !np.left[i]:
+				m.inputs[i] = np.recv[i].Input(p)
+			default:
+				m.inputs[i] = arena.Input{}
+			}
 		}
+		ev := m.match.Step(netTick, m.inputs)
+		np.seq++
+		m.sendTick(ev, m.match.Arena != a)
+		if m.match.Arena != m.round {
+			m.newRound()
+			all = arena.Events{} // the last round's are gone with it
+			return
+		}
+		all.Merge(ev)
+	})
+	return all
+}
+
+// sendTick sends the guests a tick: its events (reliably, when there are
+// any, or the standing changed) and every snapEvery ticks a snapshot.
+func (m *Arena) sendTick(ev arena.Events, newRound bool) {
+	np := m.net
+	standing := m.match.Net()
+	var frame, snap []byte
+	net := ev.Net()
+	if !net.Empty() || newRound || standingChanged(np.standing, standing) {
+		frame = online.Encode(online.Msg{Frame: &online.FrameMsg{Events: net, Match: standing}})
+		np.standing = standing
 	}
-	ev := m.match.Step(dt, m.inputs)
-	np.seq++
-	frame := online.Encode(online.Msg{Frame: &online.FrameMsg{Events: ev.Net(), Match: m.match.Net()}})
-	var snap []byte
-	if np.seq%snapEvery == 0 || m.match.Arena != a {
-		snap = online.Encode(online.Msg{Snap: &online.SnapMsg{Round: m.match.Round, Seq: np.seq, Snap: m.match.Arena.Snapshot()}})
+	if np.seq%snapEvery == 0 || newRound {
+		s := online.SnapMsg{Round: m.match.Round, Seq: np.seq, Match: standing, Snap: m.match.Arena.Snapshot(),
+			Acks: make([]uint32, len(np.recv))}
+		for i := range np.recv {
+			s.Acks[i] = np.recv[i].Acked()
+		}
+		// Pickups change seldom: send them when they do (and every second,
+		// in case one went missing).
+		pick, _ := json.Marshal(s.Snap.Pickups)
+		if string(pick) == string(np.pickups) && np.seq%(snapEvery*30) != 0 && !newRound {
+			s.Snap.Pickups, s.Snap.KeepPickups = nil, true
+		}
+		np.pickups = pick
+		snap = online.Encode(online.Msg{Snap: &s})
 	}
 	for i, l := range np.links {
 		if l == nil || np.left[i] {
 			continue
 		}
-		if err := l.Send(online.Reliable, frame); err != nil {
-			m.playerLeft(i)
-			continue
+		if frame != nil {
+			if err := l.Send(online.Reliable, frame); err != nil {
+				m.playerLeft(i)
+				continue
+			}
 		}
 		if snap != nil {
 			l.Send(online.Fast, snap)
 		}
 	}
-	m.effects(dt, ev)
-	if m.match.Arena != m.round {
-		m.newRound()
-	}
 }
 
-// guestStep sends our input to the host and plays what the host sent.
-func (m *Arena) guestStep(dt float32, mine arena.Input) {
-	np := m.net
-	me := m.me()
-	// Aim here and now, and tell the host where we're aiming.
-	if !me.Dead {
-		me.Yaw = float32(math.Remainder(float64(me.Yaw+mine.Look[0]), 2*math.Pi))
-		me.Pitch = clampf(me.Pitch+mine.Look[1], -camera.MaxPitch, camera.MaxPitch)
+// standingChanged reports a change in the match other than its clock.
+func standingChanged(a, b arena.NetMatch) bool {
+	if a.Round != b.Round || a.Phase != b.Phase || a.RoundWinner != b.RoundWinner || a.Winner != b.Winner || len(a.Wins) != len(b.Wins) {
+		return true
 	}
-	if l := np.links[0]; l != nil {
-		msg := np.sender.Next(mine, me.Yaw, me.Pitch)
-		l.Send(online.Fast, online.Encode(online.Msg{Input: &msg}))
+	for i := range a.Wins {
+		if a.Wins[i] != b.Wins[i] {
+			return true
+		}
 	}
+	return false
+}
 
+// guestFrame plays what the host sent, then runs the ticks due: sending
+// our input and predicting our own movement. Everyone else is drawn
+// smoothly a little behind the host.
+func (m *Arena) guestFrame(dt float32) arena.Events {
+	np := m.net
 	var ev arena.Events
+	var snap *online.SnapMsg
 	lost := false
 	m.drain(np.links[0], func(msg online.Msg) {
 		switch {
@@ -186,21 +289,70 @@ func (m *Arena) guestStep(dt float32, mine arena.Input) {
 			ev.Merge(m.sim().ApplyEvents(&msg.Frame.Events))
 			if m.match.Apply(&msg.Frame.Match) {
 				m.newRound()
+				m.net.pred.Reset()
+				m.net.interp.Reset()
+				ev = arena.Events{}
 			}
-		case msg.Snap != nil && msg.Snap.Round == m.match.Round && msg.Snap.Seq > np.seq:
-			np.seq = msg.Snap.Seq
-			m.sim().ApplySnapshot(&msg.Snap.Snap, local)
+		case msg.Snap != nil && msg.Snap.Seq > m.net.seq:
+			m.net.seq, snap = msg.Snap.Seq, msg.Snap
 		case msg.Start != nil: // a rematch
 			m.startOnline(np.session, msg.Start)
+			ev = arena.Events{}
 		case msg.Bye:
 			lost = true
 		}
 	}, func() { lost = true })
+	np = m.net // (a rematch replaces it)
 	if lost && np.over == "" {
 		np.over = "The host left the match."
 	}
-	m.sim().StepCosmetic(dt)
-	m.effects(dt, ev)
+	a, me := m.sim(), m.me()
+	if snap != nil && snap.Round == m.match.Round {
+		before := me.Body.Position
+		a.ApplySnapshot(&snap.Snap, local)
+		if m.match.Phase == snap.Match.Phase {
+			m.match.Timer = snap.Match.Timer
+		}
+		if local < len(snap.Acks) {
+			np.pred.Reconcile(a, me, snap.Acks[local], before)
+		}
+		np.interp.Add(&snap.Snap)
+	}
+	np.ticks(dt, func(in arena.Input) {
+		if l := np.links[0]; l != nil {
+			in.ViewTime = np.interp.ViewTime() // judge our shots where we see everyone
+			msg := np.sender.Next(in, me.Yaw, me.Pitch)
+			l.Send(online.Fast, online.Encode(online.Msg{Inputs: np.batch.Add(msg)}))
+			if m.match.Phase != arena.PhaseCountdown && m.match.Phase != arena.PhaseMatchOver {
+				np.pred.Step(a, me, msg.Seq, in, netTick)
+			}
+		}
+		predictSights(me, in, netTick)
+		a.StepCosmetic(netTick, me)
+	})
+	np.pred.Ease(dt)
+	np.interp.Tick(dt)
+	for i, p := range a.Players {
+		if i != local && !p.Dead {
+			np.interp.Place(i, p)
+		}
+	}
+	return ev
+}
+
+// predictSights raises and lowers our sights at once, rather than a round
+// trip later when the host says so.
+func predictSights(me *arena.Player, in arena.Input, dt float32) {
+	g, s := me.Gun()
+	if g == nil {
+		me.ADS = 0
+		return
+	}
+	if in.Aim && s.Reloading == 0 && me.Switching == 0 && !me.Swinging() && !(in.Sprint && in.Move[1] > 0.3) {
+		me.ADS = min(me.ADS+dt/g.ADSTime, 1)
+	} else {
+		me.ADS = max(me.ADS-dt/g.ADSTime, 0)
+	}
 }
 
 // drain handles every message waiting on l; gone is called if it's closed.

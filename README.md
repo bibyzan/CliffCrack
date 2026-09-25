@@ -421,6 +421,10 @@ rematch on a new site.
   centred. On an ultrawide, bring it in (about 50% on 32:9 gives a 16:9 box) so the
   armour bar, weapons, ammo, grenades, score and kill feed sit where you're looking.
   Run mode's speedometer and best distance follow it too.
+- **Aim assist (gamepad only)**: light, and never with the mouse. With the crosshair on
+  or just beside an enemy you can see (within 60 m), the right stick turns up to 45%
+  slower; while you're moving the stick or yourself, the aim drifts gently onto their
+  chest (faster with the sights up). It never snaps, and does nothing while you're still.
 - **The helmet HUD** is drawn in the world a hand's width from your eye, framed by
   faint visor brackets: your **armour bar** across the top (segments that drain, flash
   when hit, sweep back as it recharges, amber when low and red once it's gone, with
@@ -585,9 +589,27 @@ once everyone is. A room drops out of the list once it's playing.
   lost packets; and whole matches mirrored from a host to a client, through JSON and
   over a link that drops a fifth of the fast packets, ending with every chunk of the
   site (hundreds broken and collapsed) and every player's state identical.
-- Not yet: client-side prediction (on a LAN the guest's movement is a frame or two
-  behind; over the internet it'll need predicting and reconciling), a binary wire
-  format (it's JSON for now), host migration, and TURN.
+- **Hiding the lag.** Online matches tick at a fixed 60 Hz on every machine (looking
+  still updates every frame). Each packet from a guest carries its last three inputs,
+  and the host queues them and uses one per tick, in order: the host moves the guest
+  exactly as the guest did. The guest **predicts** its own movement at once; each
+  snapshot says which of its inputs the host has used, so the guest resets to the host's
+  position and replays the rest (`online.Predictor`), easing out whatever's left
+  instead of snapping. Its sights go up and down at once too. Everyone else is drawn
+  **interpolated** 100 ms behind the host between snapshots (`online.Interp`), so they
+  glide rather than jump. Tested over a simulated hotspot (60-150 ms, 10% loss): the
+  guest's prediction stays within about 9 cm of the host on average, where without it
+  the guest would see itself over a metre behind.
+- **Lean messages.** Reliable frames only go out when something happened or the
+  standing changed; the clock rides in snapshots. Pickups are left out of a snapshot
+  when they haven't changed. Messages over 400 bytes are deflated: a full snapshot is
+  under 900 bytes, one packet.
+- **Lag compensation.** Each guest input carries the moment of the host's match it
+  was seeing everyone else at (its interpolated view). The host keeps 0.6 s of every
+  player's positions, and while that guest's weapons act it puts the other players back
+  where the guest saw them (up to 350 ms back), then returns them: aim where they are
+  on your screen and it hits. Only players move back; the site is as it is now.
+- Not yet: a binary wire format, and host migration.
 
 ### UI
 

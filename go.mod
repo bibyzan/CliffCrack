@@ -7,12 +7,13 @@ require github.com/go-gl/glfw/v3.3/glfw v0.0.0-20260823155953-d41da22a9587
 require github.com/qmuntal/gltf v0.29.0
 
 require (
+	github.com/coder/websocket v1.8.15
 	github.com/ebitengine/oto/v3 v3.5.1
+	github.com/pion/webrtc/v4 v4.2.22
 	github.com/traefik/yaegi v0.16.2-0.20260209085605-fcb76d1ece0c
 )
 
 require (
-	github.com/coder/websocket v1.8.15 // indirect
 	github.com/ebitengine/purego v0.11.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/jfreymuth/pulse v0.1.3 // indirect
@@ -31,7 +32,6 @@ require (
 	github.com/pion/stun/v4 v4.0.1 // indirect
 	github.com/pion/transport/v5 v5.1.1 // indirect
 	github.com/pion/turn/v5 v5.1.2 // indirect
-	github.com/pion/webrtc/v4 v4.2.22 // indirect
 	github.com/wlynxg/anet v0.0.5 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/net v0.50.0 // indirect
