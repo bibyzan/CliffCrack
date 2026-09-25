@@ -84,7 +84,8 @@ func (pr *Predictor) Reset() { pr.history, pr.Offset = pr.history[:0], mathx.Vec
 // smoothly between them, interpDelay behind the host.
 type Interp struct {
 	clock   float32 // our time
-	offset  float32 // our time minus the host's, as best we can tell
+	offset  float32 // our time minus the host's, as drawn: eased towards best
+	best    float32 // the least our time minus the host's has been lately (the quickest packet)
 	started bool
 	samples [][]sample // by player
 }
@@ -99,21 +100,34 @@ const (
 	interpDelay    = 0.1  // s behind the newest snapshot other players are drawn
 	maxExtrapolate = 0.15 // s past the newest snapshot they may carry on along their velocity
 	maxSamples     = 32
+	// The clock offset follows the quickest packets, but eases: drawn time
+	// runs at most offsetSlew faster or slower than real time (unnoticeable),
+	// rather than jumping. The quickest seen is forgotten at bestForget s/s,
+	// in case the delay grows, and a difference beyond offsetSnap snaps.
+	offsetSlew = 0.06
+	bestForget = 0.01
+	offsetSnap = 0.3
 )
 
 // Tick advances our clock.
-func (ip *Interp) Tick(dt float32) { ip.clock += dt }
+func (ip *Interp) Tick(dt float32) {
+	ip.clock += dt
+	if !ip.started {
+		return
+	}
+	ip.best += bestForget * dt
+	d := ip.best - ip.offset
+	ip.offset += max(-offsetSlew*dt, min(d, offsetSlew*dt))
+}
 
 // Add takes a snapshot's players.
 func (ip *Interp) Add(s *arena.Snapshot) {
 	off := ip.clock - s.Time
 	switch {
-	case !ip.started:
-		ip.offset, ip.started = off, true
-	case off < ip.offset:
-		ip.offset = off // arrived sooner than we thought possible: the delay is less
-	default:
-		ip.offset += (off - ip.offset) * 0.02 // drift up slowly, riding out jitter
+	case !ip.started || abs32(off-ip.offset) > offsetSnap:
+		ip.offset, ip.best, ip.started = off, off, true
+	case off < ip.best:
+		ip.best = off // arrived sooner than any lately: the delay is less
 	}
 	for len(ip.samples) < len(s.Players) {
 		ip.samples = append(ip.samples, nil)
@@ -174,3 +188,5 @@ func (ip *Interp) ViewTime() float32 {
 
 // Reset forgets everything (a new round).
 func (ip *Interp) Reset() { ip.samples, ip.started = nil, false } // (a new round's clock starts again)
+
+func abs32(x float32) float32 { return max(x, -x) }

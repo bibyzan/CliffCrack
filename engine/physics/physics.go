@@ -121,6 +121,11 @@ type World struct {
 	// for rolling resistance.
 	LinearDamping, AngularDamping float32
 
+	// PrevPerUpdate marks where bodies were (for Interpolated) once per
+	// Update rather than every step: for a caller that updates on its own
+	// fixed tick, several steps at a time, and draws between its ticks.
+	PrevPerUpdate bool
+
 	bodies  []*Body
 	dynamic []*Body // scratch: this step's dynamic bodies
 	bp      broadphase
@@ -207,6 +212,9 @@ func (w *World) Alpha() float32 { return min(w.acc/w.FixedStep, 1) }
 func (w *World) Update(dt float32) int {
 	w.impacts = w.impacts[:0]
 	w.acc += dt
+	if w.PrevPerUpdate && w.acc >= w.FixedStep {
+		w.markPrev()
+	}
 	steps := 0
 	for w.acc >= w.FixedStep && steps < w.MaxSteps {
 		w.step(w.FixedStep)
@@ -235,9 +243,15 @@ const (
 	impactSpeed     = 0.8   // m/s; slower new contacts aren't reported
 )
 
-func (w *World) step(h float32) {
+func (w *World) markPrev() {
 	for _, b := range w.bodies {
 		b.prevPosition, b.prevRotation = b.Position, b.Rotation
+	}
+}
+
+func (w *World) step(h float32) {
+	if !w.PrevPerUpdate {
+		w.markPrev()
 	}
 	for _, b := range w.bodies {
 		if b.Kind == Dynamic {

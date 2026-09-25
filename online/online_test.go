@@ -10,6 +10,7 @@ import (
 
 	"CliffCrack/coordinator"
 	"CliffCrack/engine/mathx"
+	"CliffCrack/engine/physics"
 	"CliffCrack/game/arena"
 )
 
@@ -372,5 +373,93 @@ func TestInterpViewTime(t *testing.T) {
 	ip.Add(&arena.Snapshot{Time: 0.5, Players: []arena.NetPlayer{{}}})
 	if v := ip.ViewTime(); abs(v-(0.5-interpDelay)) > 0.02 {
 		t.Errorf("after a new round: view time %.3f, want ~%.3f", v, 0.5-interpDelay)
+	}
+}
+
+// TestInterpIsSmoothUnderJitter feeds Interp snapshots of a player running
+// in a straight line at 6 m/s, 30 a second, arriving with hotspot-like
+// jitter (0-90 ms), and draws it every frame of a 60 Hz display: its speed
+// on screen, frame to frame, should stay close to 6 m/s (no skips or stalls).
+func TestInterpIsSmoothUnderJitter(t *testing.T) {
+	const speed = 6
+	rng := rand.New(rand.NewPCG(4, 4))
+	var ip Interp
+	type pending struct {
+		at   float32 // our time it arrives
+		snap arena.Snapshot
+	}
+	var queue []pending
+	p := &arena.Player{Body: physics.NewSphere(0.4, 80)}
+	var worst, last float32
+	var clock float32
+	for frame := 0; frame < 60*20; frame++ {
+		dt := float32(1.0 / 60)
+		clock += dt
+		ip.Tick(dt)
+		if frame%2 == 0 { // the host sends at 30 Hz
+			host := clock
+			queue = append(queue, pending{at: clock + 0.03 + rng.Float32()*0.09, snap: arena.Snapshot{Time: host,
+				Players: []arena.NetPlayer{{Pos: arena.V3{host * speed, 0, 0}, Vel: arena.V3{speed, 0, 0}}}}})
+		}
+		keep := queue[:0]
+		for _, q := range queue {
+			if q.at <= clock {
+				ip.Add(&q.snap)
+			} else {
+				keep = append(keep, q)
+			}
+		}
+		queue = keep
+		if !ip.Place(0, p) {
+			continue
+		}
+		x := p.Body.Position[0]
+		if frame > 120 {
+			v := (x - last) / dt
+			worst = max(worst, abs(v-speed))
+		}
+		last = x
+	}
+	t.Logf("worst on-screen speed error %.2f m/s (of %d m/s)", worst, speed)
+	if worst > 1.5 {
+		t.Errorf("the player skips or stalls: speed on screen off by up to %.1f m/s", worst)
+	}
+}
+
+// TestPredictedViewIsSmooth runs a guest's own player on the fixed net tick
+// (rubble, then prediction, as the game does) and draws it every frame of
+// an uneven display, between the last two ticks: running flat out, its
+// speed on screen should hardly waver, frames with no tick or two alike.
+func TestPredictedViewIsSmooth(t *testing.T) {
+	const tick = float32(1.0 / 60)
+	m := arena.NewMatch(3, 2)
+	m.Phase, m.Arena.Live = arena.PhaseFight, true
+	a, p := m.Arena, m.Arena.Players[1]
+	a.Phys.PrevPerUpdate = true // as online
+	var pred Predictor
+	rng := rand.New(rand.NewPCG(7, 7))
+	var acc, worst, speed float32
+	var last mathx.Vec3
+	var seq uint32
+	for frame := 0; frame < 60*6; frame++ {
+		dt := 1/75.0 + rng.Float32()*(1/45.0-1/75.0) // 45-75 fps, all over the place
+		for acc += dt; acc >= tick; acc -= tick {
+			a.StepCosmetic(tick, p)
+			seq++
+			pred.Step(a, p, seq, arena.Input{Move: [2]float32{0, 1}}, tick)
+		}
+		drawn, _ := p.Body.Interpolated(acc / tick)
+		if frame > 240 { // off the launch pad, landed and up to running speed
+			v := drawn.Sub(last).Len() / dt
+			if speed == 0 {
+				speed = p.Body.Velocity.Len()
+			}
+			worst = max(worst, abs(v-speed))
+		}
+		last = drawn
+	}
+	t.Logf("running at %.2f m/s: worst on-screen speed error %.2f m/s", speed, worst)
+	if speed < 1 || worst > speed*0.15 {
+		t.Errorf("the view stutters: speed on screen off by up to %.2f m/s of %.2f", worst, speed)
 	}
 }

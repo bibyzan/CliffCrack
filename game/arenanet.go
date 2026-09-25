@@ -127,6 +127,8 @@ func (m *Arena) updateOnline(dt float32, in *input.State, mouseFree bool) {
 	c.Look = [2]float32{}
 	np.pending = mergePresses(np.pending, c)
 
+	// The match steps on the net tick, drawn between ticks (see alpha).
+	m.sim().Phys.PrevPerUpdate = true
 	var ev arena.Events
 	if np.host {
 		ev = m.hostFrame(dt)
@@ -319,6 +321,9 @@ func (m *Arena) guestFrame(dt float32) arena.Events {
 		np.interp.Add(&snap.Snap)
 	}
 	np.ticks(dt, func(in arena.Input) {
+		// Rubble first: stepping the world marks every body's last position,
+		// ours included, and ours should be where prediction moves it from.
+		a.StepCosmetic(netTick, me)
 		if l := np.links[0]; l != nil {
 			in.ViewTime = np.interp.ViewTime() // judge our shots where we see everyone
 			msg := np.sender.Next(in, me.Yaw, me.Pitch)
@@ -328,7 +333,6 @@ func (m *Arena) guestFrame(dt float32) arena.Events {
 			}
 		}
 		predictSights(me, in, netTick)
-		a.StepCosmetic(netTick, me)
 	})
 	np.pred.Ease(dt)
 	np.interp.Tick(dt)

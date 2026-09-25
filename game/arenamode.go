@@ -717,11 +717,21 @@ func (m *Arena) playAt(s *audio.Sound, pos mathx.Vec3, volume float32) {
 
 // eye is the camera position: the local player's eye, sinking to the
 // ground after they die.
+// alpha is how far drawing is between the last simulation step and the
+// next: online, the match steps on the fixed net tick rather than the
+// physics world's own clock.
+func (m *Arena) alpha() float32 {
+	if np := m.net; np != nil {
+		return clampf(np.acc/netTick, 0, 1)
+	}
+	return m.sim().Phys.Alpha()
+}
+
 func (m *Arena) eye() mathx.Vec3 {
 	me := m.me()
-	eye := me.Eye(m.sim().Phys.Alpha())
+	eye := me.Eye(m.alpha())
 	if np := m.net; np != nil && !np.host {
-		eye = me.Eye(1).Add(np.pred.Offset) // predicted, a correction easing out
+		eye = eye.Add(np.pred.Offset) // predicted, a correction easing out
 	}
 	if me.Dead {
 		t := clampf((m.sim().Time-me.DiedAt)/0.6, 0, 1)
@@ -934,7 +944,7 @@ func (m *Arena) appendStructures(out []render.DrawCmd) []render.DrawCmd {
 // appendDebris draws rubble as tumbling boxes (glass shards translucent) and
 // grenades in flight; pieces shrink away at the end of their life.
 func (m *Arena) appendDebris(out []render.DrawCmd) []render.DrawCmd {
-	alpha := m.sim().Phys.Alpha()
+	alpha := m.alpha()
 	for _, d := range m.sim().Debris {
 		pos, rot := d.Body.Interpolated(alpha)
 		h := d.Half.Scale(clampf((d.Life-d.Age)/0.6, 0, 1))

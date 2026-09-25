@@ -136,9 +136,9 @@ type InputReceiver struct {
 	have  bool
 }
 
-// maxQueued inputs can wait (at 60 Hz, ~70 ms) before older ones are
-// skipped to catch up.
-const maxQueued = 4
+// maxQueued inputs can wait (at 60 Hz, 100 ms: a hotspot bunches them)
+// before older ones are skipped to catch up.
+const maxQueued = 6
 
 // Acked is the sequence number of the last input used.
 func (r *InputReceiver) Acked() uint32 { return r.used.Seq }

@@ -19,8 +19,8 @@ func (w *World) StepBody(b *Body, dt float32) {
 	}
 	lin := float32(math.Exp(-float64(w.LinearDamping * h)))
 	ang := float32(math.Exp(-float64(w.AngularDamping * h)))
+	b.prevPosition, b.prevRotation = b.Position, b.Rotation // (where it was before this whole step)
 	for range n {
-		b.prevPosition, b.prevRotation = b.Position, b.Rotation
 		b.Velocity = b.Velocity.Add(w.Gravity.Scale(h))
 
 		var contacts []contact

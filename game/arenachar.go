@@ -76,8 +76,7 @@ const (
 // head and arms following their aim, the weapon in hand and the suit
 // flashing when hit. The dead topple over backwards.
 func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride float32) []render.DrawCmd {
-	alpha := m.sim().Phys.Alpha()
-	pos, _ := p.Body.Interpolated(alpha)
+	pos, _ := p.Body.Interpolated(m.alpha())
 	feet := pos.Sub(mathx.Vec3{0, arena.PlayerRadius, 0})
 	base := mathx.Translate(feet[0], feet[1], feet[2]).Mul(mathx.RotateY(-p.Yaw))
 	if p.Dead {
