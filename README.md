@@ -48,6 +48,7 @@ You don't need to link against the Vulkan loader: volk loads `vulkan-1.dll` from
 build/bin/game.exe -validation=false -vsync=false
 build/bin/game.exe -mode run                  # skip the menu: menu | run | demo
 build/bin/game.exe -mode run -seed 42         # replay one course (default: a new one each run)
+build/bin/game.exe -mode run -seed 12 -from 800   # start 800 m down the course (try a particular section)
 build/bin/game.exe -mode run -autopilot -screenshot out.png -frames 600   # a self-driving run
 build/bin/game.exe -model path/to/model.glb   # show a glTF model in the centre
 build/bin/game.exe -screenshot out.png -frames 90   # 90 fixed 1/60 s frames, save the last, exit
@@ -182,8 +183,27 @@ It gets harder and faster all the way down:
 - **Zones**: every 500 m you enter a new named zone (*The Drop*, *Pine Line*,
   *Boulder Field*, and so on), announced with a banner.
 
-The
-level is built in 48 m chunks. Each chunk's mesh samples that same height function, and
+After a warm-up, **special sections** break up the valley, a few hundred metres apart:
+
+- **Ridge**: a warning tells you which side to climb. The path leaves the valley and rises
+  onto that side's mountain, the same ridged peaks that wall the run. The crest pitches over
+  those summits, the shoulders break into rock, and both sides fall away into the pit. Fall
+  off and the run is over. Later the pit fills back in and the path drops into the valley.
+- **Narrows**: the channel becomes a gorge through those mountains. It snakes, pinches and
+  opens between ridged walls. A few rocks hug the walls, so you weave.
+
+In plain valley, riding up the banks doesn't last. Past the channel's edge the snow slides
+you back towards the path, harder the further up you are. Stay up there anyway and
+snowballs come rolling down the bank at you, timed to cross your line. They knock you
+about but don't end the run. Cracks only appear in plain valley.
+
+The terrain is one height function in every section. A section blends in a *corridor*
+around the path line: on a ridge, the summit of the side mountains, with the valley sunk
+into a pit; in the narrows, a snaking gorge. Meshes are built around the path line, and
+the physics, obstacles and autopilot all follow it too. Tests ride the autopilot through
+a ridge and the narrows to prove they're rideable.
+
+The level is built in 48 m chunks. Each chunk's mesh samples that same height function, and
 the physics collides with it through a heightfield collider. What you see is what you
 ride on. Chunks stream in as you go: the game keeps about 480 m ahead and builds at most
 one new chunk per frame (~0.7 ms). The renderer frees old chunk meshes once no frame in

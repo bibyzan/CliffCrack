@@ -56,6 +56,7 @@ type scenery struct {
 	ballTex render.Texture
 	shadow  render.Mesh
 	chip    render.Mesh // a piece of shattered ball
+	snow    render.Mesh // a rolling snowball
 }
 
 func newScenery() (*scenery, error) {
@@ -102,6 +103,7 @@ func newScenery() (*scenery, error) {
 	sc.ball = mesh(geom.Sphere(1, 32, 16))
 	sc.shadow = mesh(geom.Disc(1, 24, false))
 	sc.chip = mesh(geom.Icosphere(1, 0))
+	sc.snow = mesh(rockMesh(rand.New(rand.NewPCG(9, 9)))) // lumpy, like packed snow
 	if err != nil {
 		return nil, err
 	}

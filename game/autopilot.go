@@ -29,10 +29,12 @@ func autopilot(r *ride) rideInput {
 		}
 	}
 
-	w := r.course.HalfWidth(s + look)
-	centre := r.course.Centre(s + look)
+	// The path's line and width: up on a ridge's crest, through the narrows.
+	w := r.course.PathHalfWidth(s + look)
+	centre := r.course.PathCentre(s + look)
+	margin := min(float32(2), w*0.4)
 	best, bestCost := r.lane, float32(1e9)
-	for off := -w + 2; off <= w-2; off += 0.75 {
+	for off := -w + margin; off <= w-margin; off += 0.5 {
 		end := centre + off
 		cost := 0.02*abs32(off) + 0.05*abs32(off-r.lane)
 		for _, o := range near {

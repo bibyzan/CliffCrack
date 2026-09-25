@@ -2,12 +2,14 @@ package game
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"CliffCrack/engine/gfx"
 	"CliffCrack/engine/input"
 	"CliffCrack/engine/mathx"
 	"CliffCrack/engine/ui"
+	"CliffCrack/game/course"
 )
 
 // The interface palette (linear RGBA), matching the renderer's UI theme.
@@ -48,6 +50,27 @@ func withAlpha(c [4]float32, a float32) [4]float32 {
 	return c
 }
 
+// sectionWarning is the banner shown as a special section approaches, so
+// there's time to get up the bank for a ridge.
+func (r *Run) sectionWarning() (string, bool) {
+	if r.ride.crashed {
+		return "", false
+	}
+	s := r.ride.s()
+	k, ok := r.course.NextSection(s)
+	if !ok || k.Start-s > 220 {
+		return "", false
+	}
+	if k.Kind == course.Narrows {
+		return "NARROWS AHEAD", true
+	}
+	// Side +1 is +x: to the right while heading down the mountain.
+	if k.Side > 0 {
+		return "RIDGE AHEAD  -  CLIMB RIGHT", true
+	}
+	return "RIDGE AHEAD  -  CLIMB LEFT", true
+}
+
 // UI draws the HUD, zone banners and the game-over card. in picks keyboard
 // or gamepad prompts.
 func (r *Run) UI(b *ui.Builder, in *input.State) {
@@ -78,6 +101,13 @@ func (r *Run) UI(b *ui.Builder, in *input.State) {
 		b.End()
 		b.Panel("##zonename", 0.5, 0.31, hudText, 3)
 		b.ColorText(withAlpha(uiWhite, fade), "%s", strings.ToUpper(zoneName(r.zone)))
+		b.End()
+	}
+	if msg, ok := r.sectionWarning(); ok {
+		// Pulse to catch the eye.
+		pulse := 0.65 + 0.35*float32(math.Sin(float64(r.ride.time)*8))
+		b.Panel("##section", 0.5, 0.4, hudText, 1.8)
+		b.ColorText(withAlpha(uiAccent, pulse), "%s", msg)
 		b.End()
 	}
 	if r.ride.time < hintTime && !r.ride.crashed {

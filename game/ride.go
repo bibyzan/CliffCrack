@@ -14,24 +14,38 @@ const (
 	rideBallRadius = 0.5
 	// Cruise speed: what the ride builds towards on the ground, rising from
 	// 20 m/s (72 km/h) at the top to ~50 m/s (180 km/h) far down.
-	rideCruiseBase  = 20.0
-	rideCruiseGain  = 30.0
-	rideTuckBonus   = 0.15  // W: cruise this much faster
-	rideBrakeCut    = 0.6   // S: cruise this much slower...
-	rideBrakeDrag   = 0.012 // ... and scrub speed with quadratic drag
-	rideBoost       = 6.0   // m/s^2 at most of push towards the cruise speed
-	rideOverDrag    = 0.02  // drag on speed above cruise (per m/s over, per m/s)
-	rideSteer       = 17.0  // m/s^2 of sideways push on the ground
-	rideAirSteer    = 5.0   // ... and in the air
-	rideSkipTime    = 0.3   // seconds after touching down that still count as on the ground (skipping over moguls)
-	rideJumpCool    = 0.35  // seconds before another jump: the ball can still touch the snow for a step after one
-	rideJump        = 6.5   // m/s straight up
-	rideStallSpeed  = 1.5   // slower than this for rideStallTime ends the run
-	rideStallTime   = 2.5   // seconds
-	rideCrackFall   = 4.0   // metres below the rim: fallen into a crack
-	rideOffPiste    = 95.0  // metres from the centre line: lost on the mountain
-	rideStartSpeed  = 7.0   // push off the cliff top
-	rideBodiesAhead = 2     // chunks of obstacle colliders kept ahead of the ball
+	rideCruiseBase = 20.0
+	rideCruiseGain = 30.0
+	rideTuckBonus  = 0.15  // W: cruise this much faster
+	rideBrakeCut   = 0.6   // S: cruise this much slower...
+	rideBrakeDrag  = 0.012 // ... and scrub speed with quadratic drag
+	rideBoost      = 6.0   // m/s^2 at most of push towards the cruise speed
+	rideOverDrag   = 0.02  // drag on speed above cruise (per m/s over, per m/s)
+	rideSteer      = 17.0  // m/s^2 of sideways push on the ground
+	rideAirSteer   = 5.0   // ... and in the air
+	rideSkipTime   = 0.3   // seconds after touching down that still count as on the ground (skipping over moguls)
+	rideJumpCool   = 0.35  // seconds before another jump: the ball can still touch the snow for a step after one
+	rideJump       = 6.5   // m/s straight up
+	rideStallSpeed = 1.5   // slower than this for rideStallTime ends the run
+	rideStallTime  = 2.5   // seconds
+	rideCrackFall  = 4.0   // metres below the rim: fallen into a crack
+	rideEdgeFall   = 14.0  // metres below the path: fallen off the ridge (or the mountain)
+	rideOffPiste   = 95.0  // metres from the path's centre line: lost on the mountain
+
+	// Up on the valley's banks the snow slides you back towards the path:
+	// past rideBankFree metres beyond the channel's edge, a push grows with
+	// distance up to rideBankMax m/s^2 (and snowballs start rolling at you).
+	rideBankFree = 3.0
+	rideBankPush = 0.7 // m/s^2 per metre further out
+	rideBankMax  = 16.0
+
+	// Snowballs roll down the banks at a ball that stays up there.
+	snowballAfter   = 0.8  // seconds up on a bank before the first one
+	snowballEvery   = 1.4  // seconds between them
+	snowballMax     = 3    // alive at once
+	snowballLife    = 14.0 // seconds before one melts away
+	rideStartSpeed  = 7.0  // push off the cliff top
+	rideBodiesAhead = 2    // chunks of obstacle colliders kept ahead of the ball
 )
 
 // rideInput is one frame of control. Steer is -1 (left) .. 1 (right) relative
@@ -50,6 +64,13 @@ type rideEvents struct {
 
 // obstacleTag marks obstacle bodies (Body.UserData).
 type obstacleTag struct{ kind course.ObstacleKind }
+
+// snowball is a big ball of snow rolling down a bank. It knocks the player
+// about but, unlike a rock, doesn't end the run.
+type snowball struct {
+	body *physics.Body
+	age  float32
+}
 
 // ride is the Run mode's simulation: the ball on the generated course, the
 // obstacle colliders near it, and the rules that end a run. It has no
@@ -73,6 +94,11 @@ type ride struct {
 	crashPos  mathx.Vec3
 	debris    []*physics.Body // the ball's pieces after a crash
 	lane      float32         // autopilot: chosen offset from the centre line
+
+	snowballs []*snowball
+	onBank    float32 // seconds the ball has been up on a bank
+	nextBall  float32 // seconds until the next snowball may roll
+	rng       *rand.Rand
 }
 
 // newRide starts a run on c. obstacles returns a chunk's obstacles (cached
@@ -202,6 +228,10 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 	b.Velocity = b.Velocity.Scale(1 / (1 + drag*speed*dt))
 
 	r.sinceJump += dt
+	if onGround {
+		r.bankPush(dt)
+	}
+
 	if in.jump && onGround && r.sinceJump > rideJumpCool {
 		r.sinceJump = 0
 		b.Velocity[1] = max(b.Velocity[1], 0) + rideJump
@@ -242,11 +272,22 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 	}
 
 	p := b.Position
+	s := r.s()
+	pathX := r.course.PathCentre(s)
 	switch {
 	case p[1] < r.course.Rim(p[0], p[2])-rideCrackFall:
 		r.crash("fell into a crack")
-	case abs32(p[0]-r.course.Centre(r.s())) > rideOffPiste:
+	case p[1] < r.course.Rim(pathX, p[2])-rideEdgeFall:
+		if k, ok := r.course.SectionAt(s); ok && k.Kind == course.Ridge {
+			r.crash("fell off the ridge")
+		} else {
+			r.crash("fell off the mountain")
+		}
+	case abs32(p[0]-pathX) > rideOffPiste:
 		r.crash("lost on the mountain")
+	}
+	if !r.crashed {
+		r.updateSnowballs(dt)
 	}
 	if r.landed && b.Velocity.Len() < rideStallSpeed {
 		r.stalled += dt
@@ -258,6 +299,97 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 	}
 	ev.crashed = r.crashed
 	return ev
+}
+
+// placeAt puts the ball on the path at distance s (u across from its centre
+// line), already rolling down it at speed: for starting partway down.
+func (r *ride) placeAt(s, u, speed float32) {
+	x := r.course.PathCentre(s) + u
+	r.ball.Position = mathx.Vec3{x, r.course.Height(x, -s) + rideBallRadius + 0.05, -s}
+	r.ball.Velocity = mathx.Vec3{0, 0, -speed}
+	r.ball.AngularVelocity = mathx.Vec3{-speed / rideBallRadius, 0, 0}
+	r.ball.Teleported()
+	r.landed = true
+	r.distance = s
+	r.syncBodies()
+}
+
+// bankOut is how far past the valley channel's edge the ball is (metres,
+// positive up on a bank) and which side it's on (+1 for +x).
+func (r *ride) bankOut() (out, side float32) {
+	s := r.s()
+	u := r.ball.Position[0] - r.course.Centre(s)
+	side = 1
+	if u < 0 {
+		side = -1
+	}
+	return abs32(u) - r.course.HalfWidth(s), side
+}
+
+// bankPush slides a ball that's up on the valley's banks back towards the
+// path, harder the further out it is, so riding the banks can't last. In
+// sections, whose own walls and edges shape the ride, it fades out.
+func (r *ride) bankPush(dt float32) {
+	out, side := r.bankOut()
+	weight := r.course.ValleyWeight(r.s())
+	if out <= rideBankFree || weight <= 0 {
+		return
+	}
+	push := min(rideBankMax, (out-rideBankFree)*rideBankPush+3) * weight
+	r.ball.Velocity[0] -= side * push * dt
+}
+
+// updateSnowballs rolls snowballs down the bank at a ball that stays up
+// there, ages them and clears away old ones.
+func (r *ride) updateSnowballs(dt float32) {
+	out, side := r.bankOut()
+	if out > rideBankFree+3 && r.course.ValleyWeight(r.s()) > 0.99 {
+		r.onBank += dt
+	} else {
+		r.onBank = 0
+	}
+	r.nextBall -= dt
+	if r.onBank > snowballAfter && r.nextBall <= 0 && len(r.snowballs) < snowballMax {
+		r.spawnSnowball(side)
+		r.nextBall = snowballEvery
+	}
+	alive := r.snowballs[:0]
+	for _, sb := range r.snowballs {
+		sb.age += dt
+		p := sb.body.Position
+		behind := p[2] - r.ball.Position[2] // metres behind the ball (the run heads to -z)
+		if sb.age > snowballLife || behind > 60 || p[1] < r.course.Rim(p[0], p[2])-10 {
+			r.phys.Remove(sb.body)
+			continue
+		}
+		alive = append(alive, sb)
+	}
+	r.snowballs = alive
+}
+
+// spawnSnowball starts a snowball further up the bank and a little ahead,
+// already rolling down across the ball's line.
+func (r *ride) spawnSnowball(side float32) {
+	if r.rng == nil {
+		r.rng = rand.New(rand.NewPCG(r.course.Seed, 0x5a0b))
+	}
+	// Timed to cross the ball's line about 1.5 s later: it starts ~12 m up
+	// the bank, rolling down at ~8 m/s while drifting downhill at half the
+	// ball's speed, so it starts 0.75 s of the ball's speed ahead.
+	b := r.ball
+	ahead := 8 + 0.75*b.Velocity.Len() + 4*r.rng.Float32()
+	s := r.s() + ahead
+	x := b.Position[0] + side*(10+3*r.rng.Float32())
+	radius := 1.6 + 0.7*r.rng.Float32()
+	body := physics.NewSphere(radius, 40*radius) // heavy: it shoves the ball
+	body.Position = mathx.Vec3{x, r.course.Height(x, -s) + radius + 0.5, -s}
+	body.Velocity = mathx.Vec3{-side * 8, 0, b.Velocity[2] * 0.5}
+	body.Restitution = 0.2
+	body.Friction = 0.8
+	sb := &snowball{body: body}
+	body.UserData = sb
+	r.phys.Add(body)
+	r.snowballs = append(r.snowballs, sb)
 }
 
 // crash ends the run: the ball shatters into pieces that tumble on.

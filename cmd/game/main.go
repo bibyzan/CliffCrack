@@ -39,6 +39,7 @@ func run() error {
 	mode := flag.String("mode", "menu", `start in "menu", "run" or "demo"`)
 	seed := flag.Uint64("seed", 0, "Run mode course seed (0 = a new course every run)")
 	autopilot := flag.Bool("autopilot", false, "Run mode steers itself (for demos and scripted tests)")
+	from := flag.Float64("from", 0, "Run mode: start this many metres down the course (with -seed, to try a particular section)")
 	ui := flag.Bool("ui", true, "show the Engine Demo's debug UI at startup (F1 toggles the debug window in any mode)")
 	sound := flag.Bool("audio", true, "enable audio output")
 	drop := flag.Int("drop", 0, "number of physics balls to drop at startup")
@@ -105,6 +106,7 @@ func run() error {
 		Start:     startMode,
 		Seed:      *seed,
 		Autopilot: *autopilot,
+		StartAt:   float32(*from),
 		DebugUI:   *ui,
 		Audio:     mixer,
 		DataDir:   dataDir,

@@ -1,6 +1,8 @@
 // Package course generates the Run mode's downhill level from a seed (pure
 // Go, no GPU): a meandering snow channel dropping down a mountainside, walled
-// by rising peaks, cut by cracks to jump and strewn with rocks and pines.
+// by rising peaks, cut by cracks to jump and strewn with rocks and pines, and
+// broken up by special sections (sections.go): ridges above a bottomless pit
+// and narrows between sheer walls.
 //
 // The level is endless and generated in chunks along the run. Every query is
 // a pure function of the seed, so chunks can be built in any order, the
@@ -87,6 +89,8 @@ type Course struct {
 	detail *noise.Field // moguls
 	peaks  *noise.Field // mountains beside the run
 	cracks []Crack      // sorted by S
+	// Special sections, sorted by Start. Cracks only appear in plain valley.
+	sections []Section
 }
 
 // New generates the level for seed.
@@ -97,13 +101,24 @@ func New(seed uint64) *Course {
 		detail: noise.New(seed + 1),
 		peaks:  noise.New(seed + 2),
 	}
+	c.generateSections()
 	// Cracks: the first after a warm-up stretch, then closer together and
-	// wider the further you get. Aligned to mesh rows.
+	// wider the further you get, only in plain valley. Aligned to mesh rows.
 	rng := rand.New(rand.NewPCG(seed, 0xc4ac5))
 	for s := float32(220 + rng.IntN(60)); s < 200000; {
 		d := Difficulty(s)
-		width := 3 + 5*d + float32(rng.IntN(2))
-		c.cracks = append(c.cracks, Crack{S: float32(math.Round(float64(s))), Width: float32(math.Round(float64(width)))})
+		width := float32(math.Round(float64(3 + 5*d + float32(rng.IntN(2)))))
+		at := float32(math.Round(float64(s)))
+		if c.overlapsSection(at-rampLength-30, at+width+landing+30) {
+			// No cracks in sections: try again just after the one in the way.
+			k, ok := c.SectionAt(at + width + landing + 30)
+			if !ok {
+				k, _ = c.NextSection(at - rampLength - 30)
+			}
+			s = k.End() + rampLength + 40 + float32(rng.IntN(60))
+			continue
+		}
+		c.cracks = append(c.cracks, Crack{S: at, Width: width})
 		s += 130 + 130*(1-d) + float32(rng.IntN(100))
 	}
 	return c
@@ -133,7 +148,8 @@ func drop(s float32) float32 {
 	}
 }
 
-// Centre is the x of the course centre line at distance s.
+// Centre is the x of the valley's centre line at distance s. The path follows
+// it except in ridge sections (see PathCentre).
 func (c *Course) Centre(s float32) float32 {
 	fs := float64(s)
 	x := 34*c.shape.Line(fs/260) + 9*c.shape.Line(fs/75+40)
@@ -141,11 +157,38 @@ func (c *Course) Centre(s float32) float32 {
 	return float32(x) * smoothstep(0, 120, s)
 }
 
-// HalfWidth is half the width of the channel's flat-ish floor at s. It
-// tightens as you go.
-func (c *Course) HalfWidth(s float32) float32 {
+// HalfWidth is half the width of the valley channel's flat-ish floor at s.
+// It tightens as you go. (Where the path runs elsewhere, see PathHalfWidth.)
+func (c *Course) HalfWidth(s float32) float32 { return c.valleyHalfWidth(s) }
+
+func (c *Course) valleyHalfWidth(s float32) float32 {
 	d := Difficulty(s)
 	return 15 - 5*d + (4-1.5*d)*float32(c.shape.Line(float64(s)/140+90))
+}
+
+// PathCentre is the x of the rideable path's centre line: the valley's, or
+// the ridge's crest in a ridge section.
+func (c *Course) PathCentre(s float32) float32 {
+	p, _ := c.profileAt(s)
+	return c.Centre(s) + p.shift
+}
+
+// PathHalfWidth is half the width of the rideable path's floor at s.
+func (c *Course) PathHalfWidth(s float32) float32 {
+	w := c.valleyHalfWidth(s)
+	if p, ok := c.profileAt(s); ok {
+		return w + (p.halfWidth-w)*p.corridor
+	}
+	return w
+}
+
+// ValleyWeight is 1 in plain valley and 0 where a section's corridor has
+// fully replaced it.
+func (c *Course) ValleyWeight(s float32) float32 {
+	if p, ok := c.profileAt(s); ok {
+		return 1 - p.corridor
+	}
+	return 1
 }
 
 // Cracks returns the cracks overlapping [from, to).
@@ -207,10 +250,11 @@ func (c *Course) surface(x, z float32) (height, cut float32) {
 	s := -z
 	u := x - c.Centre(s)
 	au := abs(u)
-	w := c.HalfWidth(s)
+	w := c.valleyHalfWidth(s)
 
 	// The slope itself, with long gentle rolls.
-	h := -drop(s) + 2.5*float32(c.shape.Line(float64(s)/60+20))
+	base := -drop(s) + 2.5*float32(c.shape.Line(float64(s)/60+20))
+	h := base
 
 	// Channel: a shallow bowl, then snow berms, then peaks further out.
 	bowl := min(au, w)
@@ -227,6 +271,10 @@ func (c *Course) surface(x, z float32) (height, cut float32) {
 	// Behind the start: the cliff the ball is dropped from.
 	h += cliffHeight * smoothstep(-2, -10, s)
 
+	if p, ok := c.profileAt(s); ok && p.corridor > 0 {
+		h = c.corridor(x, z, base, h, p)
+	}
+
 	// Cracks and their kickers span the channel and fade out on the banks.
 	across := 1 - smoothstep(w+4, w+18, au)
 	if across > 0 {
@@ -239,6 +287,100 @@ func (c *Course) surface(x, z float32) (height, cut float32) {
 		}
 	}
 	return h, cut
+}
+
+// corridor reshapes the valley height hv at (x, z) for a special section.
+// The valley sinks towards the pit, and the path's own surface replaces it:
+// a ridge is the summit of the same ridged mountains that wall the valley,
+// a narrows is a gorge cut through them.
+func (c *Course) corridor(x, z, base, hv float32, p profile) float32 {
+	sunk := hv + (base-pitDepth-hv)*p.pit
+	var local float32
+	if p.kind == Narrows {
+		local = c.gorge(x, z, base, sunk, p)
+	} else {
+		local = c.summit(x, z, base, sunk, p)
+	}
+	return sunk + (local-sunk)*p.corridor
+}
+
+// summit is the mountain top the ridge rides. The crest is a narrow crown.
+// Past it, the ground is the same ridged peaks that wall the valley: sharp
+// crests and rock faces, tens of metres of relief, sloping away on both
+// sides and then into the pit. Those peaks stay at or below the line you ride.
+func (c *Course) summit(x, z, base, hv float32, p profile) float32 {
+	s := -z
+	path := c.Centre(s) + p.shift
+	au := abs(x - path)
+	sharp := float32(0)
+	if ridgeLift > 0 {
+		sharp = p.lift / ridgeLift
+	}
+	// Long and shallow, so the crest never climbs against the mountain's grade.
+	on := float32(c.peaks.Ridged(float64(-s)/220, 1.3, 2, 0.5))
+	spine := base + p.lift + (on-0.4)*14*sharp
+
+	floor := max(p.halfWidth, 4)
+	u := min(au/floor, 1)
+	// A little of the mountain's own grain on the crown, so the snow isn't a
+	// graded ramp. Small enough that the line stays downhill and rideable.
+	grain := float32(c.detail.FBM(float64(x)/7, float64(z)/7, 2, 0.5)) * 0.35 * sharp
+	crown := spine - 0.7*u*u*sharp + grain*(1-u)
+
+	// Same field as the side mountains, zero on the racing line and full a
+	// few metres off it, which is where the camera sees them.
+	off := float32(c.peaks.Ridged(float64(x)/64, float64(z)/64, 5, 0.5))
+	along := float32(c.peaks.Ridged(float64(path)/64, float64(-s)/64, 5, 0.5))
+	grow := smoothstep(floor-0.5, floor+3, au)
+	peaks := (off - along) * 70 * grow * sharp
+	// Upward ridges stand beside the crest. Further out they aren't allowed
+	// to rebuild a bench, or a ball that leaves the line can land and ride.
+	if upCap := 9 * (1 - smoothstep(floor+1, floor+9, au)); peaks > upCap {
+		peaks = upCap
+	}
+	d := max(au-floor, 0)
+	// A mountainside, not a wall: steep enough for rock, shallow enough that
+	// the ridges read as peaks instead of wrinkles on a cliff.
+	slope := (0.38*d + 0.008*d*d) * sharp
+	local := crown - slope + peaks
+	roof := spine - 0.08*d*sharp
+	if local > roof {
+		local = roof + (local-roof)*0.35
+	}
+	// The pit takes over only once the shoulders have had room to be mountains.
+	if hv < local {
+		t := smoothstep(floor+14, floor+36, au)
+		local += (hv - local) * t
+	}
+	return local
+}
+
+// gorge is the narrows: a snaking floor between walls built from the same
+// ridged peaks as the side mountains, pinching and opening along the way.
+func (c *Course) gorge(x, z, base, hv float32, p profile) float32 {
+	s := -z
+	u := x - (c.Centre(s) + p.shift)
+	au := abs(u)
+	jag := float32(c.peaks.Ridged(float64(x)/16, float64(z)/16, 4, 0.55))
+	big := float32(c.peaks.Ridged(float64(x)/48, float64(z)/48, 3, 0.5))
+	roll := float32(c.shape.Line(float64(s)/34+6)) * 2 * p.walls
+	floor := base + roll - 0.012*u*u
+	e := au - p.halfWidth
+	if e <= 0 {
+		return floor
+	}
+	// Leaning, not vertical. A vertical face hides the ridges: height variation
+	// only wrinkles it. On a slope, the same ridges step the wall in and out.
+	fold := (0.55*big + jag - 0.75) * 26 * smoothstep(1.5, 9, e)
+	rise := max(1.35*e, 1.9*e+fold)
+	face := floor + rise*p.walls
+	// The first stretch of wall stays the face, so the gorge doesn't melt
+	// back into the snow bank. Further out it joins the surrounding mountains.
+	if e < 8 {
+		return face
+	}
+	t := smoothstep(8, 34, e)
+	return face + (hv-face)*t
 }
 
 // StartPosition is where the ball is dropped: over the cliff edge behind the start.
@@ -266,7 +408,7 @@ func (c *Course) Chunk(index int) Chunk {
 	offsets := columnOffsets()
 	mesh := geom.Grid(columns, rows, func(i, j int) mathx.Vec3 {
 		s := start + float32(j*rowStep)
-		x := c.Centre(s) + offsets[i]
+		x := c.PathCentre(s) + offsets[i] // columns packed tightly around the path
 		return mathx.Vec3{x, c.Height(x, -s), -s}
 	})
 	return Chunk{Index: index, Start: start, Mesh: mesh, Obstacles: c.obstacles(index, start)}
@@ -278,7 +420,7 @@ func (c *Course) Obstacles(index int) []Obstacle {
 }
 
 // columnOffsets spaces the mesh columns across the course: about a metre
-// apart in the channel, widening to ~9 m over the far mountains.
+// apart on the path, widening to ~9 m over the far mountains.
 func columnOffsets() []float32 {
 	const a = 0.25 // share of linear spacing; the rest is cubic
 	out := make([]float32, columns)
@@ -300,6 +442,9 @@ func (c *Course) obstacles(index int, start float32) []Obstacle {
 	d := Difficulty(mid)
 	rocks := 2 + int(9*d) + rng.IntN(3)
 	trees := 5 + int(6*d) + rng.IntN(4)
+	if _, ok := c.profileAt(mid); ok {
+		return c.sectionObstacles(rng, start, d)
+	}
 
 	var out []Obstacle
 	// place adds an obstacle at distance s, u across from the centre line.
@@ -310,6 +455,9 @@ func (c *Course) obstacles(index int, start float32) []Obstacle {
 		}
 		if c.inJumpZone(s) {
 			return // keep kickers, cracks and landings clear
+		}
+		if c.overlapsSection(s-20, s+20) {
+			return // sections place their own (see sectionObstacles)
 		}
 		x, z := c.Centre(s)+u, -s
 		base := mathx.Vec3{x, c.Height(x, z), z}
@@ -368,6 +516,50 @@ func (c *Course) obstacles(index int, start float32) []Obstacle {
 				side = -1
 			}
 			place(Tree, s, side*(w-1+rng.Float32()*16), false)
+		}
+	}
+	return out
+}
+
+// sectionObstacles places a chunk's obstacles inside a special section: none
+// on its transitions (the climb, the pinch), a few rocks on a ridge's crest,
+// and rocks hugging alternate walls in the narrows so you weave between them.
+func (c *Course) sectionObstacles(rng *rand.Rand, start, d float32) []Obstacle {
+	var out []Obstacle
+	count := 1 + int(3*d) + rng.IntN(2)
+	for range count {
+		s := start + rng.Float32()*ChunkLength
+		q, ok := c.profileAt(s)
+		if !ok || !q.stable {
+			continue
+		}
+		hw := c.PathHalfWidth(s)
+		o := Obstacle{Kind: Rock, Distance: s, Yaw: rng.Float32() * 2 * math.Pi, Variant: rng.IntN(1 << 16)}
+		var u float32
+		if q.kind == Narrows {
+			side := float32(1)
+			if rng.IntN(2) == 0 {
+				side = -1
+			}
+			o.Scale = 0.7 + 0.3*rng.Float32()
+			u = side * (hw - o.Scale*0.6)
+		} else {
+			o.Scale = 0.7 + 0.7*rng.Float32()
+			u = (rng.Float32()*2 - 1) * (hw - 2)
+		}
+		x, z := c.PathCentre(s)+u, -s
+		o.Base = mathx.Vec3{x, c.Height(x, z), z}
+		o.Squash = 0.6 + 0.3*rng.Float32()
+		o.Radius = o.Scale * 0.85
+		o.Centre = o.Base.Add(mathx.Vec3{0, o.Scale * o.Squash * 0.35, 0})
+		crowded := false
+		for _, q := range out {
+			if abs(q.Distance-s) < 12 { // room to swerve between them
+				crowded = true
+			}
+		}
+		if !crowded {
+			out = append(out, o)
 		}
 	}
 	return out

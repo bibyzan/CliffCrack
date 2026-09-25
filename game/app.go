@@ -45,9 +45,10 @@ type Stats struct {
 
 type Options struct {
 	Start     Mode
-	Seed      uint64 // non-zero: every run uses this course
-	Autopilot bool   // the player's runs steer themselves
-	DebugUI   bool   // show the Engine Demo's debug window at startup (F1 toggles)
+	Seed      uint64  // non-zero: every run uses this course
+	StartAt   float32 // non-zero: runs start this many metres down the course (for testing sections)
+	Autopilot bool    // the player's runs steer themselves
+	DebugUI   bool    // show the Engine Demo's debug window at startup (F1 toggles)
 	Audio     *audio.Mixer
 	Demo      DemoOptions
 	DataDir   string // where settings are saved ("" = don't save)
@@ -103,6 +104,7 @@ func NewApp(opts Options) (*App, error) {
 	}
 	a.run = newRun(sc, opts.Audio, opts.Seed, &a.settings)
 	a.run.Autopilot = opts.Autopilot
+	a.run.startAt = opts.StartAt
 	a.opts.Demo.Settings = &a.settings
 	if err := a.enter(opts.Start); err != nil {
 		return nil, err

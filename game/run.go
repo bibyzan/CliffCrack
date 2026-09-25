@@ -40,7 +40,8 @@ type Run struct {
 	attract bool
 	// Autopilot steers the player's runs too (for demos and scripted tests).
 	Autopilot bool
-	fixedSeed uint64 // non-zero: every run uses this seed
+	fixedSeed uint64  // non-zero: every run uses this seed
+	startAt   float32 // non-zero: the player's runs start this far down (a dev shortcut)
 
 	seed   uint64
 	course *course.Course
@@ -99,6 +100,9 @@ func (r *Run) start(attract bool) {
 	}
 	r.course = course.New(r.seed)
 	r.ride = newRide(r.course, r.obstacles)
+	if r.startAt > 0 && !attract {
+		r.ride.placeAt(r.startAt, 0, r.ride.cruise())
+	}
 	r.overTime, r.choice, r.newBest, r.wantsMenu, r.retry = 0, 0, false, false, false
 	r.zone, r.zoneTime = -1, 0
 	r.cam = newChaseCam(r.ride)
@@ -280,6 +284,11 @@ func (r *Run) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, 
 
 // appendBall draws the ball and its shadow, or its pieces after a crash.
 func (r *Run) appendBall(out []render.DrawCmd) []render.DrawCmd {
+	for _, sb := range r.ride.snowballs {
+		pos, rot := r.ride.pose(sb.body)
+		out = append(out, render.DrawCmd{Model: bodyMatrix(pos, rot, sb.body.Radius), Color: snowColor,
+			Flags: gfx.DrawFlat, Mesh: r.sc.snow})
+	}
 	if r.ride.crashed {
 		for i, p := range r.ride.debris {
 			c := [4]float32{1, 1, 1, 1}
