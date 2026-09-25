@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 40">
+  <!-- A frag grenade: body, fuse head, spoon and pin ring. -->
+  <ellipse cx="16" cy="25" rx="11" ry="13"/>
+  <rect x="12" y="7" width="9" height="6"/>
+  <polygon points="20,8 27,10 27,28 24,28 23,13"/>
+  <circle cx="9" cy="8" r="4.5"/>
+  <circle cx="9" cy="8" r="2.4" fill="#000"/>
+  <rect x="3" y="22" width="26" height="2" fill="#000"/>
+</svg>

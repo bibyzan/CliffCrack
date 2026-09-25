@@ -70,6 +70,8 @@ type arenaAssets struct {
 	chasm     *chasm
 	ring      render.Mesh // the sniper scope's surround
 	thinRing  render.Mesh // reticles: a ring of radius 1, 0.18 thick
+	quad      render.Mesh // HUD icons: a unit quad facing the eye
+	icons     hudIcons
 }
 
 func newArenaAssets() (*arenaAssets, error) {
@@ -108,6 +110,12 @@ func newArenaAssets() (*arenaAssets, error) {
 		return nil, err
 	}
 	if as.thinRing, err = render.CreateMesh(ring(1.18, 40)); err != nil {
+		return nil, err
+	}
+	if as.quad, err = render.CreateMesh(hudQuad()); err != nil {
+		return nil, err
+	}
+	if as.icons, err = loadIcons(); err != nil {
 		return nil, err
 	}
 	return as, nil // glass uses the white texture (handle 0)

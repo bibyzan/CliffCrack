@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 130 40">
+  <!-- The pump shotgun: stock, receiver, ghost ring, barrel, magazine tube, pump and grip. -->
+  <polygon points="2,11 30,15 30,26 4,31"/>
+  <rect x="29" y="12" width="34" height="14"/>
+  <circle cx="52" cy="8" r="5"/>
+  <circle cx="52" cy="8" r="2.4" fill="#000"/>
+  <rect x="62" y="12" width="64" height="6"/>
+  <rect x="124" y="11" width="4" height="8"/>
+  <rect x="62" y="19" width="50" height="4"/>
+  <rect x="70" y="17" width="24" height="9"/>
+  <polygon points="38,25 48,25 45,37 35,37"/>
+</svg>

@@ -109,7 +109,8 @@ func partsFor(k arena.WeaponKind) []gunPart {
 	case k == arena.WeaponHammer:
 		return hammerParts
 	case int(k) >= 0 && int(k) < len(markers):
-		return markers[k].parts
+		mk := &markers[k]
+		return join(mk.parts, mk.mag, mk.pump) // all of it, at rest
 	}
 	return nil
 }

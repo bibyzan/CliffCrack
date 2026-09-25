@@ -77,6 +77,7 @@ type arenaSounds struct {
 	tick, fight, win, lose, collapse                     *audio.Sound
 	armour, pop, recharge, splat                         *audio.Sound
 	throw, stick, stickyBoom, pickup                     *audio.Sound
+	magOut, magIn, charge, shellIn, pump                 *audio.Sound
 	guns                                                 [len(arena.WeaponNames)]*audio.Sound
 	breaks                                               [arena.MaterialCount]*audio.Sound
 }
@@ -120,7 +121,10 @@ type Arena struct {
 	bursts     []burst
 	feed       []feedLine
 	popped     float32 // 0..1 flash as your own armour breaks
-	charging   bool    // your armour was recharging last frame
+	killMark   float32 // s left of the kill marker
+	armourMark bool    // the last hit marker only marked their armour
+	hitDirs    []hitDir
+	charging   bool // your armour was recharging last frame
 	lastShield float32
 	flash      float32 // seconds of muzzle flash left
 	hitMark    float32
@@ -138,6 +142,9 @@ type Arena struct {
 	lastTick   int              // the countdown second (or phase) last announced
 	fovKick    float32          // 0..1 widening of the view as a launch pad throws you
 	throwAnim  float32          // 0..1 the gun dipping as you throw a grenade
+	reloadEase float32          // 0..1 the gun turned for a reload
+	reloadT    float32          // how far through the reload it was last frame
+	lastPump   float32          // the shotgun's time since its last shot, last frame
 }
 
 func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64, practice bool) (*Arena, error) {
@@ -217,7 +224,7 @@ func (m *Arena) newRound() {
 	m.ends = [2][4]float32{south, north}
 	m.fovKick = 0
 	m.balls, m.splats, m.bursts = m.balls[:0], m.splats[:0], m.bursts[:0]
-	m.popped, m.charging = 0, false
+	m.popped, m.charging, m.killMark, m.hitDirs = 0, false, 0, m.hitDirs[:0]
 	m.flash, m.hitMark, m.hurt, m.shake, m.elapsed = 0, 0, 0, 0, 0
 	m.lastTick = 0
 	clear(m.strides)
@@ -402,6 +409,11 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 	m.feed = keep(m.feed, func(f feedLine) bool { return f.age < feedLife })
 	m.flash = max(m.flash-dt, 0)
 	m.hitMark = max(m.hitMark-dt, 0)
+	m.killMark = max(m.killMark-dt, 0)
+	for i := range m.hitDirs {
+		m.hitDirs[i].age += dt
+	}
+	m.hitDirs = keep(m.hitDirs, func(d hitDir) bool { return d.age < hitDirLife })
 	m.popped *= float32(math.Exp(-1.5 * float64(dt)))
 	// Your armour starting to come back.
 	if charging := me.Shield < arena.MaxShield && me.Shield > 0 && !me.Dead && me.Shield > m.lastShield; charging && !m.charging {
@@ -415,6 +427,13 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 	m.shake *= float32(math.Exp(-6 * float64(dt)))
 	m.fovKick *= float32(math.Exp(-2.5 * float64(dt)))
 	m.throwAnim *= float32(math.Exp(-7 * float64(dt)))
+	_, reloadingNow := me.Reloading()
+	if reloadingNow && !me.Dead {
+		m.reloadEase = min(m.reloadEase+dt*7, 1)
+	} else {
+		m.reloadEase = max(m.reloadEase-dt*5, 0)
+	}
+	m.reloadCues(me)
 
 	// Walk cycles: the weapon sway, and everyone's legs.
 	for i, p := range m.sim().Players {
@@ -471,11 +490,16 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 				m.play(m.sfx.hurt, 0.9)
 			}
 			m.shake = max(m.shake, 0.2+h.Damage/150)
+			if h.By != nil && h.By != me {
+				m.hitDirs = append(m.hitDirs, hitDir{from: h.By.Chest()})
+			} else if h.From != (mathx.Vec3{}) {
+				m.hitDirs = append(m.hitDirs, hitDir{from: h.From})
+			}
 			if h.Popped {
 				m.popped = 1
 			}
 		case h.By == me:
-			m.hitMark, m.headMark = hitMarkTime, h.Head
+			m.hitMark, m.headMark, m.armourMark = hitMarkTime, h.Head, h.Armour
 			switch {
 			case h.Head:
 				m.play(m.sfx.headshot, 0.9)
@@ -493,6 +517,9 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		how := k.Weapon.Cause()
 		if k.Head {
 			how += " · HEADSHOT"
+		}
+		if k.By == me && k.Victim != me {
+			m.killMark = killMarkLen
 		}
 		line := feedLine{text: m.playerName(k.By) + "  [" + how + "]  " + m.playerName(k.Victim), good: k.By == me && k.Victim != me}
 		if k.By == nil || k.By == k.Victim {
@@ -717,11 +744,22 @@ func (m *Arena) weaponModel() mathx.Mat4 {
 	offset[1] -= 0.22 * m.throwAnim
 	pitch -= 0.5 * m.throwAnim
 
-	if t, ok := w.Reloading(); ok {
-		dip := float32(math.Sin(math.Pi * float64(t)))
-		offset[1] -= 0.14 * dip
-		pitch -= 0.35 * dip
-		roll = 0.5 * dip
+	// Reloading: the gun turns to show where the ammo goes, and comes in a
+	// little, for the supporting hand to work on it.
+	if e := smooth(m.reloadEase); e > 0 {
+		style := reloadMag
+		if mk, ok := m.markerFor(heldKind(w)); ok {
+			style = mk.reload
+		}
+		switch style {
+		case reloadShells: // the port underneath, turned towards you
+			roll, pitch = 0.75*e, 0.15*e
+		case reloadDrum: // the drum's side up
+			roll, pitch = -0.35*e, 0.2*e
+		default: // the magazine well
+			roll, pitch = 0.35*e, 0.12*e
+		}
+		offset = offset.Add(mathx.Vec3{-0.04 * e, 0.02 * e, 0.05 * e})
 	}
 	switch held := heldKind(w); held {
 	case arena.WeaponLauncher:
@@ -823,7 +861,8 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 		out = m.appendWeapon(out)
 	}
 	out = m.appendHurt(out)
-	return params, m.appendReticle(out, fov)
+	out = m.appendReticle(out, fov)
+	return params, m.appendHelmet(out, fov, aspect)
 }
 
 // appendStructures draws every standing chunk, darkening as it takes damage,
@@ -910,13 +949,27 @@ func (m *Arena) appendWeapon(out []render.DrawCmd) []render.DrawCmd {
 	held := heldKind(&m.me().Weapons)
 	switch held {
 	case arena.WeaponHammer:
-		return m.drawParts(out, model, hammerParts)
+		out = m.drawParts(out, model, hammerParts)
+		return m.appendArms(out, model, nil, reloadPose{}, false)
 	}
 	mk, ok := m.markerFor(held)
 	if !ok {
 		return out // empty-handed
 	}
 	out = m.drawParts(out, model, mk.parts)
+	// The parts that move: the pump, and the magazine through a reload.
+	var pose reloadPose
+	t, reloadingNow := m.me().Reloading()
+	if reloadingNow {
+		pose = reloading(mk, t)
+	}
+	if mk.pump != nil {
+		out = m.drawParts(out, model.Mul(translate(m.pumpOffset())), mk.pump)
+	}
+	if mk.mag != nil {
+		out = m.drawParts(out, model.Mul(translate(pose.magOff)), mk.mag)
+	}
+	out = m.appendArms(out, model, mk, pose, reloadingNow)
 	if m.flash > 0 {
 		size := 0.018 + 0.01*m.rng.Float32() // it's only ~40 cm from the eye
 		at := model.TransformPoint(mk.muzzle.Add(mathx.Vec3{0, 0, -0.03}))

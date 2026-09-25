@@ -128,9 +128,20 @@ var markers = [...]marker{
 			row(b(0.032, 0.012, -0.235, 0.0008, 0.006, 0.014, gunBlack), 3, mathx.Vec3{0, 0, 0.034}), // handguard slots
 			row(b(-0.032, 0.012, -0.235, 0.0008, 0.006, 0.014, gunBlack), 3, mathx.Vec3{0, 0, 0.034}),
 			row(r(0, 0.018, -0.41, 0.0135, 0.0135, 0.004, gunMetal), 3, mathx.Vec3{0, 0, -0.03}), // barrel rings
-			hopper(-0.105, -0.01, -0.01, 0.046),
 			grip(-0.035, 0.09),
 		),
+		// Magazine-fed, as markers built for mag swaps are: a box of paint
+		// with a window showing the balls in it.
+		mag: []gunPart{
+			b(0, -0.07, -0.035, 0.015, 0.042, 0.026, tealDark),
+			b(0, -0.1, -0.03, 0.015, 0.014, 0.024, tealDark),
+			b(0, -0.118, -0.03, 0.017, 0.004, 0.027, gunBlack), // base plate
+			glow(b(0.0152, -0.075, -0.035, 0.0006, 0.028, 0.012, paintBalls)),
+			glow(b(-0.0152, -0.075, -0.035, 0.0006, 0.028, 0.012, paintBalls)),
+		},
+		magHold: mathx.Vec3{0, -0.12, -0.03}, magDrop: mathx.Vec3{0, -1, 0.2},
+		charge: mathx.Vec3{0.038, 0.032, 0.07},
+		grip:   mathx.Vec3{0, -0.075, 0.09}, fore: mathx.Vec3{0, -0.09, -0.17},
 		muzzle: mathx.Vec3{0, 0.018, -0.54}, sight: mathx.Vec3{0, 0.107, 0.07}, size: 0.55, relief: 0.22,
 	},
 	arena.WeaponPistol: {
@@ -144,7 +155,6 @@ var markers = [...]marker{
 				b(0, 0.03, -0.14, 0.009, 0.009, 0.012, gunMetal),           // barrel tip
 				r(0, 0.03, -0.152, 0.0095, 0.0095, 0.003, gunBlack),        // muzzle
 				b(0, 0.042, 0.075, 0.005, 0.008, 0.006, gunBlack),          // hammer
-				b(0, -0.112, 0.04, 0.019, 0.006, 0.026, gunMetal),          // tube base
 				b(0.018, -0.055, 0.04, 0.0012, 0.042, 0.018, markerOrange), // grip panels
 				b(-0.018, -0.055, 0.04, 0.0012, 0.042, 0.018, markerOrange),
 				// Three-dot tritium irons: two on the rear notch, one on the front post.
@@ -162,6 +172,14 @@ var markers = [...]marker{
 				b(0, -0.02, -0.035, 0.003, 0.005, 0.025, gunBlack), b(0, -0.018, -0.028, 0.003, 0.01, 0.003, gunMetal),
 			},
 		),
+		mag: []gunPart{
+			b(0, -0.07, 0.04, 0.012, 0.045, 0.016, gunBlack),
+			b(0, -0.112, 0.04, 0.019, 0.006, 0.026, markerOrange), // base plate
+			glow(b(0, -0.07, 0.0565, 0.006, 0.03, 0.0006, paintBalls)),
+		},
+		magHold: mathx.Vec3{0, -0.118, 0.04}, magDrop: mathx.Vec3{0, -1, 0},
+		charge: mathx.Vec3{-0.025, 0.035, 0.05}, // the slide
+		grip:   mathx.Vec3{0, -0.06, 0.045}, fore: mathx.Vec3{-0.02, -0.085, 0.03},
 		muzzle: mathx.Vec3{0, 0.03, -0.16}, sight: mathx.Vec3{0, 0.058, 0.09}, size: 0.6, relief: 0.3,
 	},
 	arena.WeaponShotgun: {
@@ -175,7 +193,6 @@ var markers = [...]marker{
 				r(0, 0.02, -0.5, 0.019, 0.019, 0.002, gunBlack),
 				b(0, -0.014, -0.26, 0.014, 0.014, 0.15, gunBlack),   // magazine tube
 				b(0, -0.014, -0.415, 0.016, 0.016, 0.006, gunMetal), // tube cap
-				b(0, -0.014, -0.2, 0.026, 0.024, 0.07, markerLime),  // pump
 				b(0, -0.012, 0.24, 0.028, 0.04, 0.08, markerPurple), // stock
 				b(0, -0.012, 0.325, 0.03, 0.045, 0.008, rubber),     // butt pad
 				// A big ghost ring rear, on protective ears, that frames the
@@ -189,11 +206,17 @@ var markers = [...]marker{
 				glow(r(0, 0.07, -0.46, 0.004, 0.004, 0.004, fiberRed)),
 				glow(r(0, 0.07, -0.455, 0.0022, 0.0022, 0.006, withAlpha(fiberRed, 0.6))), // the fibre's glow
 			},
-			row(b(0, -0.0145, -0.245, 0.0265, 0.0245, 0.0025, rubber), 5, mathx.Vec3{0, 0, 0.022}),      // pump ridges
 			row(b(0.034, -0.006, -0.03, 0.004, 0.006, 0.011, markerOrange), 4, mathx.Vec3{0, 0, 0.026}), // spare paint shells
 			hopper(-0.085, 0.04, 0.02, 0.05),
 			grip(-0.035, 0.12),
 		),
+		pump: join(
+			[]gunPart{b(0, -0.014, -0.2, 0.026, 0.024, 0.07, markerLime)},
+			row(b(0, -0.0145, -0.245, 0.0265, 0.0245, 0.0025, rubber), 5, mathx.Vec3{0, 0, 0.022}),
+		),
+		reload:  reloadShells,
+		magHold: mathx.Vec3{0, -0.045, 0.0}, // the loading port
+		grip:    mathx.Vec3{0, -0.075, 0.12}, fore: mathx.Vec3{0, -0.045, -0.2},
 		muzzle: mathx.Vec3{0, 0.02, -0.51}, sight: mathx.Vec3{0, 0.07, 0.1}, size: 0.55, relief: 0.14,
 	},
 	arena.WeaponSniper: {
@@ -207,7 +230,6 @@ var markers = [...]marker{
 				b(0, 0.01, -0.47, 0.012, 0.012, 0.14, gunBlack),     // barrel
 				b(0, 0.01, -0.625, 0.017, 0.013, 0.025, gunMetal),   // muzzle brake
 				b(0, 0.01, -0.625, 0.018, 0.004, 0.014, gunBlack),
-				b(0, -0.05, -0.02, 0.016, 0.03, 0.03, gunBlack),     // magazine
 				b(-0.012, -0.02, -0.3, 0.003, 0.003, 0.1, gunBlack), // bipod, folded
 				b(0.012, -0.02, -0.3, 0.003, 0.003, 0.1, gunBlack),
 				b(0, -0.01, 0.25, 0.027, 0.044, 0.09, markerWhite), // stock
@@ -228,6 +250,13 @@ var markers = [...]marker{
 			hopper(-0.07, 0.03, 0.06, 0.04),
 			grip(-0.035, 0.13),
 		),
+		mag: []gunPart{
+			b(0, -0.05, -0.02, 0.016, 0.03, 0.03, gunBlack),
+			b(0, -0.081, -0.02, 0.018, 0.003, 0.032, markerWhite), // base plate
+		},
+		magHold: mathx.Vec3{0, -0.085, -0.02}, magDrop: mathx.Vec3{0, -1, 0.1},
+		charge: mathx.Vec3{0.04, 0.02, 0.1}, // the bolt
+		grip:   mathx.Vec3{0, -0.075, 0.13}, fore: mathx.Vec3{0, -0.03, -0.22},
 		muzzle: mathx.Vec3{0, 0.01, -0.65}, sight: mathx.Vec3{0, 0.085, 0.16}, size: 0.55, relief: 0.2, scope: true,
 	},
 	arena.WeaponLauncher: {
@@ -236,11 +265,9 @@ var markers = [...]marker{
 				b(0, 0, -0.12, 0.05, 0.05, 0.24, launcherGreen), // tube
 				b(0, 0, -0.365, 0.058, 0.058, 0.012, gunBlack),  // muzzle
 				r(0, 0, -0.378, 0.045, 0.045, 0.004, gunMetal),
-				b(0, 0.052, -0.12, 0.012, 0.003, 0.2, gunBlack),      // top rail
-				r(0, -0.03, 0.08, 0.075, 0.075, 0.065, hopperYellow), // drum
-				b(0, -0.03, 0.08, 0.02, 0.02, 0.07, gunMetal),        // drum axle
-				b(0, -0.055, -0.22, 0.015, 0.045, 0.02, rubber),      // fore grip
-				b(0, -0.01, 0.23, 0.03, 0.045, 0.06, launcherGreen),  // stock
+				b(0, 0.052, -0.12, 0.012, 0.003, 0.2, gunBlack),     // top rail
+				b(0, -0.055, -0.22, 0.015, 0.045, 0.02, rubber),     // fore grip
+				b(0, -0.01, 0.23, 0.03, 0.045, 0.06, launcherGreen), // stock
 				b(0, -0.01, 0.295, 0.032, 0.05, 0.008, rubber),
 				// The ladder sight: two uprights and a glowing crossbar.
 				b(0, 0.058, -0.03, 0.014, 0.004, 0.012, gunBlack),
@@ -249,10 +276,19 @@ var markers = [...]marker{
 				glow(b(0, 0.086, -0.03, 0.011, 0.0012, 0.0012, markerOrange)),
 				glow(b(0, 0.074, -0.03, 0.011, 0.0008, 0.0012, markerOrange)),
 			},
-			row(b(0, 0, -0.33, 0.052, 0.052, 0.004, gunBlack), 4, mathx.Vec3{0, 0, 0.06}),                   // tube bands
-			row(glow(r(0.06, -0.03, 0.08, 0.014, 0.014, 0.014, paintBalls)), 3, mathx.Vec3{-0.06, 0.03, 0}), // grenades in the drum
+			row(b(0, 0, -0.33, 0.052, 0.052, 0.004, gunBlack), 4, mathx.Vec3{0, 0, 0.06}), // tube bands
 			grip(-0.04, 0.05),
 		),
+		mag: join(
+			[]gunPart{
+				r(0, -0.03, 0.08, 0.075, 0.075, 0.065, hopperYellow), // drum
+				b(0, -0.03, 0.08, 0.02, 0.02, 0.07, gunMetal),        // axle
+			},
+			row(glow(r(0.06, -0.03, 0.08, 0.014, 0.014, 0.014, paintBalls)), 3, mathx.Vec3{-0.06, 0.03, 0}),
+		),
+		reload:  reloadDrum,
+		magHold: mathx.Vec3{0.06, -0.09, 0.08}, magDrop: mathx.Vec3{1, -0.3, 0},
+		grip: mathx.Vec3{0, -0.085, 0.05}, fore: mathx.Vec3{0, -0.09, -0.22},
 		muzzle: mathx.Vec3{0, 0, -0.39}, sight: mathx.Vec3{0, 0.086, 0.02}, size: 0.45, relief: 0.3,
 	},
 }

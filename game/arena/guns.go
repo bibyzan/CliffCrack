@@ -8,7 +8,8 @@ type GunSpec struct {
 	Reserve  int     // rounds carried beyond the magazine (you can carry twice this)
 	Interval float32 // s between shots
 	Auto     bool    // fires while the trigger is held (else once per pull)
-	Reload   float32 // s
+	Reload   float32 // s (per shell, for one loaded a shell at a time)
+	PerShell bool    // loaded a shell at a time; firing interrupts the reload
 	Pellets  int     // paintballs per shot
 
 	Damage      float32 // per paintball to a player
@@ -53,7 +54,7 @@ var Guns = [weaponCount]*GunSpec{
 	// The pump shotgun: a cone of paint that shreds up close and falls away
 	// fast. Its pellets tear through walls.
 	WeaponShotgun: {
-		Mag: 8, Reserve: 16, Interval: 0.85, Reload: 2.6, Pellets: 12,
+		Mag: 8, Reserve: 16, Interval: 0.85, Reload: 0.42, PerShell: true, Pellets: 12,
 		Damage: 14, HeadMult: 1.25, ChunkDamage: 22, Range: 40, Falloff: 7, Push: 0.9,
 		HipSpread: 0.075, ADSSpread: 0.055, MoveSpread: 0.01, Recoil: 0.07,
 		Zoom: 1.15, ADSTime: 0.18, ADSMove: 0.8, BallSpeed: 110,
@@ -98,7 +99,10 @@ func (a *Arena) updateGun(p *Player, dt float32, in Input, ev *Events) {
 		w.cooldown = max(w.cooldown, 0)
 	}
 	if w.Reloading > 0 {
-		return
+		if !(g.PerShell && in.FirePressed && w.Ammo > 0) {
+			return
+		}
+		w.Reloading = 0 // a shell at a time: firing breaks off the reload
 	}
 	canReload := w.Reserve > 0 || a.FreeAmmo
 	if in.Reload && w.Ammo < g.Mag && canReload {
@@ -164,7 +168,7 @@ func (a *Arena) updateGun(p *Player, dt float32, in Input, ev *Events) {
 
 	ads := smoothstep(p.ADS)
 	w.bloom = min(w.bloom+g.Bloom*(1-0.5*ads), g.MaxBloom)
-	w.Kick = 1
+	w.Kick, w.SinceShot = 1, 0
 	p.recoil += g.Recoil * (1 - 0.5*ads)
 	if w.Ammo == 0 && !a.InfiniteAmmo && canReload {
 		w.Reloading = g.Reload // auto-reload after the last round

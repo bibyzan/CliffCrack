@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 40">
+  <!-- The paintball pistol, muzzle to the right: slide, frame, grip and trigger guard. -->
+  <rect x="8" y="7" width="50" height="11"/>
+  <rect x="56" y="9" width="5" height="7"/>
+  <rect x="8" y="17" width="36" height="5"/>
+  <polygon points="9,21 23,21 20,38 6,38"/>
+  <path d="M23 21H34V27H27Z"/>
+  <rect x="26" y="22" width="5" height="3" fill="#000"/>
+  <rect x="44" y="4" width="3" height="3"/>
+  <rect x="9" y="4" width="5" height="3"/>
+</svg>

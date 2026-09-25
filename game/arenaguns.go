@@ -45,7 +45,27 @@ type marker struct {
 	size   float32    // drawn this much smaller than life, this close to the eye
 	relief float32    // m from the eye to the sight with the sights up
 	scope  bool       // with the sights up, the view goes through a scope instead
+
+	// For the arms and the reload: where each hand holds it, the parts that
+	// come away (a magazine, a drum) and the pump that slides.
+	grip, fore mathx.Vec3 // the firing hand, and the supporting hand
+	reload     reloadStyle
+	mag        []gunPart  // the magazine (or drum), in its seat
+	magHold    mathx.Vec3 // where the supporting hand takes it
+	magDrop    mathx.Vec3 // which way it comes out
+	charge     mathx.Vec3 // a handle the supporting hand works after a new magazine (zero: none)
+	pump       []gunPart  // slides back and forth after each shot (a pump shotgun)
 }
+
+// reloadStyle is how a gun is reloaded: a magazine swapped, shells pushed
+// in one at a time, or a drum swung out and replaced.
+type reloadStyle int
+
+const (
+	reloadMag reloadStyle = iota
+	reloadShells
+	reloadDrum
+)
 
 // ring is a flat annulus in the XY plane, inner radius 1 and outer radius
 // outer, facing +Z: the black round the sniper scope's view.

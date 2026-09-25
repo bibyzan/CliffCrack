@@ -84,6 +84,7 @@ type GunState struct {
 	Reserve   int     // rounds carried beyond the magazine
 	Reloading float32 // seconds left, 0 when ready
 	Kick      float32 // 0..1 visual recoil for the gun model, decays fast
+	SinceShot float32 // s since it last fired (for a pump's cycle)
 	cooldown  float32
 	bloom     float32 // extra spread from firing, radians; settles back
 }
@@ -203,6 +204,7 @@ func (a *Arena) updateWeapons(p *Player, dt float32, in Input, ev *Events) {
 	for k, g := range Guns {
 		s := &w.States[k]
 		s.Kick *= float32(math.Exp(-14 * float64(dt)))
+		s.SinceShot += dt
 		if g == nil {
 			continue
 		}
@@ -211,11 +213,17 @@ func (a *Arena) updateWeapons(p *Player, dt float32, in Input, ev *Events) {
 		if s.Reloading > 0 {
 			if s.Reloading = max(s.Reloading-dt, 0); s.Reloading == 0 {
 				take := g.Mag - s.Ammo
+				if g.PerShell {
+					take = min(take, 1)
+				}
 				if !a.FreeAmmo {
 					take = min(take, s.Reserve)
 					s.Reserve -= take
 				}
 				s.Ammo += take
+				if g.PerShell && s.Ammo < g.Mag && (s.Reserve > 0 || a.FreeAmmo) {
+					s.Reloading = g.Reload // the next shell
+				}
 			}
 		}
 	}

@@ -23,15 +23,16 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 	if mt.Practice {
 		m.rangeHUD(b)
 	} else {
-		// Score: YOU 1 : 0 BOT, the round and its clock.
-		b.Panel("##score", 0.5, 0.02, anchored, 1.7)
+		// Score, top left under the visor's corner (the armour bar has the
+		// top middle): YOU 1 : 0 BOT, the round and its clock.
+		b.Panel("##score", 0.035, 0.075, anchored, 1.5)
 		b.ColorText(suitColor[0], "YOU")
 		b.SameLine(14)
 		b.Text("%d : %d", mt.Wins[0], mt.Wins[1])
 		b.SameLine(14)
 		b.ColorText(suitColor[1], "BOT")
 		b.End()
-		b.Panel("##round", 0.5, 0.085, hudText, 1.1)
+		b.Panel("##round", 0.035, 0.135, anchored, 1.0)
 		clock := ""
 		if mt.Phase == arena.PhaseFight {
 			t := int(math.Ceil(float64(mt.Timer)))
@@ -42,23 +43,6 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 	}
 
 	m.nameTags(b)
-
-	// Armour, bottom left: a word, not a bar. With it gone, the word dims
-	// red and your health shows under it.
-	b.Panel("##armour", 0.02, 0.975, anchored, 2)
-	switch {
-	case me.Popped():
-		pulse := 0.45 + 0.25*float32(math.Sin(float64(m.elapsed)*6))
-		b.ColorText(withAlpha(hurtColor, pulse), "ARMOUR")
-		b.Progress("", me.Health/arena.MaxHealth, 150, 6)
-	case m.charging:
-		b.ColorText(uiMuted, "ARMOUR")
-	case me.Shield < arena.MaxShield*0.5:
-		b.ColorText(uiAccent, "ARMOUR CRACKED")
-	default:
-		b.ColorText(uiWhite, "ARMOUR")
-	}
-	b.End()
 
 	// Kill feed, top right.
 	for i, f := range m.feed {
@@ -87,9 +71,9 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 	}
 }
 
-// weaponHUD is the loadout, bottom right: the weapon in hand over the other,
-// its magazine and reserve, and the grenades (the kind G throws lit). A
-// weapon in reach gets a prompt to pick it up.
+// weaponHUD is the words that go with the helmet's icons (see
+// appendHelmet): the magazine and reserve, and a prompt when a weapon's in
+// reach. (Reloads show in the hands, not as a bar.)
 func (m *Arena) weaponHUD(b *ui.Builder, in *input.State, me *arena.Player) {
 	anchored := hudText &^ gfx.UICentered
 	b.Panel("##ammo", 0.985, 0.975, anchored, 2.8)
@@ -103,35 +87,6 @@ func (m *Arena) weaponHUD(b *ui.Builder, in *input.State, me *arena.Player) {
 	}
 	b.End()
 
-	b.Panel("##loadout", 0.985, 0.86, anchored, 1.2)
-	b.ColorText(uiAccent, "%s", arena.WeaponNames[me.Current])
-	if other := me.Other(); other != arena.NoWeapon {
-		b.SameLine(16)
-		b.ColorText(withAlpha(uiMuted, 0.75), "%s", arena.WeaponNames[other])
-	}
-	b.End()
-	b.Panel("##grenades", 0.985, 0.815, anchored, 1.05)
-	for k := range arena.GrenadeKinds {
-		if k > 0 {
-			b.SameLine(14)
-		}
-		col := withAlpha(uiMuted, 0.7)
-		if k == me.GrenadeKind {
-			col = uiWhite
-		}
-		if me.Grenades[k] == 0 {
-			col = withAlpha(col, 0.35)
-		}
-		b.ColorText(col, "%s x%d", arena.GrenadeNames[k], me.Grenades[k])
-	}
-	b.End()
-
-	if t, ok := me.Reloading(); ok {
-		b.Panel("##reload", 0.5, 0.64, hudText, 1.2)
-		b.ColorText(uiAccent, "RELOADING")
-		b.Progress("", t, 220, 6)
-		b.End()
-	}
 	if p := m.sim().NearestPickup(me); p != nil {
 		b.Panel("##pickup", 0.5, 0.6, hudText, 1.15)
 		verb := "pick up"
@@ -250,10 +205,10 @@ func ammoText(b *ui.Builder, ammo, reserve int, reloading bool) {
 // far, and how you're shooting.
 func (m *Arena) rangeHUD(b *ui.Builder) {
 	s, me := m.sim(), m.me()
-	b.Panel("##range", 0.5, 0.02, hudText&^gfx.UICentered, 1.5)
+	b.Panel("##range", 0.035, 0.075, hudText&^gfx.UICentered, 1.3)
 	b.ColorText(paintColor[0], "FIRING RANGE")
 	b.End()
-	b.Panel("##rangeinfo", 0.5, 0.08, hudText, 1.05)
+	b.Panel("##rangeinfo", 0.035, 0.125, hudText&^gfx.UICentered, 0.95)
 	what := "--"
 	if !me.Dead {
 		shot := s.Trace(me, me.Eye(1), me.Forward(), 300)

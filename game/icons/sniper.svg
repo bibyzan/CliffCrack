@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 40">
+  <!-- The sniper rifle: stock with a cheek riser, receiver, scope and bells, long barrel, brake, magazine and grip. -->
+  <polygon points="2,13 20,11 36,15 36,27 4,31"/>
+  <rect x="35" y="16" width="46" height="11"/>
+  <rect x="46" y="7" width="36" height="6"/>
+  <polygon points="40,4 48,6 48,14 40,16"/>
+  <polygon points="80,6 90,3 90,17 80,14"/>
+  <rect x="52" y="12" width="4" height="5"/>
+  <rect x="72" y="12" width="4" height="5"/>
+  <rect x="80" y="19" width="62" height="4"/>
+  <rect x="140" y="17" width="8" height="8"/>
+  <rect x="60" y="26" width="8" height="8"/>
+  <polygon points="42,26 50,26 47,37 39,37"/>
+</svg>

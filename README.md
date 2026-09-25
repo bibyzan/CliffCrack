@@ -408,11 +408,23 @@ rematch on a new site.
   it loose) and damages the structures it hits, so a collapse can bring down what's
   below. Rubble clears after 3–12 s or once it falls into the chasm, with at most 700
   pieces kept. A big collapse rumbles and shakes the view.
-- **HUD and feedback**: the round score and clock, your armour, a name tag over the bot
-  while it's in sight, a crosshair that turns orange on a hit (red for the head), a kill
-  feed, your two weapons with the ammo and grenades, a prompt when a weapon's in reach,
-  and the countdown and result banners. Taking damage flashes the view red and
-  low health pulses it; tracers, dust in each material's colour, explosions, screen
+- **The helmet HUD** is drawn in the world a hand's width from your eye, framed by
+  faint visor brackets: your **armour bar** across the top (segments that drain, flash
+  when hit, sweep back as it recharges, amber when low and red once it's gone, with
+  health pips under it); **hit markers** round the crosshair (white, pale blue on
+  armour, red for the head, bigger for a kill); **red chevrons** pointing at whoever
+  just shot you; and **SVG icons** (`game/icons`, rasterized by `engine/svgicon`) for
+  your two weapons, the rounds left in the magazine (spent ones dim) and your frags
+  and stickies. Text is just the score, magazine and reserve, the kill feed, name tags
+  and banners.
+- **First-person arms** hold every weapon (two-bone arms reaching from out of view):
+  the firing hand on the grip, the other on the fore grip or pump. **Reloads are
+  animated**: the rifle, pistol and sniper drop their magazine, the hand fetches a
+  fresh one, seats it and works the charging handle, slide or bolt; the shotgun rolls
+  to show its port and takes shells one at a time (fire to break off); the launcher
+  swings its drum out and swaps it. Each step has its sound, and the shotgun's pump
+  racks after every shot. Throwing a grenade takes the off hand off the gun.
+- Tracers of paint, dust in each material's colour, explosions, screen
   shake and panned sounds do the rest. The sounds are synthesised at startup
   (`audio.Synth`: layers of swept tones and filtered noise, with an echo for the chasm):
   gas pops for the markers, a wet splut where paint lands, a tink off armour and a

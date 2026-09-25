@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 26">
+  <!-- A sniper round: a pointed paint slug on a case. -->
+  <path d="M4 0C6 3 7 6 7 9V25H1V9C1 6 2 3 4 0Z"/>
+  <rect x="1" y="9" width="6" height="1.4" fill="#000"/>
+</svg>

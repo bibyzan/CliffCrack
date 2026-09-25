@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 22">
+  <!-- The damage indicator: a chevron pointing up (rotated towards whoever shot you). -->
+  <polygon points="0,22 20,0 40,22 31,22 20,10 9,22"/>
+</svg>

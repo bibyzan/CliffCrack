@@ -194,3 +194,22 @@ func TestRangeDummiesStrafeAndGetBackUp(t *testing.T) {
 		t.Errorf("practice has no rounds: phase %v", m.Phase)
 	}
 }
+
+func TestShotgunLoadsAShellAtATime(t *testing.T) {
+	a := flatArena(nil, at(0, 10, 0))
+	p := a.Players[0]
+	arm(p, WeaponShotgun)
+	p.Pitch = 0.5
+	g, s := Guns[WeaponShotgun], &p.States[WeaponShotgun]
+	s.Ammo = 5
+	a.Step(frame, []Input{{Reload: true}})
+	run(a, g.Reload*2+0.05)
+	if s.Ammo != 7 || s.Reloading == 0 {
+		t.Fatalf("two shells' time into a reload: ammo %d (want 7), still reloading %v", s.Ammo, s.Reloading > 0)
+	}
+	// Firing breaks off the reload.
+	ev := a.Step(frame, []Input{{Fire: true, FirePressed: true}})
+	if len(ev.Shots) == 0 || s.Reloading != 0 {
+		t.Errorf("fire mid-reload: shots %d, reloading %v", len(ev.Shots), s.Reloading)
+	}
+}

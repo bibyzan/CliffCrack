@@ -75,6 +75,13 @@ func newArenaSounds() arenaSounds {
 			tone(audio.Square, 1800, 1800, 80, 60, 30, 0.25), tone(audio.Square, 2400, 2400, 170, 60, 30, 0.25)),
 		stickyBoom: audio.Echo(audio.Synth(1, hiss(0, 900, 5, 1, 1800, 0), tone(audio.Sine, 90, 35, 0, 700, 5, 0.9),
 			tone(audio.Sine, 1400, 300, 0, 300, 9, 0.35), hiss(0, 200, 14, 0.6, 0, 2600)), ms(230), 0.3, 2),
+		// Reloads: the magazine released and sliding out; seated with a
+		// clack; a handle racked; a shell thumbed in; the pump.
+		magOut:  audio.Synth(0.4, click(0, 1), hiss(10, 90, 30, 0.6, 3500, 900), tone(audio.Sine, 700, 450, 0, 60, 45, 0.3)),
+		magIn:   audio.Synth(0.55, hiss(0, 50, 60, 0.5, 2500, 400), click(40, 1), tone(audio.Sine, 380, 260, 40, 70, 45, 0.6), click(60, 0.7)),
+		charge:  audio.Synth(0.5, click(0, 0.9), hiss(10, 110, 30, 0.7, 4000, 1200), click(150, 1), tone(audio.Sine, 900, 1100, 150, 40, 60, 0.3)),
+		shellIn: audio.Synth(0.4, hiss(0, 45, 60, 0.6, 3000, 600), click(35, 1), tone(audio.Sine, 520, 400, 35, 50, 50, 0.4)),
+		pump:    audio.Synth(0.55, hiss(0, 120, 25, 0.8, 3200, 500), click(0, 0.8), click(130, 1), hiss(140, 90, 35, 0.6, 3500, 700)),
 		// Taking a weapon: a rattle and the snap of it coming up.
 		pickup: audio.Synth(0.45, hiss(0, 120, 25, 0.5, 3000, 700), click(90, 1), tone(audio.Sine, 700, 900, 90, 60, 40, 0.4), click(160, 0.8)),
 		// Paint landing on a surface: a wet splut.

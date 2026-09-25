@@ -46,6 +46,7 @@ func run() error {
 	hold := flag.String("hold", "", `keys to hold down every frame, e.g. "W" or "WD" (for scripted tests)`)
 	click := flag.Bool("click", false, "hold the left mouse button every frame (for scripted tests)")
 	weapon := flag.String("weapon", "", `Arena: start holding this weapon ("rifle", "pistol", "shotgun", "sniper" or "launcher"; for screenshots)`)
+	tap := flag.String("tap", "", `keys to press on given frames, e.g. "R@60,G@90" (for scripted tests)`)
 	aim := flag.Bool("aim", false, "hold the right mouse button every frame: aim down the sights (for scripted tests)")
 	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
 	flag.Parse()
@@ -147,6 +148,13 @@ func run() error {
 		}
 		if *aim {
 			in.ButtonEvent(input.MouseRight, true)
+		}
+		for _, t := range strings.Split(*tap, ",") {
+			var k rune
+			var at int
+			if n, _ := fmt.Sscanf(strings.ToUpper(t), "%c@%d", &k, &at); n == 2 {
+				in.KeyEvent(input.Key(k), rendered == at) // down on its frame, up after
+			}
 		}
 		if in.Pressed(input.KeyF12) && capturePath == "" {
 			capturePath = time.Now().Format("screenshot-20060102-150405.png")
