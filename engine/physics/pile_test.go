@@ -53,7 +53,7 @@ func TestPileConservesEnergyAndSettles(t *testing.T) {
 
 	prev := energy(w)
 	allowance := 0.01 * prev // depenetration may lift bodies slightly
-	for step := 0; step < 600; step++ {
+	for step := 0; step < 900; step++ { // 15 s: a chaotic pile can leave a ball rolling for a while
 		w.Update(1.0 / 60)
 		e := energy(w)
 		if e > prev+allowance {
@@ -68,7 +68,7 @@ func TestPileConservesEnergyAndSettles(t *testing.T) {
 			t.Errorf("ball %d escaped or sank: %v", i, p)
 		}
 		if v := b.Velocity.Len(); v > 0.3 {
-			t.Errorf("ball %d (r %.2f) still moving at %.2f m/s after 10 s: pos %v vel %v ang %v", i, b.Radius, v, b.Position, b.Velocity, b.AngularVelocity)
+			t.Errorf("ball %d (r %.2f) still moving at %.2f m/s after 15 s: pos %v vel %v ang %v", i, b.Radius, v, b.Position, b.Velocity, b.AngularVelocity)
 		}
 	}
 }

@@ -36,7 +36,7 @@ func run() error {
 	model := flag.String("model", "", "optional .gltf/.glb file to show in the centre of the scene")
 	screenshot := flag.String("screenshot", "", "render -frames frames at a fixed 60 Hz step, save the last one to this PNG and exit")
 	frames := flag.Int("frames", 120, "number of frames to render before taking -screenshot")
-	mode := flag.String("mode", "menu", `start in "menu", "run", "arena" or "demo"`)
+	mode := flag.String("mode", "menu", `start in "menu", "run", "arena", "demolition" or "demo"`)
 	seed := flag.Uint64("seed", 0, "Run mode course seed (0 = a new course every run)")
 	autopilot := flag.Bool("autopilot", false, "Run mode steers itself (for demos and scripted tests)")
 	from := flag.Float64("from", 0, "Run mode: start this many metres down the course (with -seed, to try a particular section)")
@@ -44,11 +44,12 @@ func run() error {
 	sound := flag.Bool("audio", true, "enable audio output")
 	drop := flag.Int("drop", 0, "number of physics balls to drop at startup")
 	hold := flag.String("hold", "", `keys to hold down every frame, e.g. "W" or "WD" (for scripted tests)`)
+	click := flag.Bool("click", false, "hold the left mouse button every frame (for scripted tests)")
 	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
 	flag.Parse()
 	startMode, ok := game.ParseMode(*mode)
 	if !ok {
-		return fmt.Errorf("unknown -mode %q (want menu, run, arena or demo)", *mode)
+		return fmt.Errorf("unknown -mode %q (want menu, run, arena, demolition or demo)", *mode)
 	}
 
 	exe, err := os.Executable()
@@ -137,6 +138,9 @@ func run() error {
 		platform.PollEvents()
 		for _, k := range strings.ToUpper(*hold) {
 			in.KeyEvent(input.Key(k), true) // letters and space use their ASCII codes
+		}
+		if *click {
+			in.ButtonEvent(input.MouseLeft, true)
 		}
 		if in.Pressed(input.KeyF12) && capturePath == "" {
 			capturePath = time.Now().Format("screenshot-20060102-150405.png")

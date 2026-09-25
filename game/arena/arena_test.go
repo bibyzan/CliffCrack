@@ -17,6 +17,12 @@ func run(a *Arena, seconds float32, in Input) Events {
 		ev := a.Step(frame, in)
 		all.Shots = append(all.Shots, ev.Shots...)
 		all.Kills = append(all.Kills, ev.Kills...)
+		all.Breaks = append(all.Breaks, ev.Breaks...)
+		all.Smashes = append(all.Smashes, ev.Smashes...)
+		all.Explosions = append(all.Explosions, ev.Explosions...)
+		all.Swung = all.Swung || ev.Swung
+		all.Launched = all.Launched || ev.Launched
+		all.Switched = all.Switched || ev.Switched
 		all.Jumped = all.Jumped || ev.Jumped
 		all.Landed = max(all.Landed, ev.Landed)
 		all.Reloaded = all.Reloaded || ev.Reloaded
@@ -133,17 +139,17 @@ func TestShootingKillsAndRespawns(t *testing.T) {
 	if a.Score != KillScore || a.Kills != 1 || a.ShotsHit < DroneHealth {
 		t.Errorf("score %d kills %d hits %d", a.Score, a.Kills, a.ShotsHit)
 	}
-	if len(a.Debris) != debrisPerKill {
-		t.Errorf("%d debris pieces, want %d", len(a.Debris), debrisPerKill)
+	if len(a.Debris) != droneDebris {
+		t.Errorf("%d debris pieces, want %d", len(a.Debris), droneDebris)
 	}
 	if a.Alive() != len(a.Drones)-1 {
 		t.Errorf("%d alive, want one down", a.Alive())
 	}
 
 	// Debris clears and the drone comes back.
-	run(a, debrisLife+0.1, Input{})
+	run(a, Materials[Scrap].DebrisLife*1.2+0.1, Input{})
 	if len(a.Debris) != 0 {
-		t.Errorf("%d debris left after %v s", len(a.Debris), debrisLife)
+		t.Errorf("%d debris left after the debris life", len(a.Debris))
 	}
 	if d.Dead || d.Health != DroneHealth {
 		t.Errorf("drone should respawn at full health: dead %v health %d", d.Dead, d.Health)
@@ -184,15 +190,15 @@ func TestMagazineAndReload(t *testing.T) {
 	if len(ev.Shots) != MagSize {
 		t.Errorf("fired %d shots from a full magazine, want %d", len(ev.Shots), MagSize)
 	}
-	if !ev.Reloaded || a.Weapon.Reloading == 0 {
+	if !ev.Reloaded || a.Rifle.Reloading == 0 {
 		t.Fatal("an empty magazine should start a reload")
 	}
 	if ev := run(a, 0.5, Input{Fire: true}); len(ev.Shots) != 0 {
 		t.Error("can't fire while reloading")
 	}
 	run(a, ReloadTime, Input{})
-	if a.Weapon.Ammo != MagSize || a.Weapon.Reloading != 0 {
-		t.Errorf("after reloading: ammo %d, reloading %v", a.Weapon.Ammo, a.Weapon.Reloading)
+	if a.Rifle.Ammo != MagSize || a.Rifle.Reloading != 0 {
+		t.Errorf("after reloading: ammo %d, reloading %v", a.Rifle.Ammo, a.Rifle.Reloading)
 	}
 
 	// Manual reload of a partial magazine.

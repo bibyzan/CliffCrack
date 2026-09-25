@@ -64,11 +64,17 @@ type Body struct {
 	// friction holds them still on slopes instead of rolling them away.
 	FixedRotation bool
 
+	// Ignore, if set, is one body this one never collides with (a projectile
+	// and whoever fired it).
+	Ignore *Body
+
 	invMass, invInertia float32
 
 	// State before the latest step, for Interpolated.
 	prevPosition mathx.Vec3
 	prevRotation mathx.Quat
+
+	stamp uint32 // broadphase de-duplication
 }
 
 // Interpolated is where to draw the body: between its state before and after
@@ -116,6 +122,8 @@ type World struct {
 	LinearDamping, AngularDamping float32
 
 	bodies  []*Body
+	dynamic []*Body // scratch: this step's dynamic bodies
+	bp      broadphase
 	acc     float32
 	impacts []Impact
 	touched map[[2]*Body]bool // pairs in contact during the previous step
@@ -162,6 +170,9 @@ func (w *World) Add(b *Body) error {
 	}
 	b.Teleported()
 	w.bodies = append(w.bodies, b)
+	if b.Kind != Dynamic {
+		w.bp.dirty = true
+	}
 	return nil
 }
 
@@ -169,6 +180,9 @@ func (w *World) Remove(b *Body) {
 	for i, x := range w.bodies {
 		if x == b {
 			w.bodies = append(w.bodies[:i], w.bodies[i+1:]...)
+			if b.Kind != Dynamic {
+				w.bp.dirty = true
+			}
 			break
 		}
 	}
@@ -288,21 +302,6 @@ func integrateRotation(q mathx.Quat, w mathx.Vec3, h float32) mathx.Quat {
 	dq := mathx.Quat{X: w[0], Y: w[1], Z: w[2]}.Mul(q)
 	s := h / 2
 	return mathx.Quat{X: q.X + dq.X*s, Y: q.Y + dq.Y*s, Z: q.Z + dq.Z*s, W: q.W + dq.W*s}.Normalize()
-}
-
-func (w *World) detect() []contact {
-	var out []contact
-	for i, a := range w.bodies {
-		for _, b := range w.bodies[i+1:] {
-			if a.Kind != Dynamic && b.Kind != Dynamic {
-				continue
-			}
-			if c, ok := collide(a, b); ok {
-				out = append(out, c)
-			}
-		}
-	}
-	return out
 }
 
 func collide(a, b *Body) (contact, bool) {
