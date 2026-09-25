@@ -1,45 +1,68 @@
 package arena
 
 import (
+	"math"
+
 	"CliffCrack/engine/mathx"
 	"CliffCrack/engine/physics"
 )
 
-// maxDebris caps loose pieces; beyond it the oldest are cleared first.
-const maxDebris = 450
+const (
+	maxDebris = 700 // loose pieces; beyond it the oldest are cleared first
+
+	// Falling rubble hurts: a piece moving faster than crushSpeed that hits
+	// a player or a standing chunk damages it by its weight and speed.
+	crushSpeed        = 7    // m/s
+	crushPlayerScale  = 0.35 // damage per sqrt(kg) m/s
+	crushPlayerMax    = 55
+	crushChunkMinMass = 25   // kg: lighter pieces just bounce off structures
+	crushChunkScale   = 0.04 // damage per kg m/s
+	crushChunkMax     = 260
+)
 
 // damageChunk wears a chunk down and breaks it at zero. by (nil for none)
 // gets the credit.
 func (a *Arena) damageChunk(c *Chunk, damage float32, push mathx.Vec3, by *Player, ev *Events) {
-	if !c.Alive {
+	if !c.Alive || damage <= 0 {
 		return
 	}
 	c.HP -= damage
+	if by != nil {
+		a.lastBreaker = by
+	}
 	if c.HP <= 0 {
 		a.breakChunk(c, push, by, ev)
 	}
 }
 
-// breakChunk shatters a chunk into a few smaller pieces flung by push.
+// breakChunk shatters a chunk into pieces flung by push: a few big ones and
+// a spray of chips, more for bigger pieces.
 func (a *Arena) breakChunk(c *Chunk, push mathx.Vec3, by *Player, ev *Events) {
 	a.removeChunk(c, by)
-	n := int(volume(c.Half) / 0.05)
-	n = max(1, min(n, 4))
+	n := int(volume(c.Half)/0.04) + 2
+	n = max(2, min(n, 7))
 	if c.Mat == Glass {
-		n = 3
+		n = 4
 	}
-	half := c.Half.Scale(0.5)
-	for k := range half {
-		half[k] = max(half[k], 0.03)
+	// Split the box in two along its longest axes, so the big pieces keep
+	// its shape; the rest are chips.
+	big := c.Half.Scale(0.5)
+	for k := range big {
+		big[k] = max(big[k], 0.04)
 	}
-	for range n {
+	for i := range n {
+		half := big
+		if i >= 3 {
+			half = big.Scale(0.35 + 0.25*a.rng.Float32())
+		}
 		at := c.Centre.Add(mathx.Vec3{
 			(a.rng.Float32() - 0.5) * c.Half[0],
 			(a.rng.Float32() - 0.5) * c.Half[1],
 			(a.rng.Float32() - 0.5) * c.Half[2],
 		})
-		spray := mathx.Vec3{a.rng.Float32()*2 - 1, a.rng.Float32() + 0.3, a.rng.Float32()*2 - 1}.Scale(1.5)
-		a.addDebris(at, half, c.Mat, push.Add(spray))
+		spray := mathx.Vec3{a.rng.Float32()*2 - 1, a.rng.Float32() + 0.3, a.rng.Float32()*2 - 1}.Scale(1.5 + float32(i/3))
+		d := a.addDebris(at, half, c.Mat, push.Add(spray))
+		d.By = by
 	}
 	ev.Breaks = append(ev.Breaks, Break{At: c.Centre, Half: c.Half, Mat: c.Mat})
 }
@@ -55,21 +78,59 @@ func (a *Arena) removeChunk(c *Chunk, by *Player) {
 	}
 }
 
-// settle brings down every chunk left without support: each falls as one
-// piece of rubble.
+// settle brings down every chunk left without support, anywhere in the
+// arena: a wall comes down with the floor under it. Each falls as one piece
+// of rubble, dropping out of where it stood, credited to whoever broke
+// something last.
 func (a *Arena) settle(ev *Events) {
+	dirty := false
 	for _, s := range a.Structures {
-		if !s.dirty {
+		dirty = dirty || s.dirty
+		s.dirty = false
+	}
+	if !dirty {
+		return
+	}
+	for _, c := range unsupported(a.chunks) {
+		a.removeChunk(c, nil)
+		drift := mathx.Vec3{a.rng.Float32() - 0.5, -0.5, a.rng.Float32() - 0.5}.Scale(0.8)
+		d := a.addDebris(c.Centre, c.Half, c.Mat, drift)
+		d.By = a.lastBreaker
+		d.Collapsed = true
+		ev.Breaks = append(ev.Breaks, Break{At: c.Centre, Half: c.Half, Mat: c.Mat, Collapsed: true})
+	}
+	for _, s := range a.Structures {
+		s.dirty = false // the fallen chunks don't hold anything up either
+	}
+}
+
+// crush lets heavy, fast rubble hurt what it hits: players, and the
+// structures it lands on (so a collapse can bring down what's below it).
+func (a *Arena) crush(ev *Events) {
+	for _, im := range a.Phys.Impacts() {
+		d, ok := im.A.UserData.(*Debris)
+		other := im.B
+		if !ok {
+			if d, ok = im.B.UserData.(*Debris); !ok {
+				continue
+			}
+			other = im.A
+		}
+		if d.speed < crushSpeed {
 			continue
 		}
-		s.dirty = false
-		for _, c := range s.unsupported() {
-			a.removeChunk(c, nil)
-			drift := mathx.Vec3{a.rng.Float32() - 0.5, 0, a.rng.Float32() - 0.5}.Scale(0.6)
-			a.addDebris(c.Centre, c.Half, c.Mat, drift)
-			ev.Breaks = append(ev.Breaks, Break{At: c.Centre, Half: c.Half, Mat: c.Mat, Collapsed: true})
+		mass := d.Body.Mass
+		switch o := other.UserData.(type) {
+		case *Player:
+			damage := min(float32(math.Sqrt(float64(mass)))*d.speed*crushPlayerScale, crushPlayerMax)
+			if damage >= 3 {
+				a.hurtPlayer(o, d.By, damage, false, WeaponRubble, im.Point, d.Body.Velocity.Scale(0.15), ev)
+			}
+		case *Chunk:
+			if mass >= crushChunkMinMass {
+				a.damageChunk(o, min(mass*d.speed*crushChunkScale, crushChunkMax), d.Body.Velocity.Scale(0.3), d.By, ev)
+			}
 		}
-		s.dirty = false // the fallen chunks don't hold anything up either
 	}
 }
 
@@ -96,7 +157,8 @@ func (a *Arena) ageDebris(dt float32) {
 	alive := a.Debris[:0]
 	for _, d := range a.Debris {
 		d.Age += dt
-		if d.Age > d.Life || d.Body.Position[1] < -20 {
+		d.speed = d.Body.Velocity.Len()
+		if d.Age > d.Life || d.Body.Position[1] < pitDepth {
 			a.Phys.Remove(d.Body)
 			continue
 		}

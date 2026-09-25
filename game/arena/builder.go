@@ -25,6 +25,7 @@ type builder struct {
 	origin mathx.Vec3
 	turns  int // quarter turns about Y
 	s      *Structure
+	trim   bool // mark the top edges of walls, columns and slabs as part of the glowing outline
 }
 
 func newBuilder(name string, origin mathx.Vec3, turns int) *builder {
@@ -32,14 +33,16 @@ func newBuilder(name string, origin mathx.Vec3, turns int) *builder {
 }
 
 // box adds a chunk spanning lo..hi in the builder's frame.
-func (b *builder) box(lo, hi mathx.Vec3, m Material) {
+func (b *builder) box(lo, hi mathx.Vec3, m Material) *Chunk {
 	c := lo.Add(hi).Scale(0.5)
 	h := hi.Sub(lo).Scale(0.5)
 	for range b.turns { // (x, z) -> (z, -x) per quarter turn; half extents swap
 		c = mathx.Vec3{c[2], c[1], -c[0]}
 		h = mathx.Vec3{h[2], h[1], h[0]}
 	}
-	b.s.Chunks = append(b.s.Chunks, &Chunk{Centre: c.Add(b.origin), Half: h, Mat: m})
+	chunk := &Chunk{Centre: c.Add(b.origin), Half: h, Mat: m}
+	b.s.Chunks = append(b.s.Chunks, chunk)
+	return chunk
 }
 
 // opening is a hole in a wall in wall coordinates: u metres along the wall
@@ -76,26 +79,104 @@ func (b *builder) wall(x0, z0, x1, z1, base, height, thick float32, m Material, 
 			if skip {
 				continue
 			}
+			var c *Chunk
 			if alongX {
 				xa, xb := min(x0, x1)+u0, min(x0, x1)+u1
-				b.box(mathx.Vec3{xa, base + v0, z0 - t/2}, mathx.Vec3{xb, base + v1, z0 + t/2}, mat)
+				c = b.box(mathx.Vec3{xa, base + v0, z0 - t/2}, mathx.Vec3{xb, base + v1, z0 + t/2}, mat)
 			} else {
 				za, zb := min(z0, z1)+u0, min(z0, z1)+u1
-				b.box(mathx.Vec3{x0 - t/2, base + v0, za}, mathx.Vec3{x0 + t/2, base + v1, zb}, mat)
+				c = b.box(mathx.Vec3{x0 - t/2, base + v0, za}, mathx.Vec3{x0 + t/2, base + v1, zb}, mat)
 			}
+			c.Trim = b.trim && iv == nv-1 && mat != Glass
 		}
 	}
 }
 
 // slab is a floor or roof between (x0, z0) and (x1, z1) with its top at y.
 func (b *builder) slab(x0, z0, x1, z1, y, thick float32, m Material) {
-	nx := max(1, int(math.Round(float64((x1-x0)/slabTile))))
-	nz := max(1, int(math.Round(float64((z1-z0)/slabTile))))
+	b.tiles(x0, z0, x1, z1, y, thick, slabTile, m)
+}
+
+// tiles is a slab cut into tiles of about the given size. With trim on,
+// the tiles round its edge carry the outline.
+func (b *builder) tiles(x0, z0, x1, z1, y, thick, tile float32, m Material) {
+	nx := max(1, int(math.Round(float64((x1-x0)/tile))))
+	nz := max(1, int(math.Round(float64((z1-z0)/tile))))
 	dx, dz := (x1-x0)/float32(nx), (z1-z0)/float32(nz)
 	for i := 0; i < nx; i++ {
 		for j := 0; j < nz; j++ {
-			b.box(mathx.Vec3{x0 + float32(i)*dx, y - thick, z0 + float32(j)*dz},
+			c := b.box(mathx.Vec3{x0 + float32(i)*dx, y - thick, z0 + float32(j)*dz},
 				mathx.Vec3{x0 + float32(i+1)*dx, y, z0 + float32(j+1)*dz}, m)
+			c.Trim = b.trim && (i == 0 || j == 0 || i == nx-1 || j == nz-1)
+		}
+	}
+}
+
+// Stairs: solid steps about stairRise high, cut into pieces no taller than
+// stairPiece (nor wider than stairWidth) so they break up like everything
+// else.
+const (
+	stairRise  = 0.19
+	stairPiece = 1.0
+	stairWidth = 3.0 // widest piece across
+)
+
+// stairs is a flight of solid steps from base up to top, climbing along X
+// (or Z) from the foot at from to the head at to, between w0 and w1 across.
+// The last step is level with top, so it meets a deck there flush. Each
+// step's top piece collides as its stretch of a smooth ramp through the
+// middles of the treads (a sphere can't climb steps); the foot of the ramp
+// runs into the floor so there's no lip.
+func (b *builder) stairs(alongX bool, from, to, w0, w1, base, top float32, m Material) {
+	n := max(1, int(math.Round(float64((top-base)/stairRise))))
+	run := (to - from) / float32(n)
+	rise := (top - base) / float32(n)
+	dir := float32(1) // uphill, along the stairs' axis
+	if run < 0 {
+		dir = -1
+	}
+	slope := float32(math.Atan2(float64(rise), float64(abs(run))))
+	cos, sin := float32(math.Cos(float64(slope))), float32(math.Sin(float64(slope)))
+	var uphill, normal mathx.Vec3
+	if alongX {
+		uphill, normal = mathx.Vec3{dir * cos, sin, 0}, mathx.Vec3{-dir * sin, cos, 0}
+	} else {
+		uphill, normal = mathx.Vec3{0, sin, dir * cos}, mathx.Vec3{0, cos, -dir * sin}
+	}
+	const thick = 0.15 // half thickness of each stretch of ramp
+	rot := mathx.QuatFromBasis(normal.Cross(uphill), normal, uphill)
+	across := max(1, int(math.Ceil(float64((w1-w0)/stairWidth)))) // one piece across if it'll do: seams catch your feet
+	dw := (w1 - w0) / float32(across)
+	for k := 0; k < n; k++ {
+		u0, u1 := from+float32(k)*run, from+float32(k+1)*run
+		u0, u1 = min(u0, u1), max(u0, u1)
+		height := (top - base) * float32(k+1) / float32(n)
+		up := max(1, int(math.Ceil(float64(height/stairPiece))))
+		dh := height / float32(up)
+		for a := 0; a < across; a++ {
+			wa, wb := w0+float32(a)*dw, w0+float32(a+1)*dw
+			var c *Chunk
+			for v := 0; v < up; v++ {
+				ya, yb := base+float32(v)*dh, base+float32(v+1)*dh
+				if alongX {
+					c = b.box(mathx.Vec3{u0, ya, wa}, mathx.Vec3{u1, yb, wb}, m)
+				} else {
+					c = b.box(mathx.Vec3{wa, ya, u0}, mathx.Vec3{wb, yb, u1}, m)
+				}
+			}
+			// The top piece's stretch of ramp: its surface meets the tread's
+			// height at the middle of the run.
+			length := abs(run)/cos + 0.04
+			mid := mathx.Vec3{(u0 + u1) / 2, base + height, (wa + wb) / 2}
+			if !alongX {
+				mid = mathx.Vec3{(wa + wb) / 2, base + height, (u0 + u1) / 2}
+			}
+			if k == 0 {
+				length += 0.4
+				mid = mid.Sub(uphill.Scale(0.2))
+			}
+			half := mathx.Vec3{(wb - wa) / 2, thick, length / 2}
+			c.Slope = b.slope(mid.Sub(normal.Scale(thick)), half, rot)
 		}
 	}
 }
@@ -105,9 +186,19 @@ func (b *builder) column(x, z, base, height, width float32, m Material) {
 	n := max(1, int(math.Round(float64(height/panelHeight))))
 	dh := height / float32(n)
 	for i := 0; i < n; i++ {
-		b.box(mathx.Vec3{x - width/2, base + float32(i)*dh, z - width/2},
+		c := b.box(mathx.Vec3{x - width/2, base + float32(i)*dh, z - width/2},
 			mathx.Vec3{x + width/2, base + float32(i+1)*dh, z + width/2}, m)
+		c.Trim = b.trim && i == n-1
 	}
+}
+
+// slope turns a tilted box from the builder's frame into the world's.
+func (b *builder) slope(centre, half mathx.Vec3, rot mathx.Quat) *Slope {
+	for range b.turns { // as in box: (x, z) -> (z, -x), a quarter turn about +Y
+		centre = mathx.Vec3{centre[2], centre[1], -centre[0]}
+	}
+	turn := mathx.AxisAngle(mathx.Vec3{0, 1, 0}, float32(b.turns)*math.Pi/2)
+	return &Slope{Centre: centre.Add(b.origin), Half: half, Rotation: turn.Mul(rot)}
 }
 
 func (b *builder) finish() *Structure {

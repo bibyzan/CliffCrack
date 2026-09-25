@@ -18,15 +18,18 @@ func TestGenerateSite(t *testing.T) {
 			t.Fatal("the same seed should give the same structures")
 		}
 		total += len(s.Chunks)
-		allStanding(t, s)
 		for _, c := range s.Chunks {
-			if abs(c.Centre[0])+c.Half[0] > arenaHalfX || abs(c.Centre[2])+c.Half[2] > arenaHalfZ {
+			if !s.Shell && (abs(c.Centre[0])+c.Half[0] > arenaHalfX || abs(c.Centre[2])+c.Half[2] > arenaHalfZ) {
 				t.Fatalf("%s chunk outside the arena at %v", s.Name, c.Centre)
 			}
 		}
 	}
-	if total < 60 || total > 3000 {
-		t.Errorf("site has %d chunks, want enough cover to fight around", total)
+	if total < 1500 || total > 6000 {
+		t.Errorf("site has %d chunks, want the whole arena breakable but not too heavy to simulate", total)
+	}
+	// Linked together, as in a round, everything stands before any damage.
+	if u := unsupported(a.link()); len(u) != 0 {
+		t.Fatalf("%d chunks unsupported before any damage (first a %s at %v)", len(u), u[0].Structure.Name, u[0].Centre)
 	}
 	if c := GenerateSite(43); len(c.Structures) == len(a.Structures) && len(c.Structures[0].Chunks) == len(a.Structures[0].Chunks) {
 		t.Log("seeds 42 and 43 happen to start alike") // not an error, just unlikely
@@ -50,7 +53,7 @@ func TestSiteIsMirrored(t *testing.T) {
 				t.Fatalf("pair %d chunk %d: south %v, north %v; want the north one at %v", i/2, j, c.Centre, m.Centre, want)
 			}
 		}
-		if lo, _ := footprint(south); lo[2] < 1 {
+		if lo, _ := footprint(south); lo[2] < 1 && !south.Shell {
 			t.Errorf("south structure %s reaches the middle (z from %v)", south.Name, lo[2])
 		}
 	}
@@ -86,8 +89,8 @@ func TestLaunchBaysFireWhenTheRoundStarts(t *testing.T) {
 		peak = max(peak, p.Body.Position[1])
 	}
 	pos := p.Body.Position
-	if peak < endWallLow+1 {
-		t.Errorf("launch peaked at %.1f m, want it to clear the %.1f m end wall", peak, endWallLow)
+	if peak < parapetH+3 {
+		t.Errorf("launch peaked at %.1f m, want it to clear the %.1f m parapet well", peak, parapetH)
 	}
 	if pos[2] < 12 || pos[2] > 24 || math.Abs(float64(pos[1]-PlayerRadius)) > 0.05 {
 		t.Errorf("landed at %v, want on the floor in the landing zone (z 12..24)", pos)
@@ -102,28 +105,41 @@ func TestLaunchBaysFireWhenTheRoundStarts(t *testing.T) {
 	}
 }
 
-func TestJumpPadReachesThePlatform(t *testing.T) {
-	a := New(3, 0, 0)
-	var pad Pad
-	for _, p := range a.Pads {
-		if !p.Spawn && p.Centre[2] > 0 {
-			pad = p
-		}
+// padLanding walks a player onto the pad at centre from 3 m to the south
+// (north if from is negative) and returns where they end up.
+func padLanding(t *testing.T, a *Arena, centre mathx.Vec3, from float32) mathx.Vec3 {
+	t.Helper()
+	yaw := float32(0)
+	if from < 0 {
+		yaw = math.Pi
 	}
-	// Walk onto it from the south.
-	p := a.AddPlayer(Spawn{At: pad.Centre.Add(mathx.Vec3{0, PlayerRadius + 0.02, 3}), Yaw: 0})
+	p := a.AddPlayer(Spawn{At: centre.Add(mathx.Vec3{0, PlayerRadius + 0.02, from}), Yaw: yaw})
 	var boosted bool
 	for range 120 {
 		ev := a.Step(frame, []Input{{Move: [2]float32{0, 1}}})
 		boosted = boosted || ev.Did(p, ActBoost)
 	}
-	run(a, 1)
-	pos := p.Body.Position
+	run(a, 1.5)
 	if !boosted {
-		t.Fatal("walking over the jump pad should launch you")
+		t.Fatal("walking over the pad should launch you")
 	}
-	if math.Abs(float64(pos[1]-(PlatformH+PlayerRadius))) > 0.1 {
-		t.Errorf("ended at %v: want on top of the centre platform (y %.1f)", pos, PlatformH+PlayerRadius)
+	return p.Body.Position
+}
+
+func TestJumpPadsReachTheSpire(t *testing.T) {
+	a := New(3, 0, 0)
+	pos := padLanding(t, a, mathx.Vec3{floorPadX, 0, floorPadZ}, 3)
+	if want := float32(firstBalcony + 2*spireStep); math.Abs(float64(pos[1]-(want+PlayerRadius))) > 0.1 {
+		t.Errorf("ended at %v: want on the spire's third balcony (y %.1f)", pos, want)
+	}
+}
+
+func TestLiftPadReachesTheTower(t *testing.T) {
+	a := New(3, 0, 0)
+	// Walk onto it from the middle's side, towards the tower.
+	pos := padLanding(t, a, mathx.Vec3{towerX, 0, towerZ - liftPadOut}, -2)
+	if math.Abs(float64(pos[1]-(TopH+PlayerRadius))) > 0.1 || abs(pos[2]-towerZ) > towerHalf {
+		t.Errorf("ended at %v: want on top of the perch tower (y %.1f)", pos, TopH+PlayerRadius)
 	}
 }
 

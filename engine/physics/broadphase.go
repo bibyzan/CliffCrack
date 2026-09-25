@@ -1,7 +1,9 @@
 package physics
 
 import (
+	"cmp"
 	"math"
+	"slices"
 
 	"CliffCrack/engine/mathx"
 )
@@ -111,10 +113,22 @@ func (w *World) detect() []contact {
 	}
 	w.dynamic = dyn
 
+	// Dynamic pairs by sort and sweep on X: a collapse can leave hundreds of
+	// pieces falling at once, too many to test every pair.
+	slices.SortStableFunc(dyn, func(a, b *Body) int {
+		return cmp.Compare(a.Position[0]-a.Radius, b.Position[0]-b.Radius)
+	})
 	for i, a := range dyn {
+		right := a.Position[0] + a.Radius
 		for _, b := range dyn[i+1:] {
+			if b.Position[0]-b.Radius > right {
+				break
+			}
 			test(a, b)
 		}
+	}
+
+	for _, a := range dyn {
 		for _, b := range bp.always {
 			test(a, b)
 		}

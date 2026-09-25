@@ -19,13 +19,14 @@ type BlockKind int
 const (
 	Floor BlockKind = iota
 	Wall
-	Platform
-	Pillar
-	Ramp
-	Bay // the launch bays' floors and walls
+	Bay    // the launch bays' walls
+	Deck   // the launch bays' floors, jutting from the chasm walls
+	Girder // the steel frame the arena's floor is laid on
+	Rock   // the mountain spurs rising out of the chasm beside the arena
 )
 
-// Block is an indestructible static box: the arena's shell.
+// Block is an indestructible static box: the frame the arena is built on
+// and the launch bays.
 type Block struct {
 	Kind     BlockKind
 	Centre   mathx.Vec3

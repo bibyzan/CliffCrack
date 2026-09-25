@@ -25,9 +25,9 @@ func (w *World) Raycast(origin, dir mathx.Vec3, maxDist float32, skip func(*Body
 	}
 	best := RayHit{Distance: maxDist}
 	found := false
-	for _, b := range w.bodies {
+	test := func(b *Body) {
 		if skip != nil && skip(b) {
-			continue
+			return
 		}
 		var t float32
 		var n mathx.Vec3
@@ -45,8 +45,49 @@ func (w *World) Raycast(origin, dir mathx.Vec3, maxDist float32, skip func(*Body
 			found = true
 		}
 	}
+	if maxDist > shortRay {
+		for _, b := range w.bodies {
+			test(b)
+		}
+		return best, found
+	}
+	// A short ray only needs the statics in the grid cells it passes
+	// through, plus everything that isn't in the grid.
+	bp := &w.bp
+	if bp.dirty || bp.cells == nil {
+		bp.rebuild(w.bodies)
+	}
+	end := origin.Add(d.Scale(maxDist))
+	lo := mathx.Vec3{min(origin[0], end[0]), min(origin[1], end[1]), min(origin[2], end[2])}
+	hi := mathx.Vec3{max(origin[0], end[0]), max(origin[1], end[1]), max(origin[2], end[2])}
+	c0, c1 := cellRange(lo, hi)
+	bp.stamp++
+	for x := c0[0]; x <= c1[0]; x++ {
+		for y := c0[1]; y <= c1[1]; y++ {
+			for z := c0[2]; z <= c1[2]; z++ {
+				for _, b := range bp.cells[cellKey{x, y, z}] {
+					if b.stamp != bp.stamp {
+						b.stamp = bp.stamp
+						test(b)
+					}
+				}
+			}
+		}
+	}
+	for _, b := range bp.always {
+		test(b)
+	}
+	for _, b := range w.bodies {
+		if b.Kind == Dynamic {
+			test(b)
+		}
+	}
 	return best, found
 }
+
+// shortRay is the longest ray (m) cast through the broadphase grid rather
+// than against every body.
+const shortRay = 3 * gridCell
 
 func raySphere(o, d, c mathx.Vec3, r float32) (float32, mathx.Vec3, bool) {
 	oc := o.Sub(c)
@@ -68,9 +109,13 @@ func raySphere(o, d, c mathx.Vec3, r float32) (float32, mathx.Vec3, bool) {
 
 // rayBox is the slab test in the box's local frame.
 func rayBox(o, d mathx.Vec3, b *Body) (float32, mathx.Vec3, bool) {
-	inv := b.Rotation.Conjugate()
-	lo := inv.Rotate(o.Sub(b.Position))
-	ld := inv.Rotate(d)
+	r := b.Rotation
+	aligned := r.X == 0 && r.Y == 0 && r.Z == 0 // most statics: skip the rotations
+	lo, ld := o.Sub(b.Position), d
+	if !aligned {
+		inv := r.Conjugate()
+		lo, ld = inv.Rotate(lo), inv.Rotate(d)
+	}
 	tNear, tFar := float32(math.Inf(-1)), float32(math.Inf(1))
 	axis, sign := -1, float32(0)
 	for i := 0; i < 3; i++ {
@@ -99,6 +144,9 @@ func rayBox(o, d mathx.Vec3, b *Body) (float32, mathx.Vec3, bool) {
 	}
 	var n mathx.Vec3
 	n[axis] = sign
+	if aligned {
+		return tNear, n, true
+	}
 	return tNear, b.Rotation.Rotate(n), true
 }
 

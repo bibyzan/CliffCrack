@@ -8,18 +8,21 @@ import (
 	"CliffCrack/engine/geom"
 	"CliffCrack/engine/gfx"
 	"CliffCrack/engine/mathx"
+	"CliffCrack/engine/noise"
 	"CliffCrack/engine/render"
 	"CliffCrack/game/arena"
 )
 
 // Arena's look, after Halo 5's Breakout: a clean white simulation space
 // outlined in glowing trim, each end in its team's colour, with the
-// structures in their materials' colours.
+// structures in their materials' colours, on a dark steel frame.
 var (
 	arenaFloorColor    = mathx.SRGB(0.74, 0.76, 0.80, 1)
 	arenaWallColor     = mathx.SRGB(0.90, 0.91, 0.93, 1)
 	arenaPlatformColor = mathx.SRGB(0.95, 0.95, 0.96, 1)
 	arenaBayColor      = mathx.SRGB(0.50, 0.53, 0.58, 1)
+	arenaDeckColor     = mathx.SRGB(0.66, 0.69, 0.74, 1)
+	girderColor        = mathx.SRGB(0.28, 0.30, 0.34, 1)
 	arenaTrimCyan      = mathx.SRGB(0.25, 0.92, 1.00, 1)
 
 	grenadeGlow    = mathx.SRGB(1.00, 0.18, 0.12, 1)
@@ -43,6 +46,8 @@ var materialColor = [...][4]float32{
 	arena.Concrete: mathx.SRGB(0.66, 0.66, 0.64, 1),
 	arena.Glass:    mathx.SRGB(0.62, 0.84, 0.95, 0.32),
 	arena.Metal:    mathx.SRGB(0.48, 0.50, 0.56, 1),
+	arena.Panel:    arenaPlatformColor,
+	arena.Plate:    arenaFloorColor,
 }
 
 // dustColor is the puff a material gives off when it breaks.
@@ -52,6 +57,8 @@ var dustColor = [...][4]float32{
 	arena.Concrete: mathx.SRGB(0.78, 0.77, 0.74, 1),
 	arena.Glass:    mathx.SRGB(0.85, 0.95, 1.00, 1),
 	arena.Metal:    mathx.SRGB(0.95, 0.80, 0.50, 1),
+	arena.Panel:    mathx.SRGB(0.92, 0.93, 0.95, 1),
+	arena.Plate:    mathx.SRGB(0.80, 0.81, 0.84, 1),
 }
 
 // arenaAssets are the Arena's GPU resources, built once.
@@ -60,6 +67,7 @@ type arenaAssets struct {
 	floor     render.Texture
 	panel     render.Texture
 	materials [len(materialColor)]render.Texture
+	chasm     *chasm
 }
 
 func newArenaAssets() (*arenaAssets, error) {
@@ -89,24 +97,42 @@ func newArenaAssets() (*arenaAssets, error) {
 			return nil, err
 		}
 	}
+	as.materials[arena.Panel] = as.panel
+	as.materials[arena.Plate] = as.floor
+	if as.chasm, err = newChasm(); err != nil {
+		return nil, err
+	}
 	return as, nil // glass uses the white texture (handle 0)
 }
 
 // levelDraws builds the draws (and meshes) for a level's indestructible
-// blocks: white clean-sim panels, a lighter grid floor and darker launch
-// bays. Their glowing trim comes from trimDraws.
+// blocks: white clean-sim walls, a grid floor, darker launch bays, the
+// steel girders and the mountains' rock. Their glowing trim comes from trimDraws.
 func (as *arenaAssets) levelDraws(level []arena.Block) ([]render.DrawCmd, []render.Mesh, error) {
 	var draws []render.DrawCmd
 	var meshes []render.Mesh
+	rock := noise.New(0x70c4)
 	for _, b := range level {
+		if b.Kind == arena.Rock {
+			mesh, err := render.CreateMesh(rockBlockMesh(rock, b.Centre, b.Half))
+			if err != nil {
+				return nil, meshes, err
+			}
+			meshes = append(meshes, mesh)
+			model := mathx.Translate(b.Centre[0], b.Centre[1], b.Centre[2]).Mul(b.Rotation.Mat4())
+			draws = append(draws, render.DrawCmd{Model: model, Color: chasmRockColor, Flags: gfx.DrawFlat | gfx.DrawSnow, Mesh: mesh})
+			continue
+		}
 		tile, tex, col := float32(2), as.panel, arenaWallColor
 		switch b.Kind {
 		case arena.Floor:
 			tile, tex, col = 4, as.floor, arenaFloorColor
-		case arena.Platform, arena.Pillar, arena.Ramp:
-			col = arenaPlatformColor
+		case arena.Deck:
+			tile, tex, col = 4, as.floor, arenaDeckColor
 		case arena.Bay:
 			col = arenaBayColor
+		case arena.Girder:
+			tile, tex, col = 1.5, as.materials[arena.Metal], girderColor
 		}
 		mesh, err := render.CreateMesh(boxMesh(b.Half, tile))
 		if err != nil {
@@ -119,20 +145,14 @@ func (as *arenaAssets) levelDraws(level []arena.Block) ([]render.DrawCmd, []rend
 	return draws, meshes, nil
 }
 
-// trimDraws are the glowing bands that outline the level: along the tops of
-// walls and platforms, the edges of ramps and rings round the pillars. Each
-// end glows in the colour of the player who starts there (south, north);
-// the middle is neutral.
+// trimDraws are the glowing bands that outline the level's blocks: along
+// the tops of walls and the lips of the launch bays. Each end glows in the
+// colour of the player who starts there (south, north); the middle is
+// neutral. (The destructible parts carry their own trim: see trimColor.)
 func (as *arenaAssets) trimDraws(level []arena.Block, south, north [4]float32) []render.DrawCmd {
 	var out []render.DrawCmd
 	for _, b := range level {
-		col := arenaTrimCyan
-		switch {
-		case b.Centre[2] > 3:
-			col = south
-		case b.Centre[2] < -3:
-			col = north
-		}
+		col := trimColor(b.Centre, south, north)
 		// band adds a strip at local (offset, half) in the block's frame.
 		band := func(offset, half mathx.Vec3) {
 			c := b.Centre
@@ -142,26 +162,33 @@ func (as *arenaAssets) trimDraws(level []arena.Block, south, north [4]float32) [
 		}
 		h := b.Half
 		switch b.Kind {
-		case arena.Wall, arena.Bay, arena.Platform:
-			if b.Kind == arena.Bay && h[1] > 1.8 {
-				// A bay floor: a strip along its lip.
-				band(mathx.Vec3{0, h[1] - 0.05, 0}, mathx.Vec3{h[0] + 0.01, 0.05, h[2] + 0.01})
-				continue
+		case arena.Deck:
+			// A strip along the lip facing the arena.
+			lip := -h[2] + 0.05
+			if b.Centre[2] < 0 {
+				lip = -lip
 			}
+			band(mathx.Vec3{0, h[1] - 0.05, lip}, mathx.Vec3{h[0] + 0.01, 0.05, 0.06})
+		case arena.Wall, arena.Bay:
 			band(mathx.Vec3{0, h[1] - 0.1, 0}, mathx.Vec3{h[0] + 0.012, 0.05, h[2] + 0.012})
 			if b.Kind == arena.Wall && h[1] > 2 {
 				band(mathx.Vec3{0, -h[1] + 0.9, 0}, mathx.Vec3{h[0] + 0.012, 0.025, h[2] + 0.012})
 			}
-		case arena.Pillar:
-			band(mathx.Vec3{0, -h[1] + 1.4, 0}, mathx.Vec3{h[0] + 0.015, 0.06, h[2] + 0.015})
-			band(mathx.Vec3{0, h[1] - 0.1, 0}, mathx.Vec3{h[0] + 0.015, 0.05, h[2] + 0.015})
-		case arena.Ramp:
-			for _, sx := range []float32{-1, 1} {
-				band(mathx.Vec3{sx * (h[0] - 0.04), h[1] + 0.005, 0}, mathx.Vec3{0.04, 0.012, h[2] - 0.3})
-			}
 		}
 	}
 	return out
+}
+
+// trimColor is the glow for something at p: the colour of whoever starts at
+// that end, or neutral in the middle.
+func trimColor(p mathx.Vec3, south, north [4]float32) [4]float32 {
+	switch {
+	case p[2] > 3:
+		return south
+	case p[2] < -3:
+		return north
+	}
+	return arenaTrimCyan
 }
 
 // boxMesh is a box with the given half extents and texture coordinates

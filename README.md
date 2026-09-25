@@ -8,10 +8,10 @@ The main menu offers three modes:
   procedurally generated mountain. Steer around rocks and pines, jump the cracks, and go
   as far as you can. The first thing you hit ends the run.
 - **Arena**, a first-person duel: best of three single-life rounds against a bot. You're
-  launched out of a bay into a Halo 5 Breakout-style arena of white panels and team-
-  coloured light, with destructible cover in the spirit of THE FINALS and a
-  sledgehammer, rifle and grenade launcher to tear it apart. It's the groundwork for an
-  online multiplayer arena game.
+  launched from a cliff across a chasm into a Halo 5 Breakout-style arena of white
+  panels and team-coloured light, hung on girders over a bottomless drop. Nearly all of
+  it breaks, in the spirit of THE FINALS, and you get a sledgehammer, rifle and grenade
+  launcher to tear it apart. It's the groundwork for an online multiplayer arena game.
 - **Engine Demo**, the physics sandbox. Roll the checker ball around the arena, bump the
   spinning cubes and drop piles of balls.
 
@@ -248,29 +248,65 @@ bot (red) in a **best of three**: each round is **one life each**, and the last 
 standing takes it. First to two rounds wins the match; Enter, A or a click starts a
 rematch on a new site.
 
-- **Rounds**: you start in a launch bay raised behind your end wall, looking out over
-  the arena. During the 3 s countdown you can look around and pick a weapon, but not move
-  or fire. At FIGHT the bay's pad fires you over the wall into the arena, with a whoosh,
-  a jolt and a widening of the view. The round has a 2:30 clock: when time runs out the
+- **Rounds**: you start in a launch bay jutting from the chasm wall beyond your end,
+  looking out over the arena. During the 3 s countdown you can look around and pick a
+  weapon, but not move or fire. At FIGHT the bay's pad fires you across the 12 m gap
+  into the arena, with a whoosh, a jolt and a widening of the view. The round has a 2:30 clock: when time runs out the
   healthier player takes it, and level health is a draw. Every round starts on a fresh
   copy of the same site, with the players swapping ends.
-- **The arena** is a compact 40 × 60 m box of white clean-sim panels outlined in glowing
-  trim. Each end's trim glows in the colour of whoever starts there, so it follows you
-  when you swap ends. The shell is the same every time:
-  - a raised centre platform, with ramps down to the east and west
-  - raised ledges along both side walls, with ramps at their ends
-  - four tall pillars
-  - a jump pad at each end that throws you onto the centre platform
-  - a launch bay behind each end wall, with two pads (room for 2v2 later)
+- **The chasm**: the arena hangs between faceted rock walls like Run mode's
+  mountainsides, with snow on their ledges and peaks above. The chasm runs off into the
+  haze on both sides, and far below is water. Fall in (or get blown in) and you're out;
+  whoever hurt you in the last 6 s gets the kill.
+- **The arena** is a compact 40 × 60 m deck of white clean-sim panels outlined in glowing
+  trim, in a valley of mountains, with a 29 m spire in the middle. Each end's trim glows
+  in the colour of whoever starts there, so it follows you when you swap ends. The layout is the same every time:
+  - a floor of 2 m plates laid on steel girders over the drop, with a low parapet round
+    the edge
+  - **the keep** in the middle: an 18 × 12 m deck at 2.5 m on columns, with grand
+    stairs up to it from each end, and a 13 × 8 m top tier at 5 m reached by stairs
+    from the bridges
+  - **the spire** rising from the top tier to 29 m: a 4 m concrete core with a 4.5 × 5 m
+    concrete balcony every 3 m (8 to 26 m), turning a quarter each time, and a walled
+    cap on top. The balconies never reach into the corners between them, so the corners
+    stay clear all the way up. Pads on the top tier's edges and on every balcony hop you
+    up to the next. Or shoot out the core and bring the upper floors down.
+  - **jump pads** either side of the grand stairs at each end fire you from the floor
+    straight up a corner of the spire onto its 14 m balcony
+  - bridges from the keep across to raised ledges along the sides, with stairs down
+    from the ledges' ends
+  - a concrete perch tower (5 m) either side of the middle at each end, with a lift pad,
+    and a **sky bridge** from its top across to the mountain
+  - **the mountains**: a ridge of the same snow-capped rock as the chasm walls runs the
+    length of the chasm on each side and climbs into the walls at both ends, so the
+    arena sits in one continuous range. A spur of it, rising out of the chasm, reaches
+    in beside the arena. Step off the side ledge
+    onto its saddle (2.5 m) and climb rock ramps to its lower terrace (5 m, where the
+    sky bridge lands), its upper terrace (7.5 m) and its summit (10 m), where a pad
+    throws you onto the pinnacle (12.5 m). The rock doesn't break.
+  - a launch bay on each chasm wall, with two pads (room for 2v2 later)
 - **Cover** is generated from the seed: low walls, head-high walls (some with windows,
-  some glazed), L-shaped cover, crates and the odd bunker. It's placed in the south half
-  and mirrored through the centre into the north half, so both ends play the same. It
-  never blocks the ramps, pads, pillars or landing zones.
-- **Launch pads** throw whoever stands on them. In the air you can steer, but nothing
-  slows you down, so a launch keeps its speed.
+  some glazed), L-shaped cover, crates, and the odd bunker or glasshouse. It's placed in
+  the south half and mirrored through the centre into the north half, so both ends play
+  the same. It never blocks the stairs, pads, towers or landing zones.
+- **Launch pads** throw whoever stands on them (flying over one doesn't count). Each is
+  aimed at a landing spot and works out the throw from wherever you stepped on it. In
+  the air you can steer the throw, but not speed it up or slow it down, so every pad
+  lands you where it's aimed (and a launch from the bay can't be braked into the pit).
+  A pad whose floor is blown out is gone.
+- **Stairs** are solid, breakable steps, but each tread collides as its stretch of a
+  smooth ramp, so you walk up them at full speed. You also step up onto anything up to
+  35 cm high.
 - **Players** have 150 health. Movement is a fixed-rotation physics sphere at the feet,
   with the eye 1.25 m above it. Velocity eases towards the input direction: quickly on
-  the ground, slowly in the air. Gravity is 15 m/s² for snappy jumps. Bullets, blows and
+  the ground, slowly in the air. Gravity is 15 m/s² for snappy jumps. The body is a
+  sphere at the feet, so the space above your head is checked too: jump under a low
+  deck and you stop short of it rather than putting your head (and the camera) through.
+- **Momentum**: faster than you can run (off a pad, a blast or a hop), you keep your
+  speed on the ground and steer. You only start sliding back to running pace a quarter
+  second after landing, so jumping again straight away keeps it all: bunny hop off a
+  pad and carry the speed across the map. A jump pressed just before you land is taken
+  as you land. Pull back to brake. Bullets, blows and
   blasts use a separate **hitbox**: a capsule for the body and a sphere for the head,
   which takes 1.75× damage.
 - **Sledgehammer** (1): a 0.7 s swing that lands 0.22 s in, with 2.8 m reach. Two blows
@@ -283,17 +319,29 @@ rematch on a new site.
   off on impact, on reaching a player, or after 2.5 s. The 4.2 m blast does up to 120 to
   players and destroys chunks. Your own grenades hurt you at half damage, so a rocket
   jump costs some health.
+- **Everything but the girders, the bays and the mountains breaks**: the floor, the
+  keep, bridges, sky bridges, ledges, towers, stairs and parapets are structures like
+  the cover (about 2,500 chunks in all). Blow out a sky bridge and whoever's on it drops.
 - **Structures** are built from axis-aligned box *chunks*. Walls are cut into panels of
-  about 1 × 0.75 m, floors into 1.5 m tiles, and columns into storey-high posts, with door
-  and window openings (glazed ones get glass panes). Each chunk has a material and HP
-  scaled by its size: glass 4, wood 45, brick 90, concrete 160, metal 600.
-- **Support**: chunks that share a face hold each other up. After any damage, a flood
-  fill from the chunks on the ground finds everything still connected, and the rest
-  collapses. A structure also comes down once it has lost 65% of its original footing.
-  You can punch holes in a wall, but take out the ground floor and the whole tower falls.
-- **Debris**: a broken chunk shatters into 1–4 physics pieces (glass into shards), and
-  collapsing chunks drop whole. Rubble keeps colliding and clears after 3–12 s, with at
-  most 450 pieces kept.
+  about 1 × 0.75 m, floors into tiles, and columns into posts, with door and window
+  openings (glazed ones get glass panes). Each chunk has a material and HP scaled by its
+  size (up to 2.5×): glass 4, wood 45, brick 90, panel 110, floor plate 120, concrete
+  160, metal 600.
+- **Support**: chunks that share a face hold each other up, across structures, so a
+  wall standing on the floor comes down with the floor. After any damage, load spreads
+  out from the anchors (chunks resting on a girder): up into anything resting on a
+  supported chunk, which then spans afresh, and sideways at the cost of the distance
+  covered, but never down. Each material has a **span**, how far it can reach out from
+  support: glass 2.5 m, brick 3.5 m, wood and panel 4.5 m, concrete and plate 7 m, metal
+  10 m. Anything further out falls. Shoot out the keep's columns and the middle of its
+  deck drops while the edges hang off the stairs and bridges. A building also comes down
+  once it has lost 65% of its original footing.
+- **Debris**: a broken chunk shatters into 2–7 physics pieces (a few big ones and a
+  spray of chips; glass into shards), and collapsing chunks drop whole. Rubble falling
+  faster than 7 m/s **crushes**: it hurts players it lands on (credited to whoever broke
+  it loose) and damages the structures it hits, so a collapse can bring down what's
+  below. Rubble clears after 3–12 s or once it falls into the chasm, with at most 700
+  pieces kept. A big collapse rumbles and shakes the view.
 - **HUD and feedback**: the round score and clock, health, a name tag and health bar over
   the bot while it's in sight, a hit marker (red for headshots), a kill feed, the weapon
   bar and ammo, countdown and result banners. Taking damage flashes the view red and
@@ -316,7 +364,8 @@ the site's layout but not where you are:
   then. Close in, or while its rifle reloads nearby, it charges with the hammer.
 - When it has lost sight of you it heads for where it last saw or heard you, lobbing
   grenades at that spot on a ballistic arc. It hammers through walls in its way, hops
-  low obstacles, and sidesteps whatever it can't break.
+  low obstacles, and sidesteps whatever it can't break. It never walks or jumps off an
+  edge or into a hole blown in the floor: it turns along it instead.
 - Skill levels are easy, normal (the default) and hard, switchable in the F1 window. That
   window also has "bot holds fire", infinite ammo, autopilot and a new-match button.
   With `-autopilot` a second bot plays your side.
@@ -339,21 +388,32 @@ The game layer already works this way: the local player's keyboard, mouse or pad
 and the bot's `Think` are just two sources of commands for the same step.
 
 `game/arena`'s tests play all of it headless:
-- movement, hitboxes and headshots, cover, each weapon against players and structures,
+- movement, momentum (hopping keeps your speed, landing slides then stops, pulling back
+  brakes), headroom (a jump under a deck keeps your eye below it), hitboxes and headshots, cover, each weapon against players and structures,
   rocket jumps and self-damage
 - countdowns, round wins, side swaps, best of three, timeouts and draws; the launch bays
-  firing only once the round is live and landing you in the arena, and the jump pads
-  reaching the centre platform
-- the site: the same seed gives the same arena, and its cover is mirrored exactly
-- structures: support, collapse, the footing rule, every blueprint in every rotation
+  firing only once the round is live and landing you in the arena (even holding back),
+  the jump pad reaching the keep's top, the lift pads the towers and the hop pads the
+  spire (every pad a level up, and not onto another pad), the floor's jump pads the
+  spire's third balcony, and the pinnacle, both
+  flights of stairs climbable, and the mountain climbable
+  from the side ledge to the summit, and from a tower over its sky bridge
+- the site: the same seed gives the same arena, its cover is mirrored exactly, and,
+  linked together, everything stands before any damage
+- structures: support, spans, collapse, the footing rule, every blueprint in every
+  rotation; blowing out the floor drops what stands on it, the keep comes down without
+  its columns, a pad dies with its floor, falling rubble hurts, and a player knocked into
+  the pit is credited to whoever hit them
 - the bot: it kills a standing target but not instantly, and it can't see through walls
   but hears gunfire. It breaks through a wall to reach a hidden player, the skill levels
   rank easy < normal < hard, and two bots finish a whole match.
 
 The physics engine gained `World.Raycast`, `Body.FixedRotation`, `Body.Ignore` (a
 grenade doesn't hit the player who fired it) and a uniform-grid broadphase for static
-bodies (4 m cells, rebuilt only when statics change), which keeps a site of a thousand or
-more chunks cheap.
+bodies (4 m cells, rebuilt only when statics change), which keeps a site of thousands of
+chunks cheap. Short rays (up to 12 m) only test the statics in the grid cells they cross,
+unrotated boxes skip the rotation maths, and dynamic bodies find each other by sort and
+sweep, so hundreds of pieces of rubble can fall at once.
 
 ### UI
 

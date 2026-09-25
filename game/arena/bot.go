@@ -156,7 +156,12 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 	default:
 		// Roam the site looking for them.
 		if b.goalT <= 0 || flat(b.goal.Sub(feet)).Len() < 2 {
-			b.goal = mathx.Vec3{(b.rng.Float32()*2 - 1) * (a.Bounds[0] - 4), 0, (b.rng.Float32()*2 - 1) * (a.Bounds[1] - 4)}
+			for range 8 { // somewhere with floor left under it
+				b.goal = mathx.Vec3{(b.rng.Float32()*2 - 1) * (a.Bounds[0] - 4), 0, (b.rng.Float32()*2 - 1) * (a.Bounds[1] - 4)}
+				if groundBelow(a, b.goal.Add(mathx.Vec3{0, 3, 0}), 4) {
+					break
+				}
+			}
 			b.goalT = 8 + b.rng.Float32()*6
 		}
 		move = toward(b.goal)
@@ -199,6 +204,24 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 				look[k] = clamp(eye[k], b.smash.Centre[k]-b.smash.Half[k]*0.8, b.smash.Centre[k]+b.smash.Half[k]*0.8)
 			}
 			move = mathx.Vec3{}
+		}
+	}
+
+	// Never walk (or jump) off an edge or into a hole: turn along it.
+	if move != (mathx.Vec3{}) && self.OnGround() {
+		dir := move.Normalize()
+		if !groundAhead(a, feet, dir) {
+			in.Jump = false
+			move = mathx.Vec3{}
+			for _, turn := range []float32{0.8, -0.8, 1.6, -1.6, 2.4, -2.4} {
+				t := turn * b.strafe
+				c, s := float32(math.Cos(float64(t))), float32(math.Sin(float64(t)))
+				try := mathx.Vec3{dir[0]*c - dir[2]*s, 0, dir[0]*s + dir[2]*c}
+				if groundAhead(a, feet, try) {
+					move = try
+					break
+				}
+			}
 		}
 	}
 
@@ -374,4 +397,26 @@ func flat(v mathx.Vec3) mathx.Vec3 { return mathx.Vec3{v[0], 0, v[2]} }
 func angleBetween(a, b mathx.Vec3) float32 {
 	c := a.Dot(b) / (a.Len() * b.Len())
 	return float32(math.Acos(float64(clamp(c, -1, 1))))
+}
+
+// groundAhead reports whether there's something to stand on a step or two
+// along dir from feet: a floor, or a drop onto something solid, not the pit.
+func groundAhead(a *Arena, feet, dir mathx.Vec3) bool {
+	for _, d := range []float32{0.9, 1.8} {
+		if !groundBelow(a, feet.Add(dir.Scale(d)).Add(mathx.Vec3{0, 0.4, 0}), 3.5) {
+			return false
+		}
+	}
+	return true
+}
+
+// groundBelow reports whether a floor (not just a girder) lies within reach
+// below from.
+func groundBelow(a *Arena, from mathx.Vec3, reach float32) bool {
+	hit, ok := a.Phys.Raycast(from, mathx.Vec3{0, -1, 0}, reach, a.ignoreForAim)
+	if !ok {
+		return false
+	}
+	kind, isBlock := hit.Body.UserData.(BlockKind)
+	return !isBlock || kind != Girder
 }

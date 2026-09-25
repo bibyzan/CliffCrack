@@ -310,3 +310,42 @@ func TestGrenadesHurtAndSelfDamageIsHalved(t *testing.T) {
 		t.Errorf("rocket jump cost %v health, want some but at most %v", lost, BlastPlayerDamage*selfDamage)
 	}
 }
+
+// flying puts a player 2 m up on open ground, moving north at speed.
+func flying(speed float32) (*Arena, *Player) {
+	a := flatArena(nil, at(0, 20, 0))
+	p := a.Players[0]
+	p.Body.Position[1] = 2
+	p.Body.Velocity = mathx.Vec3{0, 0, -speed}
+	return a, p
+}
+
+func flatSpeed(p *Player) float32 { return flat(p.Body.Velocity).Len() }
+
+func TestHoppingKeepsMomentum(t *testing.T) {
+	a, p := flying(14)
+	// Hold forward and jump (a jump pressed just before landing counts).
+	run(a, 2.5, Input{Move: [2]float32{0, 1}, Jump: true})
+	if s := flatSpeed(p); s < 13 {
+		t.Errorf("hopping from 14 m/s, down to %.1f m/s after 2.5 s: want the speed kept", s)
+	}
+}
+
+func TestLandingAtSpeedSlidesThenStops(t *testing.T) {
+	a, p := flying(14)
+	run(a, 0.55) // lands after ~0.4 s
+	if !p.OnGround() || flatSpeed(p) < 13 {
+		t.Errorf("just landed (on the ground %v) at %.1f m/s: want the speed kept for a moment, to hop on", p.OnGround(), flatSpeed(p))
+	}
+	run(a, 3)
+	if s := flatSpeed(p); s > 0.5 {
+		t.Errorf("still at %.1f m/s 3 s after landing with no input", s)
+	}
+	// Pulling back brakes hard.
+	a, p = flying(14)
+	run(a, 0.45)
+	run(a, 0.4, Input{Move: [2]float32{0, -1}})
+	if s := flatSpeed(p); s > 6 {
+		t.Errorf("braking from 14 m/s for 0.4 s left %.1f m/s", s)
+	}
+}

@@ -15,10 +15,25 @@ const (
 	WeaponRifle
 	WeaponLauncher
 	weaponCount
+
+	// Not weapons, but what else can take a player down.
+	WeaponRubble = weaponCount     // crushed by falling debris
+	WeaponDrop   = weaponCount + 1 // fell into the pit
 )
 
 // WeaponNames are the HUD labels, by slot.
 var WeaponNames = [weaponCount]string{"HAMMER", "RIFLE", "LAUNCHER"}
+
+// Cause is how the kill feed names what took a player down.
+func (k WeaponKind) Cause() string {
+	switch k {
+	case WeaponRubble:
+		return "RUBBLE"
+	case WeaponDrop:
+		return "THE DROP"
+	}
+	return WeaponNames[k]
+}
 
 // Weapon tuning.
 const (

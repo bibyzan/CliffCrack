@@ -18,8 +18,8 @@ const (
 	arenaMouseSens = 0.0022 // radians per pixel
 	arenaStickYaw  = 3.2    // radians per second at full right-stick tilt
 	arenaStickPch  = 2.2
-	arenaNear      = 0.05 // close enough that the weapon model isn't clipped
-	arenaFar       = 500
+	arenaNear      = 0.05     // close enough that the weapon model isn't clipped
+	arenaFar       = farPlane // past the sky dome, and the chasm runs off into the haze
 
 	tracerSpeed  = 260 // m/s: how fast a tracer streak travels down the bullet's path
 	tracerLength = 5   // m
@@ -30,6 +30,7 @@ const (
 	hitMarkTime  = 0.14
 	maxBursts    = 160 // effect puffs alive at once
 	breakSounds  = 3   // per frame, so a collapse doesn't deafen
+	pulseRise    = 0.7 // m a launch pad's pulses climb
 
 	local = 0 // the player on this machine is player 0; the bot is player 1
 )
@@ -40,7 +41,9 @@ var botSkills = []struct {
 	skill arena.BotSkill
 }{{"easy", arena.BotEasy}, {"normal", arena.BotNormal}, {"hard", arena.BotHard}}
 
-// arenaLight is the sky and lighting: a bright, hazy simulation space.
+// arenaLight is the sky and lighting: a clear mountain afternoon, the sun
+// raking across the chasm so its walls stand out, and a cool haze that
+// swallows the drop.
 var arenaLight = struct {
 	zenith     [4]float32
 	haze       mathx.Vec3
@@ -48,9 +51,9 @@ var arenaLight = struct {
 	sunDir     mathx.Vec3
 	fog        float32
 }{
-	zenith: mathx.SRGB(0.42, 0.62, 0.92, 1), haze: srgb3(0.86, 0.90, 0.96),
-	sun: srgb3(1.0, 0.95, 0.86).Scale(1.1), shade: srgb3(0.55, 0.65, 0.85).Scale(0.55),
-	sunDir: mathx.Vec3{0.45, 0.8, 0.35}, fog: 0.006,
+	zenith: mathx.SRGB(0.33, 0.52, 0.84, 1), haze: srgb3(0.80, 0.85, 0.93),
+	sun: srgb3(1.0, 0.92, 0.80).Scale(1.1), shade: srgb3(0.52, 0.62, 0.84).Scale(0.55),
+	sunDir: mathx.Vec3{0.62, 0.6, 0.3}, fog: 0.0026,
 }
 
 // tracer is the visible streak of one bullet.
@@ -84,7 +87,7 @@ type feedLine struct {
 type arenaSounds struct {
 	shot, hit, headshot, hurt, kill, reload, empty, jump, land *audio.Sound
 	swing, thud, launch, boom, swap, boost                     *audio.Sound
-	tick, fight, win, lose                                     *audio.Sound
+	tick, fight, win, lose, collapse                           *audio.Sound
 	breaks                                                     [arena.MaterialCount]*audio.Sound
 }
 
@@ -171,6 +174,9 @@ func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64) 
 	m.sfx.breaks[arena.Concrete] = audio.Blip(200*time.Millisecond, 180, 60, 0.65)
 	m.sfx.breaks[arena.Glass] = audio.Blip(150*time.Millisecond, 3200, 2300, 0.3)
 	m.sfx.breaks[arena.Metal] = audio.Blip(260*time.Millisecond, 1200, 1100, 0.35)
+	m.sfx.breaks[arena.Panel] = audio.Blip(180*time.Millisecond, 220, 70, 0.6)
+	m.sfx.breaks[arena.Plate] = audio.Blip(240*time.Millisecond, 150, 45, 0.7)
+	m.sfx.collapse = audio.Blip(900*time.Millisecond, 90, 25, 1)
 	as, err := newArenaAssets()
 	if err != nil {
 		return nil, err
@@ -447,7 +453,7 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		at := k.Victim.Body.Position.Add(mathx.Vec3{0, 0.8, 0})
 		m.addBurst(burst{at: at, size: 1.1, life: 0.3, grow: true, colour: suitColor[k.Victim.ID%len(suitColor)]})
 		m.addBurst(burst{at: at, size: 0.6, life: 0.18, grow: true, colour: tracerColor})
-		how := arena.WeaponNames[k.Weapon]
+		how := k.Weapon.Cause()
 		if k.Head {
 			how += " · HEADSHOT"
 		}
@@ -459,20 +465,39 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		m.playAt(m.sfx.kill, at, 1)
 	}
 	heard := 0
+	eye := me.Eye(1)
+	var fell int          // pieces that collapsed this step ...
+	var fellAt mathx.Vec3 // ... and their middle
 	for _, b := range ev.Breaks {
-		// Dust: a puff the size of the piece, in its colour.
+		// Dust: a puff the size of the piece, in its colour, and a few
+		// chips thrown off it.
 		size := max(b.Half[0], b.Half[1], b.Half[2]) * 1.4
 		life := float32(0.55)
 		if b.Collapsed {
-			life = 0.9
+			life = 1.2
+			fell++
+			fellAt = fellAt.Add(b.At)
 		}
 		m.addBurst(burst{at: b.At, size: size, life: life, grow: true, lit: true, colour: withAlpha(dustColor[b.Mat], 0.7)})
+		if !b.Collapsed {
+			for range 2 {
+				off := mathx.Vec3{m.rng.Float32() - 0.5, m.rng.Float32() - 0.3, m.rng.Float32() - 0.5}.Scale(size)
+				m.addBurst(burst{at: b.At.Add(off), size: 0.08 + 0.1*m.rng.Float32(), life: 0.35, lit: true,
+					colour: withAlpha(dustColor[b.Mat], 0.9)})
+			}
+		}
 		if heard < breakSounds {
 			m.playAt(m.sfx.breaks[b.Mat], b.At, 0.8)
 			heard++
 		}
 	}
-	eye := me.Eye(1)
+	if fell >= 6 {
+		// Something big came down: a rumble and a shake, stronger close by.
+		at := fellAt.Scale(1 / float32(fell))
+		dist := at.Sub(eye).Len()
+		m.shake = max(m.shake, min(float32(fell)/40, 1)*clampf(1-dist/40, 0.1, 1))
+		m.playAt(m.sfx.collapse, at, min(float32(fell)/20, 1))
+	}
 	for _, s := range ev.Smashes {
 		if s.By == me {
 			m.shake = max(m.shake, 0.35)
@@ -691,6 +716,7 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 		Model: mathx.Translate(eye[0], eye[1], eye[2]).Mul(mathx.Scale(skyRadius, skyRadius, skyRadius)),
 		Color: l.zenith, Flags: gfx.DrawSky, Mesh: m.sc.sky,
 	})
+	out = m.as.chasm.appendDraws(out)
 	out = append(out, m.level...)
 	out = append(out, m.trim...)
 	out = m.appendPads(out)
@@ -709,14 +735,21 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 	return params, m.appendHurt(out)
 }
 
-// appendStructures draws every standing chunk, darkening as it takes damage.
-// Glass goes to m.glass, drawn after the solids.
+// appendStructures draws every standing chunk, darkening as it takes damage,
+// and the glowing trim on the ones that carry the arena's outline. Glass
+// goes to m.glass, drawn after the solids.
 func (m *Arena) appendStructures(out []render.DrawCmd) []render.DrawCmd {
 	m.glass = m.glass[:0]
 	for _, s := range m.sim().Structures {
 		for _, c := range s.Chunks {
 			if !c.Alive {
 				continue
+			}
+			if c.Trim {
+				h := c.Half
+				model := mathx.Translate(c.Centre[0], c.Top()-0.08, c.Centre[2]).Mul(mathx.Scale(h[0]+0.012, 0.04, h[2]+0.012))
+				out = append(out, render.DrawCmd{Model: model, Color: trimColor(c.Centre, m.ends[0], m.ends[1]),
+					Flags: gfx.DrawUnlit, Mesh: m.as.cube})
 			}
 			col := materialColor[c.Mat]
 			shade := 0.55 + 0.45*c.Health()
@@ -863,11 +896,14 @@ func (m *Arena) project(p mathx.Vec3) (x, y float32, ok bool) {
 }
 
 // appendPads draws the launch pads: a glowing disc in their end's colour
-// with a pulse rising through it. The launch bays' pads stay dim until the
-// round goes live.
+// with a pulse rising off it. The launch bays' pads stay dim until the
+// round goes live; a pad whose floor has been blown out is gone.
 func (m *Arena) appendPads(out []render.DrawCmd) []render.DrawCmd {
 	s := m.sim()
 	for _, p := range s.Pads {
+		if !s.PadWorks(p) {
+			continue
+		}
 		col := m.ends[0]
 		if p.Centre[2] < 0 {
 			col = m.ends[1]
@@ -883,10 +919,11 @@ func (m *Arena) appendPads(out []render.DrawCmd) []render.DrawCmd {
 		}
 		disc(0.012, p.Radius, 0.35*glow+0.2)
 		disc(0.02, p.Radius*0.55, 0.6*glow)
-		// Pulses rise off the pad and fade.
+		// Pulses rise off the pad and fade, well below eye height: standing
+		// on a pad, a disc passing the camera would wash over the view.
 		for k := range 2 {
 			t := float32(math.Mod(float64(m.elapsed)*0.9+float64(k)*0.5, 1))
-			disc(0.05+t*1.6, p.Radius*(0.95-0.4*t), 0.45*glow*(1-t))
+			disc(0.05+t*pulseRise, p.Radius*(0.95-0.4*t), 0.45*glow*(1-t))
 		}
 	}
 	return out
