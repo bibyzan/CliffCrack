@@ -888,7 +888,7 @@ func (m *Arena) appendStructures(out []render.DrawCmd) []render.DrawCmd {
 				Model:   mathx.Translate(c.Centre[0], c.Centre[1], c.Centre[2]).Mul(mathx.Scale(c.Half[0], c.Half[1], c.Half[2])),
 				Color:   col,
 				Texture: m.as.materials[c.Mat],
-				Mesh:    m.as.cube,
+				Mesh:    m.as.bevel,
 			}
 			if c.Mat == arena.Glass {
 				m.glass = append(m.glass, d)
@@ -908,7 +908,7 @@ func (m *Arena) appendDebris(out []render.DrawCmd) []render.DrawCmd {
 		pos, rot := d.Body.Interpolated(alpha)
 		h := d.Half.Scale(clampf((d.Life-d.Age)/0.6, 0, 1))
 		model := mathx.Translate(pos[0], pos[1], pos[2]).Mul(rot.Mat4()).Mul(mathx.Scale(h[0], h[1], h[2]))
-		dc := render.DrawCmd{Model: model, Color: materialColor[d.Mat], Texture: m.as.materials[d.Mat], Mesh: m.as.cube}
+		dc := render.DrawCmd{Model: model, Color: materialColor[d.Mat], Texture: m.as.materials[d.Mat], Mesh: m.as.bevel}
 		if d.Mat == arena.Glass {
 			m.glass = append(m.glass, dc)
 			continue

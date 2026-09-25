@@ -408,6 +408,17 @@ rematch on a new site.
   it loose) and damages the structures it hits, so a collapse can bring down what's
   below. Rubble clears after 3–12 s or once it falls into the chasm, with at most 700
   pieces kept. A big collapse rumbles and shakes the view.
+- **The look**: nothing in the arena is a plain box. The guns, the characters and the
+  first-person arms are built from chamfered boxes (every edge cut back, octagonal in
+  section) and faceted gems, flat-shaded per facet like the mountains; each model is
+  baked into one mesh per colour at first use, so the detail costs a few draws. The
+  characters have round helmets with wraparound visors, shoulder domes and knee pads;
+  the arms are tapered prisms with elbow pads and gloved fists. Structure chunks and
+  rubble have bevelled edges.
+- **HUD width** (in Settings): how much of the screen's width the HUD spans, 30 to 100%,
+  centred. On an ultrawide, bring it in (about 50% on 32:9 gives a 16:9 box) so the
+  armour bar, weapons, ammo, grenades, score and kill feed sit where you're looking.
+  Run mode's speedometer and best distance follow it too.
 - **The helmet HUD** is drawn in the world a hand's width from your eye, framed by
   faint visor brackets: your **armour bar** across the top (segments that drain, flash
   when hit, sweep back as it recharges, amber when low and red once it's gone, with

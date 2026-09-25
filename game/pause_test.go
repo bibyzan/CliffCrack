@@ -151,3 +151,28 @@ func TestLookSettingsScaleAndInvert(t *testing.T) {
 		t.Errorf("inverted: moving the mouse up should look down (elev > 0), got %v", l.elev)
 	}
 }
+
+func TestHUDWidthSetting(t *testing.T) {
+	dir := t.TempDir()
+	// An older settings file, from before the HUD width: it's full width.
+	if err := os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"fov": 60}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := LoadSettings(dir)
+	if err != nil || s.HUDWidth != 100 {
+		t.Fatalf("loaded %+v (%v): want the HUD at full width", s, err)
+	}
+	s.HUDWidth = 5
+	s.clamp()
+	if s.HUDWidth != minHUDWidth {
+		t.Errorf("HUD width clamped to %v, want %v", s.HUDWidth, minHUDWidth)
+	}
+	s.HUDWidth = 50
+	m := &Arena{settings: &s}
+	if got := m.hudX(0); abs32(got-0.25) > 1e-6 {
+		t.Errorf("the HUD box's left edge at %v of the screen, want 0.25", got)
+	}
+	if got := m.hudX(1); abs32(got-0.75) > 1e-6 {
+		t.Errorf("its right edge at %v, want 0.75", got)
+	}
+}

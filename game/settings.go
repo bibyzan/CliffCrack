@@ -16,16 +16,20 @@ type Settings struct {
 	LookSensitivity float32 `json:"look_sensitivity"` // multiplier for mouse and right-stick looking
 	InvertLook      bool    `json:"invert_look"`      // push up / move the mouse up to look down
 	Volume          float32 `json:"volume"`           // percent
+	// HUDWidth is how much of the screen's width the HUD spans, in percent,
+	// centred: on an ultrawide, bring it in to where you're looking.
+	HUDWidth float32 `json:"hud_width"`
 }
 
 // Setting ranges.
 const (
 	minFOV, maxFOV                 = 35, 90
 	minSensitivity, maxSensitivity = 0.25, 3
+	minHUDWidth, maxHUDWidth       = 30, 100
 )
 
 func DefaultSettings() Settings {
-	return Settings{FOV: 50, LookSensitivity: 1, Volume: 80}
+	return Settings{FOV: 50, LookSensitivity: 1, Volume: 80, HUDWidth: 100}
 }
 
 // clamp brings every value into range (e.g. after loading a hand-edited file).
@@ -40,7 +44,11 @@ func (s *Settings) clamp() {
 	fix(&s.FOV, minFOV, maxFOV, d.FOV)
 	fix(&s.LookSensitivity, minSensitivity, maxSensitivity, d.LookSensitivity)
 	fix(&s.Volume, 0, 100, d.Volume)
+	fix(&s.HUDWidth, minHUDWidth, maxHUDWidth, d.HUDWidth)
 }
+
+// hudBox is the HUD's width as a fraction of the screen's.
+func (s *Settings) hudBox() float32 { return s.HUDWidth / 100 }
 
 // fovRadians is the base vertical field of view.
 func (s *Settings) fovRadians() float32 { return s.FOV * math.Pi / 180 }

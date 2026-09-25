@@ -87,19 +87,8 @@ func ring(outer float32, segments int) geom.MeshData {
 
 // drawParts draws a model's parts under frame: boxes, or balls for the round ones.
 func (m *Arena) drawParts(out []render.DrawCmd, frame mathx.Mat4, parts []gunPart) []render.DrawCmd {
-	for _, part := range parts {
-		c, h := part.centre, part.half
-		model := frame.Mul(mathx.Translate(c[0], c[1], c[2])).Mul(mathx.Scale(h[0], h[1], h[2]))
-		mesh := m.as.cube
-		switch {
-		case part.round:
-			mesh = m.sc.ball
-		case part.ring:
-			mesh = m.as.thinRing
-		}
-		out = append(out, render.DrawCmd{Model: model, Color: part.color, Flags: part.flags, Mesh: mesh})
-	}
-	return out
+	white := [4]float32{1, 1, 1, 1}
+	return drawBaked(out, frame, bake(parts), white, white)
 }
 
 // paintball is one shot's ball of paint in flight, from the muzzle to where
@@ -212,7 +201,7 @@ func (m *Arena) appendPaint(out []render.DrawCmd) []render.DrawCmd {
 		path := b.to.Sub(b.from)
 		at := b.from.Add(path.Normalize().Scale(b.age * b.speed))
 		out = append(out, render.DrawCmd{Model: bodyMatrix(at, mathx.QuatIdentity(), b.size), Color: b.colour, Flags: gfx.DrawFlat,
-			Mesh: m.sc.ball})
+			Mesh: m.as.gem})
 	}
 	for _, s := range m.splats {
 		fade := clampf((splatLife-s.age)/3, 0, 1)

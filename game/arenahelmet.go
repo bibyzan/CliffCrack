@@ -97,7 +97,7 @@ const helmetDepth = 0.07
 
 func (m *Arena) newHelmet(out []render.DrawCmd, fovY, aspect float32) *helmet {
 	return &helmet{m: m, cam: m.camWorld(), d: helmetDepth, halfH: helmetDepth * float32(math.Tan(float64(fovY)/2)),
-		aspect: aspect, out: out}
+		aspect: aspect * m.settings.hudBox(), out: out} // laid out in the HUD box
 }
 
 // at is screen position (sx, sy) in camera space.
@@ -149,11 +149,13 @@ func (m *Arena) appendHelmet(out []render.DrawCmd, fovY, aspect float32) []rende
 	return h.out
 }
 
-// visor frames the view like the inside of a helmet: faint corner brackets.
+// visor frames the view like the inside of a helmet: faint brackets out
+// in the corners of the HUD box, clear of everything in it.
 func (h *helmet) visor() {
-	col := withAlpha(teamGlow[0], 0.22)
-	w := h.aspect // the screen's width, in heights
-	for _, c := range [][2]float32{{0.03, 0.05}, {0.97, 0.05}, {0.03, 0.95}, {0.97, 0.95}} {
+	col := withAlpha(teamGlow[0], 0.2)
+	const margin, arm, thick = 0.008, 0.04, 0.0025 // in screen heights
+	mx := margin / h.aspect                        // ... as a fraction of the box's width
+	for _, c := range [][2]float32{{mx, margin}, {1 - mx, margin}, {mx, 1 - margin}, {1 - mx, 1 - margin}} {
 		sx, sy := c[0], c[1]
 		dx, dy := float32(1), float32(1)
 		if sx > 0.5 {
@@ -162,8 +164,8 @@ func (h *helmet) visor() {
 		if sy > 0.5 {
 			dy = -1
 		}
-		h.rect(sx+dx*0.03/w, sy, 0.06, 0.003, 0, col)
-		h.rect(sx, sy+dy*0.03, 0.003, 0.06, 0, col)
+		h.rect(sx+dx*arm/2/h.aspect, sy, arm, thick, 0, col)
+		h.rect(sx, sy+dy*arm/2, thick, arm, 0, col)
 	}
 }
 

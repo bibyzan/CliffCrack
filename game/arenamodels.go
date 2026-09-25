@@ -109,20 +109,36 @@ var markers = [...]marker{
 				b(0, -0.05, 0.108, 0.013, 0.013, 0.012, gasSteel),          // regulator
 				glow(b(0.016, -0.04, 0.108, 0.002, 0.004, 0.004, tritium)), // gauge
 				b(0, -0.018, 0.275, 0.018, 0.038, 0.008, tealDark),         // butt plate
-				// The holo sight, up on a tall riser so the body sits well below
-				// the line of sight: a hooded box with a window, and a red ring
-				// and dot floating in it.
-				b(0, 0.064, 0.03, 0.014, 0.01, 0.03, gunBlack),   // riser
-				b(0, 0.064, 0.03, 0.015, 0.004, 0.02, gunMetal),  // riser clamp
-				b(0, 0.082, 0.03, 0.017, 0.006, 0.034, gunBlack), // base
-				b(-0.018, 0.107, 0.03, 0.003, 0.02, 0.034, gunBlack),
-				b(0.018, 0.107, 0.03, 0.003, 0.02, 0.034, gunBlack),
-				b(0, 0.129, 0.03, 0.021, 0.003, 0.034, gunBlack),     // hood
-				b(0.024, 0.097, 0.045, 0.004, 0.008, 0.01, gunMetal), // brightness knob
-				glow(b(0.024, 0.097, 0.056, 0.002, 0.002, 0.001, sightRed)),
-				glow(b(0, 0.107, -0.002, 0.015, 0.019, 0.0004, withAlpha(lensBlue, 0.14))), // window
-				glow(o(0, 0.107, 0.0, 0.0068, sightRed)),
-				glow(b(0, 0.107, 0.0, 0.0009, 0.0009, 0.0004, sightRed)),
+				// The holo sight: a big armoured window up on a riser, well
+				// clear of the body, with a thick hood and side guards, framed
+				// front and back so it reads as a window right up at the eye;
+				// and in the glass, a glowing ring with four ticks round a dot.
+				b(0, 0.066, 0.035, 0.016, 0.012, 0.032, gunBlack),     // riser
+				b(0, 0.064, 0.035, 0.018, 0.004, 0.022, gunMetal),     // riser clamp
+				b(0, 0.084, 0.035, 0.024, 0.006, 0.04, gunBlack),      // base
+				b(-0.029, 0.112, 0.035, 0.003, 0.025, 0.04, gunBlack), // side walls
+				b(0.029, 0.112, 0.035, 0.003, 0.025, 0.04, gunBlack),
+				b(0, 0.139, 0.035, 0.032, 0.004, 0.04, gunBlack),      // hood
+				b(0, 0.142, -0.004, 0.03, 0.002, 0.008, markerTeal),   // hood lip
+				b(-0.033, 0.1, 0.03, 0.003, 0.016, 0.024, markerTeal), // side guards
+				b(0.033, 0.1, 0.03, 0.003, 0.016, 0.024, markerTeal),
+				r(0.037, 0.098, 0.05, 0.005, 0.008, 0.008, gunMetal),  // battery cap
+				b(0.034, 0.088, 0.012, 0.003, 0.003, 0.004, gunMetal), // buttons
+				b(0.034, 0.088, 0.022, 0.003, 0.003, 0.004, gunMetal),
+				glow(b(0.0342, 0.095, 0.017, 0.0006, 0.0015, 0.002, sightRed)), // power light
+				// The rear frame round the eyepiece.
+				b(0, 0.136, 0.074, 0.028, 0.0025, 0.002, gunBlack),
+				b(0, 0.088, 0.074, 0.028, 0.0025, 0.002, gunBlack),
+				b(-0.0265, 0.112, 0.074, 0.0025, 0.022, 0.002, gunBlack),
+				b(0.0265, 0.112, 0.074, 0.0025, 0.022, 0.002, gunBlack),
+				// The glass and the reticle.
+				glow(b(0, 0.112, -0.004, 0.026, 0.022, 0.0004, withAlpha(lensBlue, 0.12))),
+				glow(o(0, 0.112, -0.002, 0.0085, sightRed)),
+				glow(b(0, 0.112, -0.002, 0.0011, 0.0011, 0.0004, sightRed)),
+				glow(b(0.0122, 0.112, -0.002, 0.0022, 0.0006, 0.0004, sightRed)),
+				glow(b(-0.0122, 0.112, -0.002, 0.0022, 0.0006, 0.0004, sightRed)),
+				glow(b(0, 0.1242, -0.002, 0.0006, 0.0022, 0.0004, sightRed)),
+				glow(b(0, 0.0998, -0.002, 0.0006, 0.0022, 0.0004, sightRed)),
 			},
 			row(b(0, 0.057, -0.16, 0.013, 0.0015, 0.004, gunMetal), 9, mathx.Vec3{0, 0, 0.032}),      // rail notches
 			row(b(0.032, 0.012, -0.235, 0.0008, 0.006, 0.014, gunBlack), 3, mathx.Vec3{0, 0, 0.034}), // handguard slots
@@ -142,7 +158,7 @@ var markers = [...]marker{
 		magHold: mathx.Vec3{0, -0.12, -0.03}, magDrop: mathx.Vec3{0, -1, 0.2},
 		charge: mathx.Vec3{0.038, 0.032, 0.07},
 		grip:   mathx.Vec3{0, -0.075, 0.09}, fore: mathx.Vec3{0, -0.09, -0.17},
-		muzzle: mathx.Vec3{0, 0.018, -0.54}, sight: mathx.Vec3{0, 0.107, 0.07}, size: 0.55, relief: 0.22,
+		muzzle: mathx.Vec3{0, 0.018, -0.54}, sight: mathx.Vec3{0, 0.112, 0.08}, size: 0.55, relief: 0.1,
 	},
 	arena.WeaponPistol: {
 		parts: join(
@@ -180,7 +196,7 @@ var markers = [...]marker{
 		magHold: mathx.Vec3{0, -0.118, 0.04}, magDrop: mathx.Vec3{0, -1, 0},
 		charge: mathx.Vec3{-0.025, 0.035, 0.05}, // the slide
 		grip:   mathx.Vec3{0, -0.06, 0.045}, fore: mathx.Vec3{-0.02, -0.085, 0.03},
-		muzzle: mathx.Vec3{0, 0.03, -0.16}, sight: mathx.Vec3{0, 0.058, 0.09}, size: 0.6, relief: 0.3,
+		muzzle: mathx.Vec3{0, 0.03, -0.16}, sight: mathx.Vec3{0, 0.058, 0.09}, size: 0.6, relief: 0.19,
 	},
 	arena.WeaponShotgun: {
 		parts: join(
@@ -217,7 +233,7 @@ var markers = [...]marker{
 		reload:  reloadShells,
 		magHold: mathx.Vec3{0, -0.045, 0.0}, // the loading port
 		grip:    mathx.Vec3{0, -0.075, 0.12}, fore: mathx.Vec3{0, -0.045, -0.2},
-		muzzle: mathx.Vec3{0, 0.02, -0.51}, sight: mathx.Vec3{0, 0.07, 0.1}, size: 0.55, relief: 0.14,
+		muzzle: mathx.Vec3{0, 0.02, -0.51}, sight: mathx.Vec3{0, 0.07, 0.1}, size: 0.55, relief: 0.1,
 	},
 	arena.WeaponSniper: {
 		parts: join(
@@ -289,6 +305,6 @@ var markers = [...]marker{
 		reload:  reloadDrum,
 		magHold: mathx.Vec3{0.06, -0.09, 0.08}, magDrop: mathx.Vec3{1, -0.3, 0},
 		grip: mathx.Vec3{0, -0.085, 0.05}, fore: mathx.Vec3{0, -0.09, -0.22},
-		muzzle: mathx.Vec3{0, 0, -0.39}, sight: mathx.Vec3{0, 0.086, 0.02}, size: 0.45, relief: 0.3,
+		muzzle: mathx.Vec3{0, 0, -0.39}, sight: mathx.Vec3{0, 0.086, 0.02}, size: 0.45, relief: 0.2,
 	},
 }

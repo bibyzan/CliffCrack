@@ -17,39 +17,52 @@ var (
 	skinTone  = mathx.SRGB(0.23, 0.24, 0.27, 1) // gloves and boots
 )
 
-// charPart is one box of a character, in the frame of the bone it hangs off.
-type charPart struct {
-	centre, half mathx.Vec3
-	color        [4]float32 // zero: the suit colour
-	flags        gfx.DrawFlags
-}
+// charPart is one piece of a character, in the frame of the bone it hangs
+// off. A zero colour is the suit's (lit) or the visor's (unlit).
+type charPart = gunPart
 
+var suitTint = [4]float32{} // (a zero colour: the suit, or the visor)
+
+// A character: rounded armour over a suit, all facets. Built from the
+// same parts as the guns: b (a chamfered box) and r (a gem).
 var (
 	charTorso = []charPart{
-		{mathx.Vec3{0, 1.12, 0}, mathx.Vec3{0.24, 0.3, 0.15}, [4]float32{}, 0},     // body
-		{mathx.Vec3{0, 1.2, 0}, mathx.Vec3{0.255, 0.18, 0.165}, armour, 0},         // vest
-		{mathx.Vec3{0, 0.86, 0}, mathx.Vec3{0.25, 0.05, 0.16}, armour, 0},          // belt
-		{mathx.Vec3{0, 1.24, 0.17}, mathx.Vec3{0.17, 0.14, 0.04}, [4]float32{}, 0}, // pack
-		{mathx.Vec3{0.27, 1.36, 0}, mathx.Vec3{0.07, 0.07, 0.1}, [4]float32{}, 0},  // right shoulder
-		{mathx.Vec3{-0.27, 1.36, 0}, mathx.Vec3{0.07, 0.07, 0.1}, [4]float32{}, 0}, // left shoulder
+		b(0, 1.1, 0, 0.21, 0.3, 0.14, suitTint),      // body
+		b(0, 1.22, -0.01, 0.235, 0.17, 0.16, armour), // chest plate
+		r(0, 1.3, -0.14, 0.14, 0.09, 0.04, armour),   // chest bulge
+		b(0, 0.86, 0, 0.225, 0.055, 0.15, armour),    // belt
+		r(0.12, 0.86, -0.15, 0.035, 0.035, 0.02, gunMetal),
+		r(-0.12, 0.86, -0.15, 0.035, 0.035, 0.02, gunMetal),
+		b(0, 1.2, 0.17, 0.16, 0.15, 0.05, suitTint),   // pack
+		r(0, 1.06, 0.2, 0.09, 0.06, 0.04, gunMetal),   // pack canister
+		r(0.27, 1.37, 0, 0.1, 0.085, 0.11, suitTint),  // right shoulder dome
+		r(-0.27, 1.37, 0, 0.1, 0.085, 0.11, suitTint), // left shoulder dome
+		r(0, 1.43, 0, 0.08, 0.05, 0.08, gunBlack),     // neck
 	}
 	// Legs hang from the hip.
 	charLeg = []charPart{
-		{mathx.Vec3{0, -0.24, 0}, mathx.Vec3{0.1, 0.24, 0.11}, [4]float32{}, 0},  // thigh
-		{mathx.Vec3{0, -0.62, 0}, mathx.Vec3{0.09, 0.18, 0.1}, armour, 0},        // shin
-		{mathx.Vec3{0, -0.8, -0.04}, mathx.Vec3{0.095, 0.05, 0.14}, skinTone, 0}, // boot
+		b(0, -0.22, 0, 0.095, 0.23, 0.1, suitTint),     // thigh
+		r(0, -0.45, -0.05, 0.075, 0.07, 0.06, armour),  // knee pad
+		b(0, -0.63, 0.005, 0.08, 0.17, 0.09, armour),   // shin
+		b(0, -0.81, -0.04, 0.09, 0.05, 0.14, skinTone), // boot
+		r(0, -0.78, -0.13, 0.07, 0.05, 0.06, skinTone), // toe
 	}
 	// The head turns on the neck.
 	charHead = []charPart{
-		{mathx.Vec3{0, 0.16, 0}, mathx.Vec3{0.14, 0.16, 0.15}, armour, 0},                         // helmet
-		{mathx.Vec3{0, 0.17, -0.14}, mathx.Vec3{0.115, 0.05, 0.025}, [4]float32{}, gfx.DrawUnlit}, // visor (visor colour)
-		{mathx.Vec3{0, 0.31, 0.02}, mathx.Vec3{0.03, 0.03, 0.1}, [4]float32{}, 0},                 // crest
+		r(0, 0.16, 0.01, 0.15, 0.165, 0.16, armour),           // helmet
+		glow(r(0, 0.15, -0.075, 0.125, 0.065, 0.1, suitTint)), // visor, wrapping round (visor colour)
+		b(0, 0.31, 0.03, 0.028, 0.035, 0.12, suitTint),        // crest
+		r(0.14, 0.13, 0.02, 0.035, 0.06, 0.06, gunMetal),      // ear pieces
+		r(-0.14, 0.13, 0.02, 0.035, 0.06, 0.06, gunMetal),
 	}
 	// Arms reach from the shoulders (in the aim frame) to the weapon.
 	charArms = []charPart{
-		{mathx.Vec3{0.2, -0.1, -0.16}, mathx.Vec3{0.06, 0.06, 0.2}, [4]float32{}, 0},
-		{mathx.Vec3{0.17, -0.12, -0.36}, mathx.Vec3{0.05, 0.05, 0.05}, skinTone, 0},
-		{mathx.Vec3{-0.04, -0.13, -0.3}, mathx.Vec3{0.055, 0.055, 0.22}, [4]float32{}, 0},
+		b(0.2, -0.1, -0.12, 0.055, 0.055, 0.16, suitTint), // right upper arm
+		r(0.19, -0.11, -0.28, 0.06, 0.055, 0.05, armour),  // right elbow pad
+		b(0.17, -0.12, -0.36, 0.045, 0.045, 0.06, armour), // right forearm
+		r(0.16, -0.12, -0.43, 0.045, 0.045, 0.045, skinTone),
+		b(-0.04, -0.13, -0.26, 0.05, 0.05, 0.2, suitTint), // left arm
+		r(-0.03, -0.13, -0.46, 0.045, 0.045, 0.045, skinTone),
 	}
 )
 
@@ -80,17 +93,7 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 		suit = lerpColor(suit, armour, 0.5)
 	}
 	draw := func(frame mathx.Mat4, parts []charPart) {
-		for _, c := range parts {
-			col := c.color
-			switch {
-			case c.flags&gfx.DrawUnlit != 0:
-				col = visorGlow[i]
-			case col == [4]float32{}:
-				col = suit
-			}
-			model := frame.Mul(mathx.Translate(c.centre[0], c.centre[1], c.centre[2])).Mul(mathx.Scale(c.half[0], c.half[1], c.half[2]))
-			out = append(out, render.DrawCmd{Model: model, Color: col, Flags: c.flags | gfx.DrawFlat, Mesh: m.as.cube})
-		}
+		out = drawBaked(out, frame, bake(parts), suit, visorGlow[i])
 	}
 
 	// Legs: a walk cycle scaled by speed on the ground.
@@ -145,7 +148,7 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 	if !p.Dead && p.Shield > 0 {
 		glow := 0.05 + 0.4*p.Flash
 		shell := base.Mul(mathx.Translate(0, 0.98, 0)).Mul(mathx.Scale(0.36, 0.98, 0.28))
-		m.glass = append(m.glass, render.DrawCmd{Model: shell, Color: withAlpha(teamGlow[i], glow), Flags: gfx.DrawUnlit, Mesh: m.sc.ball})
+		m.glass = append(m.glass, render.DrawCmd{Model: shell, Color: withAlpha(teamGlow[i], glow), Flags: gfx.DrawUnlit, Mesh: m.as.gem})
 	}
 	return out
 }

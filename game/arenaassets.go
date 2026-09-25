@@ -71,6 +71,9 @@ type arenaAssets struct {
 	ring      render.Mesh // the sniper scope's surround
 	thinRing  render.Mesh // reticles: a ring of radius 1, 0.18 thick
 	quad      render.Mesh // HUD icons: a unit quad facing the eye
+	gem       render.Mesh // a faceted ball, radius 1
+	bevel     render.Mesh // a chamfered cube, half extents 1 (structure chunks and rubble)
+	limb      render.Mesh // a tapered prism along Z, radius 1, -1..1
 	icons     hudIcons
 }
 
@@ -113,6 +116,15 @@ func newArenaAssets() (*arenaAssets, error) {
 		return nil, err
 	}
 	if as.quad, err = render.CreateMesh(hudQuad()); err != nil {
+		return nil, err
+	}
+	if as.gem, err = render.CreateMesh(gem(mathx.Vec3{1, 1, 1})); err != nil {
+		return nil, err
+	}
+	if as.bevel, err = render.CreateMesh(chamferBox(mathx.Vec3{1, 1, 1}, 0.2)); err != nil {
+		return nil, err
+	}
+	if as.limb, err = render.CreateMesh(limbMesh()); err != nil {
 		return nil, err
 	}
 	if as.icons, err = loadIcons(); err != nil {

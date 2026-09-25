@@ -61,13 +61,17 @@ func (m *Arena) arm(out []render.DrawCmd, shoulder, hand, pole mathx.Vec3) []ren
 	side := pole.Sub(dir.Scale(pole.Dot(dir))).Normalize()
 	elbow := shoulder.Add(dir.Scale(a)).Add(side.Scale(h))
 
-	out = m.limb(out, shoulder, elbow, 0.02, sleeveColor)
-	out = m.limb(out, elbow, hand, 0.016, sleeveColor)
-	wrist := hand.Sub(hand.Sub(elbow).Normalize().Scale(0.035))
-	out = m.limb(out, elbow.Add(wrist.Sub(elbow).Scale(0.4)), wrist, 0.018, bracerColor)
+	out = m.limb(out, shoulder, elbow, 0.045, sleeveColor)
+	out = m.limb(out, elbow, hand, 0.036, sleeveColor)
+	out = append(out, render.DrawCmd{Model: bodyMatrix(elbow, mathx.QuatIdentity(), 0.042), Color: bracerColor,
+		Flags: gfx.DrawFlat, Mesh: m.as.gem}) // the elbow pad
+	wrist := hand.Sub(hand.Sub(elbow).Normalize().Scale(0.05))
+	out = m.limb(out, elbow.Add(wrist.Sub(elbow).Scale(0.4)), wrist, 0.04, bracerColor)
 	// The glove: a fist round the grip.
 	fwd := hand.Sub(elbow).Normalize()
-	out = m.limb(out, wrist, hand.Add(fwd.Scale(0.008)), 0.014, gloveColor)
+	out = m.limb(out, wrist, hand.Add(fwd.Scale(0.012)), 0.026, gloveColor)
+	out = append(out, render.DrawCmd{Model: bodyMatrix(hand, mathx.QuatIdentity(), 0.027), Color: gloveColor,
+		Flags: gfx.DrawFlat, Mesh: m.as.gem}) // the knuckles
 	return out
 }
 
@@ -209,7 +213,7 @@ func (m *Arena) appendArms(out []render.DrawCmd, model mathx.Mat4, mk *marker, p
 		fore = lerp3(fore, hand, min(m.throwAnim*3, 1))
 		if t < 0.4 {
 			out = append(out, render.DrawCmd{Model: bodyMatrix(fore, mathx.QuatIdentity(), 0.03), Color: fragOlive,
-				Flags: gfx.DrawFlat, Mesh: m.sc.ball})
+				Flags: gfx.DrawFlat, Mesh: m.as.gem})
 		}
 	}
 	out = m.arm(out, c(rightShoulder), grip, dirC(rightPole))

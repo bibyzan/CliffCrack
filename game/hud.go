@@ -84,12 +84,12 @@ func (r *Run) UI(b *ui.Builder, in *input.State) {
 	if !r.ride.crashed {
 		// Speedometer, bottom left. The red zone starts where only a tuck at
 		// the fastest part of the mountain gets you.
-		b.Panel("##speedo", 0.015, 0.985, hudText&^gfx.UICentered, 1)
+		b.Panel("##speedo", 0.5+(0.015-0.5)*r.settings.hudBox(), 0.985, hudText&^gfx.UICentered, 1)
 		b.Gauge("km/h", r.ride.speed()*3.6, 0, speedoMax, ui.GaugeStyle{Size: 210, RedFrom: 0.8})
 		b.End()
 	}
 	if r.best > 0 {
-		b.Panel("##best", 0.985, 0.025, hudText, 1.2)
+		b.Panel("##best", 0.5+(0.985-0.5)*r.settings.hudBox(), 0.025, hudText, 1.2)
 		b.ColorText(uiMuted, "BEST")
 		b.Text("%.0f m", r.best)
 		b.End()

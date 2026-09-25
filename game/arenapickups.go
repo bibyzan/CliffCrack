@@ -41,11 +41,11 @@ func (m *Arena) appendGrenade(out []render.DrawCmd, g *arena.Grenade, alpha floa
 	}
 	switch g.Kind {
 	case arena.Frag:
-		part(mathx.Vec3{}, mathx.Vec3{0.055, 0.065, 0.055}, fragOlive, gfx.DrawFlat, m.sc.ball)      // body
-		part(mathx.Vec3{}, mathx.Vec3{0.058, 0.008, 0.058}, gunBlack, gfx.DrawFlat, m.sc.ball)       // band
-		part(mathx.Vec3{0, 0.07, 0}, mathx.Vec3{0.02, 0.018, 0.02}, fragSteel, 0, m.as.cube)         // fuse head
-		part(mathx.Vec3{0.028, 0.045, 0}, mathx.Vec3{0.006, 0.045, 0.012}, fragSteel, 0, m.as.cube)  // spoon
-		part(mathx.Vec3{-0.024, 0.085, 0}, mathx.Vec3{0.012, 0.012, 0.003}, fragSteel, 0, m.sc.ball) // pin ring
+		part(mathx.Vec3{}, mathx.Vec3{0.055, 0.065, 0.055}, fragOlive, gfx.DrawFlat, m.as.gem)      // body
+		part(mathx.Vec3{}, mathx.Vec3{0.058, 0.008, 0.058}, gunBlack, gfx.DrawFlat, m.as.gem)       // band
+		part(mathx.Vec3{0, 0.07, 0}, mathx.Vec3{0.02, 0.018, 0.02}, fragSteel, 0, m.as.cube)        // fuse head
+		part(mathx.Vec3{0.028, 0.045, 0}, mathx.Vec3{0.006, 0.045, 0.012}, fragSteel, 0, m.as.cube) // spoon
+		part(mathx.Vec3{-0.024, 0.085, 0}, mathx.Vec3{0.012, 0.012, 0.003}, fragSteel, 0, m.as.gem) // pin ring
 	case arena.Sticky:
 		rate := 6.0
 		if g.Stuck {
@@ -53,17 +53,17 @@ func (m *Arena) appendGrenade(out []render.DrawCmd, g *arena.Grenade, alpha floa
 		}
 		pulse := 0.5 + 0.5*float32(math.Sin(float64(m.elapsed)*rate))
 		col := paintColor[team(g.Owner)]
-		part(mathx.Vec3{}, mathx.Vec3{0.07, 0.07, 0.07}, withAlpha(col, 0.6), gfx.DrawUnlit, m.sc.ball)
-		part(mathx.Vec3{}, mathx.Vec3{0.035, 0.035, 0.035}.Scale(0.8+0.5*pulse), stickyCore, gfx.DrawUnlit, m.sc.ball)
+		part(mathx.Vec3{}, mathx.Vec3{0.07, 0.07, 0.07}, withAlpha(col, 0.6), gfx.DrawUnlit, m.as.gem)
+		part(mathx.Vec3{}, mathx.Vec3{0.035, 0.035, 0.035}.Scale(0.8+0.5*pulse), stickyCore, gfx.DrawUnlit, m.as.gem)
 		if g.Stuck {
 			out = append(out, render.DrawCmd{Model: bodyMatrix(pos, mathx.QuatIdentity(), 0.18+0.1*pulse),
 				Color: withAlpha(col, 0.25*pulse), Flags: gfx.DrawUnlit, Mesh: m.sc.chip})
 		}
 	default:
 		out = append(out,
-			render.DrawCmd{Model: bodyMatrix(pos, mathx.QuatIdentity(), 0.07), Color: hopperYellow, Mesh: m.sc.ball},
+			render.DrawCmd{Model: bodyMatrix(pos, mathx.QuatIdentity(), 0.07), Color: hopperYellow, Mesh: m.as.gem},
 			render.DrawCmd{Model: bodyMatrix(pos, mathx.QuatIdentity(), 0.035+0.015*float32(math.Sin(float64(m.elapsed)*40))),
-				Color: grenadeGlow, Flags: gfx.DrawUnlit, Mesh: m.sc.ball})
+				Color: grenadeGlow, Flags: gfx.DrawUnlit, Mesh: m.as.gem})
 	}
 	return out
 }
@@ -103,14 +103,19 @@ func (m *Arena) appendPickups(out []render.DrawCmd) []render.DrawCmd {
 	return out
 }
 
+var wholeGuns [len(markers)][]gunPart
+
 // partsFor is weapon k's model.
 func partsFor(k arena.WeaponKind) []gunPart {
 	switch {
 	case k == arena.WeaponHammer:
 		return hammerParts
 	case int(k) >= 0 && int(k) < len(markers):
-		mk := &markers[k]
-		return join(mk.parts, mk.mag, mk.pump) // all of it, at rest
+		if wholeGuns[k] == nil { // all of it, at rest (joined once, so it bakes once)
+			mk := &markers[k]
+			wholeGuns[k] = join(mk.parts, mk.mag, mk.pump)
+		}
+		return wholeGuns[k]
 	}
 	return nil
 }
@@ -130,9 +135,9 @@ func (m *Arena) appendCrate(out []render.DrawCmd, p *arena.Pickup, frame mathx.M
 	part(mathx.Vec3{0, 0.12, -0.141}, mathx.Vec3{0.2, 0.02, 0.003}, trim, gfx.DrawUnlit, m.as.cube)
 	for _, x := range []float32{-0.09, 0.09} {
 		if p.Grenade == arena.Frag {
-			part(mathx.Vec3{x, 0.24, 0}, mathx.Vec3{0.055, 0.065, 0.055}, fragOlive, gfx.DrawFlat, m.sc.ball)
+			part(mathx.Vec3{x, 0.24, 0}, mathx.Vec3{0.055, 0.065, 0.055}, fragOlive, gfx.DrawFlat, m.as.gem)
 		} else {
-			part(mathx.Vec3{x, 0.24, 0}, mathx.Vec3{0.065, 0.065, 0.065}, withAlpha(paintColor[0], 0.8), gfx.DrawUnlit, m.sc.ball)
+			part(mathx.Vec3{x, 0.24, 0}, mathx.Vec3{0.065, 0.065, 0.065}, withAlpha(paintColor[0], 0.8), gfx.DrawUnlit, m.as.gem)
 		}
 	}
 	return out

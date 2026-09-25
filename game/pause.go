@@ -84,6 +84,7 @@ const (
 	rowSensitivity
 	rowInvert
 	rowVolume
+	rowHUD
 	rowBack
 	rowCount
 )
@@ -154,6 +155,8 @@ func (m *settingsScreen) update(in *input.State, s *Settings, dt float32) (done 
 		slide(&s.LookSensitivity, minSensitivity, maxSensitivity, 0.05)
 	case rowVolume:
 		slide(&s.Volume, 0, 100, 5)
+	case rowHUD:
+		slide(&s.HUDWidth, minHUDWidth, maxHUDWidth, 5)
 	case rowInvert:
 		if (steps != 0 && m.heldFor == 0) || confirmPressed(in) { // once per press, no repeat
 			s.InvertLook = !s.InvertLook
@@ -187,6 +190,7 @@ func (m *settingsScreen) ui(b *ui.Builder, s *Settings, in *input.State) {
 		s.InvertLook = !s.InvertLook
 	}
 	b.StyledSlider("Volume", &s.Volume, 0, 100, style(rowVolume, "%.0f%%"))
+	b.StyledSlider("HUD width (ultrawide)", &s.HUDWidth, minHUDWidth, maxHUDWidth, style(rowHUD, "%.0f%%"))
 	b.Separator()
 	if b.MenuButton("Back", width, 46, m.choice == rowBack) {
 		m.back = true

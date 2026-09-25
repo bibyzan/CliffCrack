@@ -25,14 +25,14 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 	} else {
 		// Score, top left under the visor's corner (the armour bar has the
 		// top middle): YOU 1 : 0 BOT, the round and its clock.
-		b.Panel("##score", 0.035, 0.075, anchored, 1.5)
+		b.Panel("##score", m.hudX(0.035), 0.075, anchored, 1.5)
 		b.ColorText(suitColor[0], "YOU")
 		b.SameLine(14)
 		b.Text("%d : %d", mt.Wins[0], mt.Wins[1])
 		b.SameLine(14)
 		b.ColorText(suitColor[1], "BOT")
 		b.End()
-		b.Panel("##round", 0.035, 0.135, anchored, 1.0)
+		b.Panel("##round", m.hudX(0.035), 0.135, anchored, 1.0)
 		clock := ""
 		if mt.Phase == arena.PhaseFight {
 			t := int(math.Ceil(float64(mt.Timer)))
@@ -47,7 +47,7 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 	// Kill feed, top right.
 	for i, f := range m.feed {
 		fade := clampf((feedLife-f.age)*3, 0, 1)
-		b.Panel("##feed"+string(rune('0'+i%10)), 0.985, 0.03+0.04*float32(i), anchored, 1.15)
+		b.Panel("##feed"+string(rune('0'+i%10)), m.hudX(0.985), 0.03+0.04*float32(i), anchored, 1.15)
 		c := uiMuted
 		if f.good {
 			c = uiAccent
@@ -76,7 +76,7 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 // reach. (Reloads show in the hands, not as a bar.)
 func (m *Arena) weaponHUD(b *ui.Builder, in *input.State, me *arena.Player) {
 	anchored := hudText &^ gfx.UICentered
-	b.Panel("##ammo", 0.985, 0.975, anchored, 2.8)
+	b.Panel("##ammo", m.hudX(0.985), 0.975, anchored, 2.8)
 	switch g, s := me.Gun(); {
 	case g != nil:
 		ammoText(b, s.Ammo, s.Reserve, s.Reloading > 0)
@@ -205,10 +205,10 @@ func ammoText(b *ui.Builder, ammo, reserve int, reloading bool) {
 // far, and how you're shooting.
 func (m *Arena) rangeHUD(b *ui.Builder) {
 	s, me := m.sim(), m.me()
-	b.Panel("##range", 0.035, 0.075, hudText&^gfx.UICentered, 1.3)
+	b.Panel("##range", m.hudX(0.035), 0.075, hudText&^gfx.UICentered, 1.3)
 	b.ColorText(paintColor[0], "FIRING RANGE")
 	b.End()
-	b.Panel("##rangeinfo", 0.035, 0.125, hudText&^gfx.UICentered, 0.95)
+	b.Panel("##rangeinfo", m.hudX(0.035), 0.125, hudText&^gfx.UICentered, 0.95)
 	what := "--"
 	if !me.Dead {
 		shot := s.Trace(me, me.Eye(1), me.Forward(), 300)
@@ -254,3 +254,7 @@ func (m *Arena) DebugUI(b *ui.Builder, st Stats) {
 	}
 	b.End()
 }
+
+// hudX maps x across the HUD box (0 its left edge, 1 its right) to the
+// screen: the box is centred, as wide as the HUD width setting.
+func (m *Arena) hudX(x float32) float32 { return 0.5 + (x-0.5)*m.settings.hudBox() }
