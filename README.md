@@ -2,16 +2,15 @@
 
 A game built on its own engine: a **Go host** driving a **native C++ Vulkan 1.3 renderer**.
 
-The main menu offers four modes:
+The main menu offers three modes:
 
 - **Run**, the arcade mode. You're dropped off a cliff and ride a ball down an endless,
   procedurally generated mountain. Steer around rocks and pines, jump the cracks, and go
   as far as you can. The first thing you hit ends the run.
-- **Arena**, a first-person shooter prototype. Run, jump and climb around a walled arena
-  at dusk and shoot down hovering drones with a rifle.
-- **Demolition**, the Arena's destructible cousin. A randomly generated building site
-  of houses, towers, bunkers and glasshouses, and a sledgehammer, rifle and grenade
-  launcher to take them apart chunk by chunk until they collapse.
+- **Arena**, a first-person duel in the spirit of THE FINALS: best of three single-life
+  rounds against a bot, on a randomly generated site of destructible houses, towers,
+  bunkers and glasshouses, with a sledgehammer, rifle and grenade launcher that tear
+  them apart. It's the groundwork for an online multiplayer arena game.
 - **Engine Demo**, the physics sandbox. Roll the checker ball around the arena, bump the
   spinning cubes and drop piles of balls.
 
@@ -51,9 +50,8 @@ You don't need to link against the Vulkan loader: volk loads `vulkan-1.dll` from
 ./build.ps1 -Run              # Debug build, validation layers on
 ./build.ps1 -Config Release
 build/bin/game.exe -validation=false -vsync=false
-build/bin/game.exe -mode run                  # skip the menu: menu | run | arena | demolition | demo
-build/bin/game.exe -mode arena -autopilot -seed 5 -screenshot out.png -frames 90   # a bot plays the arena
-build/bin/game.exe -mode demolition -autopilot -seed 11 -screenshot out.png -frames 600   # a bot wrecks site 11
+build/bin/game.exe -mode run                  # skip the menu: menu | run | arena | demo
+build/bin/game.exe -mode arena -autopilot -seed 11 -screenshot out.png -frames 700   # bot vs bot on site 11
 build/bin/game.exe -mode run -seed 42         # replay one course (default: a new one each run)
 build/bin/game.exe -mode run -seed 12 -from 800   # start 800 m down the course (try a particular section)
 build/bin/game.exe -mode run -autopilot -screenshot out.png -frames 600   # a self-driving run
@@ -61,7 +59,7 @@ build/bin/game.exe -model path/to/model.glb   # show a glTF model in the centre
 build/bin/game.exe -screenshot out.png -frames 90   # 90 fixed 1/60 s frames, save the last, exit
 build/bin/game.exe -drop 60                   # start with 60 physics balls
 build/bin/game.exe -hold W -screenshot out.png -frames 110   # scripted input for tests
-build/bin/game.exe -mode demolition -hold W -click -screenshot out.png -frames 70   # ... -click holds the left button
+build/bin/game.exe -mode arena -hold W -click -screenshot out.png -frames 250   # ... -click holds the left button
 go test ./engine/... ./game/course ./game/arena   # engine, course and arena tests (no GPU needed)
 ```
 
@@ -79,7 +77,7 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | | mouse | look around (the cursor is captured while riding; with F1 open, hold the right button). The camera swings back behind the ball when you let go; steering always follows the direction of travel |
 | | **R**, **Enter** | ride again after a wipeout |
 | | **Esc** | pause |
-| Arena, Demolition | **W A S D** | move (**Shift** sprints) |
+| Arena | **W A S D** | move (**Shift** sprints) |
 | | mouse | aim (the cursor is captured; with F1 open, hold the right button) |
 | | left button | fire / swing (hold for automatic) |
 | | **1 2 3**, scroll | hammer / rifle / launcher, or cycle |
@@ -114,7 +112,7 @@ button. The on-screen hints switch to gamepad buttons as soon as you use one.
 | | **Start** | pause |
 | Wipeout card | d-pad, **A** | choose |
 | | **Y** / **B** | ride again / main menu |
-| Arena, Demolition | left stick / right stick | move / aim |
+| Arena | left stick / right stick | move / aim |
 | | **RT** | fire / swing |
 | | **A** / **X** / **L3** | jump / reload / sprint |
 | | **RB** / **Y**, **LB** | next / previous weapon |
@@ -243,68 +241,102 @@ autopilot rides the menu backdrop.
 
 ### Arena mode
 
-A first-person shooter prototype in a walled 48 m arena at dusk. There's a raised centre
-platform with ramps, ledges along the east and west walls, four pillars and waist-high
-cover. Glowing trim marks the edges.
+A first-person duel in the spirit of THE FINALS, and the groundwork for an online
+multiplayer arena game. You (blue) face a bot (red) in a **best of three**: each round is
+**one life each**, and the last one standing takes it. First to two rounds wins the
+match; Enter, A or a click starts a rematch on a new site.
 
-- **Movement**: the player is a fixed-rotation physics sphere at the feet, with the eye
-  1.25 m above it. Velocity eases towards the input direction: quickly on the ground,
-  slowly in the air. Friction holds you still on ramps, and gravity is 15 m/s² for snappy
-  jumps. Walls and cover block you through the regular collision solver.
-- **Rifle**: hitscan at 600 rpm with a 30-round magazine and a 1.5 s reload (automatic
-  when empty). The spread widens while moving, jumping and firing bursts. Recoil kicks the
-  view up and settles back. Bullets are physics raycasts, so cover stops them.
-- **Drones**: eight hover on looping patrols. Three hits destroy one: it bursts into
-  bouncing physics debris, scores 100 and returns 3 s later on a new patrol.
-- **Feedback**: tracer streaks from the muzzle, a muzzle flash, impact sparks, bullet
-  holes, a hit marker and a kill feed, plus panned sounds for shots, hits and kills.
-
-`game/arena` holds all the rules and has no graphics, so its tests play the mode headless:
-walking, walls, ramps, jumping, the fire rate, reloading, recoil, cover, kills and respawns.
-They also check that the bot (`-autopilot`, which aims at the nearest drone it can see)
-scores. The physics engine gained `World.Raycast` and `Body.FixedRotation` for it.
-
-### Demolition mode
-
-Destruction in the spirit of THE FINALS. Each match generates a 68 m walled building site
-from a seed. The site is a 3×3 grid of lots, and each lot gets a house, a three-storey
-tower, a bunker, a glasshouse, a maze of walls or a crate stack. Lots are jittered and
-turned by random quarter turns. You start in the south lot, sledgehammer in hand, with
-four drones circling high above.
-
+- **Rounds**: a 3 s countdown (you can look around and pick a weapon, but not move or
+  fire), then the fight, with a 2:30 clock. When time runs out the healthier player
+  takes the round, and level health is a draw. Every round starts on a fresh copy of the
+  same site, with the players swapping spawns.
+- **The site** is generated from a seed: a 68 m walled square split into a 3×3 grid of
+  lots. The north and south middle lots are the spawns, facing each other across the
+  centre. Each other lot gets a house, a three-storey tower, a bunker, a glasshouse, a
+  maze of walls or a crate stack, jittered and turned by a random quarter turn.
+- **Players** have 150 health. Movement is a fixed-rotation physics sphere at the feet,
+  with the eye 1.25 m above it. Velocity eases towards the input direction: quickly on
+  the ground, slowly in the air. Gravity is 15 m/s² for snappy jumps. Bullets, blows and
+  blasts use a separate **hitbox**: a capsule for the body and a sphere for the head,
+  which takes 1.75× damage.
+- **Sledgehammer** (1): a 0.7 s swing that lands 0.22 s in, with 2.8 m reach. Two blows
+  down a player (80 each) and knock them back. Against a structure it spreads 120 damage
+  over a 0.75 m radius, enough to hole brick or wood in one hit; concrete takes two.
+- **Rifle** (2): hitscan at 600 rpm with a 30-round magazine and a 1.5 s reload. It does
+  14 damage (24.5 to the head), chips wood and shatters glass. The spread widens while
+  moving, jumping and firing bursts, and recoil kicks the view up and settles back.
+- **Grenade launcher** (3): six rounds, 2.2 s reload. Grenades arc under gravity and go
+  off on impact, on reaching a player, or after 2.5 s. The 4.2 m blast does up to 120 to
+  players and destroys chunks. Your own grenades hurt you at half damage, so a rocket
+  jump costs some health.
 - **Structures** are built from axis-aligned box *chunks*. Walls are cut into panels of
   about 1 × 0.75 m, floors into 1.5 m tiles, and columns into storey-high posts, with door
   and window openings (glazed ones get glass panes). Each chunk has a material and HP
   scaled by its size: glass 4, wood 45, brick 90, concrete 160, metal 600.
 - **Support**: chunks that share a face hold each other up. After any damage, a flood
   fill from the chunks on the ground finds everything still connected, and the rest
-  collapses. A structure also comes down once it has lost 65% of its original footing,
-  even if a column or two still connects it to the ground. You can punch holes in a
-  wall, but take out the ground floor and the whole tower falls.
-- **Breaking**: a broken chunk shatters into 1–4 smaller physics pieces (glass into
-  shards). Collapsing chunks drop as full-size debris. Debris keeps colliding, so rubble
-  piles up and can be kicked around. It clears away after 3–12 s depending on the material,
-  and at most 450 pieces are kept.
-- **Sledgehammer** (1): a 0.7 s swing that lands 0.22 s in. Five rays check a 2.8 m
-  reach, then 120 damage is spread over a 0.75 m radius. That's enough to knock a hole
-  through brick or wood in one hit; concrete takes two.
-- **Rifle** (2): as in the Arena, doing 12 damage to chunks. It chips wood and shatters
-  glass.
-- **Grenade launcher** (3): six rounds, 2.2 s reload. Grenades arc under gravity and
-  burst on impact or after 2.5 s. The 4.2 m blast destroys chunks, flings debris and
-  can rocket-jump you.
-- Every chunk destroyed scores 10. The HUD shows how much of the site still stands,
-  and the screen shakes and dust bursts in each material's colour.
+  collapses. A structure also comes down once it has lost 65% of its original footing.
+  You can punch holes in a wall, but take out the ground floor and the whole tower falls.
+- **Debris**: a broken chunk shatters into 1–4 physics pieces (glass into shards), and
+  collapsing chunks drop whole. Rubble keeps colliding and clears after 3–12 s, with at
+  most 450 pieces kept.
+- **HUD and feedback**: the round score and clock, health, a name tag and health bar over
+  the bot while it's in sight, a hit marker (red for headshots), a kill feed, the weapon
+  bar and ammo, countdown and result banners. Taking damage flashes the view red and
+  low health pulses it; tracers, dust in each material's colour, explosions, screen
+  shake and panned sounds do the rest. The bot is a blocky soldier whose legs, head and
+  weapon follow its movement and aim; it flashes when hit and topples when it dies.
 
-The bot (`-autopilot`) picks the nearest big structure. From range it lobs grenades at
-the ground floor on a ballistic arc; up close it switches to the hammer.
+#### The bot
 
-To keep hundreds of static chunks cheap, `engine/physics` now has a uniform-grid
-broadphase for static bodies (4 m cells, rebuilt only when statics change). There is
-also `Body.Ignore`, so a grenade doesn't collide with the player who fired it. The
-tests in `game/arena` cover touching, support, collapse, holes, the footing rule,
-every blueprint in every rotation, site generation, each weapon, rocket jumps and the
-demolition bot.
+`arena.Bot` plays through exactly the same `Input` a person does, one per step. It knows
+the site's layout but not where you are:
+
+- It **sees** you only within its field of view with nothing solid in between, and
+  **hears** gunfire, launches and hammer blows within 45 m. Getting hurt also tells it
+  where the shot came from.
+- On a fresh sighting its aim starts off target and settles. It reacts after about a
+  third of a second, and its aim always drifts a little. It tracks by following your
+  motion across its view, as a player does.
+- In the open it strafes and keeps to a comfortable range with the rifle, jumping now and
+  then. Close in, or while its rifle reloads nearby, it charges with the hammer.
+- When it has lost sight of you it heads for where it last saw or heard you, lobbing
+  grenades at that spot on a ballistic arc. It hammers through walls in its way, hops
+  low obstacles, and sidesteps whatever it can't break.
+- Skill levels are easy, normal (the default) and hard, switchable in the F1 window. That
+  window also has "bot holds fire", infinite ammo, autopilot and a new-match button.
+  With `-autopilot` a second bot plays your side.
+
+#### Built for multiplayer
+
+The simulation is ready to run on a server:
+
+- `package arena` has no graphics or input handling. `Arena.Step(dt, inputs)` takes one
+  `Input` per player: movement, look deltas, fire, jump, reload and weapon choice. Those
+  inputs are the only thing that drives a player.
+- `Match` layers the rounds on top of `Arena`.
+- Events report who did what (`Shot.By`, `Hurt`, `Kill`, `Explosion.By`, per-player
+  `Action`s), so each client can pick its own effects and sounds.
+- Players live in `Arena.Players` and are added with `AddPlayer`.
+- The site is entirely determined by its seed. A client needs only the seed to build the
+  level, then the chunk deaths and player states as they change.
+
+The game layer already works this way: the local player's keyboard, mouse or pad input
+and the bot's `Think` are just two sources of commands for the same step.
+
+`game/arena`'s tests play all of it headless:
+- movement, hitboxes and headshots, cover, each weapon against players and structures,
+  rocket jumps and self-damage
+- countdowns, round wins, side swaps, best of three, timeouts and draws
+- structures: support, collapse, the footing rule, every blueprint in every rotation
+- the bot: it kills a standing target but not instantly, and it can't see through walls
+  but hears gunfire. It breaks through a wall to reach a hidden player, the skill levels
+  rank easy < normal < hard, and two bots finish a whole match.
+
+The physics engine gained `World.Raycast`, `Body.FixedRotation`, `Body.Ignore` (a
+grenade doesn't hit the player who fired it) and a uniform-grid broadphase for static
+bodies (4 m cells, rebuilt only when statics change), which keeps a site of a thousand or
+more chunks cheap.
 
 ### UI
 
@@ -380,8 +412,8 @@ engine/
   script/              yaegi host: loads scripts/, hot-reloads, exposes behaviours
 game/                gameplay code (pure Go, no cgo): app/menu, Run mode, Arena, Engine Demo
   course/              Run mode's seeded level generator (no GPU; testable on its own)
-  arena/               Arena and Demolition rules: level, site generator, destructible
-                       structures, weapons, drones, bots (no GPU)
+  arena/               Arena rules: site generator, destructible structures, players,
+                       hitboxes, weapons, rounds and the bot (no GPU)
 scripts/             hot-reloadable behaviours (interpreted at runtime)
 cmd/game/            main package (an .exe on desktop, a c-shared library on Android)
 android/             AndroidManifest.xml for the APK
@@ -413,4 +445,6 @@ android/             AndroidManifest.xml for the APK
 - Dynamic boxes in physics (debris is sphere-collided for now); physics bodies as scene components
 - Text input and more widgets in the debug UI; an entity inspector
 - Frustum culling and instancing once scenes get large
+- Arena online: a dedicated server stepping `arena.Match` from clients' `Input`s,
+  snapshots of player state and chunk deaths, client-side prediction and interpolation
 - Run: saved best distances, a daily seed, snow spray and wind audio, more obstacle kinds

@@ -1,18 +1,25 @@
 package arena
 
 import (
+	"math"
 	"math/rand/v2"
 
 	"CliffCrack/engine/mathx"
 )
 
-// Site is a generated demolition environment: indestructible ground and
-// boundary, destructible structures on a grid of lots, and a spawn point.
+// Site is a generated arena: indestructible ground and boundary, destructible
+// structures on a grid of lots, and the spawn points.
 type Site struct {
 	Blocks     []Block
 	Structures []*Structure
-	Spawn      mathx.Vec3
+	Spawns     []Spawn
 	HalfSize   float32
+}
+
+// Spawn is where a player starts a round, and which way they face.
+type Spawn struct {
+	At  mathx.Vec3
+	Yaw float32
 }
 
 const (
@@ -34,8 +41,9 @@ const (
 
 // GenerateSite builds a random site from seed: a 3 x 3 grid of lots, each
 // with a house, tower, bunker, glasshouse, freestanding walls or nothing, at
-// a random quarter turn, plus scattered crates. The south-middle lot is the
-// spawn and stays open.
+// a random quarter turn, plus scattered crates. The north- and south-middle
+// lots are the two spawns, facing each other across the middle; they only
+// get crates.
 func GenerateSite(seed uint64) *Site {
 	rng := rand.New(rand.NewPCG(seed, seed^0xd1b54a32d192ed03))
 	s := &Site{HalfSize: siteHalf}
@@ -58,9 +66,15 @@ func GenerateSite(seed uint64) *Site {
 	for i := -1; i <= 1; i++ {
 		for j := -1; j <= 1; j++ {
 			centre := mathx.Vec3{float32(i) * lotPitch, 0, float32(j) * lotPitch}
-			if i == 0 && j == 1 {
-				s.Spawn = centre.Add(mathx.Vec3{0, PlayerRadius + 0.02, 4})
-				s.Structures = append(s.Structures, Crates(rng, centre.Add(mathx.Vec3{3, 0, -2}), rng.IntN(4)))
+			if i == 0 && j != 0 {
+				// A spawn: set back from the middle, facing it; crates to one side.
+				out := float32(j) // +1 south, -1 north
+				yaw := float32(0)
+				if j < 0 {
+					yaw = math.Pi
+				}
+				s.Spawns = append(s.Spawns, Spawn{At: centre.Add(mathx.Vec3{0, PlayerRadius + 0.02, 4 * out}), Yaw: yaw})
+				s.Structures = append(s.Structures, Crates(rng, centre.Add(mathx.Vec3{3, 0, -2 * out}), rng.IntN(4)))
 				continue
 			}
 			// Jitter within the lot so the grid doesn't read as a grid.
@@ -77,5 +91,7 @@ func GenerateSite(seed uint64) *Site {
 			}
 		}
 	}
+	// South first: player 0 starts there in the first round.
+	s.Spawns[0], s.Spawns[1] = s.Spawns[1], s.Spawns[0]
 	return s
 }

@@ -2,7 +2,7 @@
 // plain Go types; it never touches cgo or Vulkan.
 //
 // The App switches between the main menu, the Run arcade mode, the Arena
-// first-person shooter and the Engine Demo sandbox.
+// first-person duel on a destructible site, and the Engine Demo sandbox.
 package game
 
 import (
@@ -22,10 +22,9 @@ const (
 	ModeRun
 	ModeDemo
 	ModeArena
-	ModeDemolition
 )
 
-// ParseMode maps "menu", "run", "arena", "demolition" or "demo" to a Mode.
+// ParseMode maps "menu", "run", "arena" or "demo" to a Mode.
 func ParseMode(s string) (Mode, bool) {
 	switch s {
 	case "menu":
@@ -36,14 +35,9 @@ func ParseMode(s string) (Mode, bool) {
 		return ModeDemo, true
 	case "arena":
 		return ModeArena, true
-	case "demolition":
-		return ModeDemolition, true
 	}
 	return ModeMenu, false
 }
-
-// firstPerson reports whether mode is one of the first-person modes (Arena, Demolition).
-func firstPerson(mode Mode) bool { return mode == ModeArena || mode == ModeDemolition }
 
 // Stats are engine numbers shown in the debug UI.
 type Stats struct {
@@ -78,9 +72,9 @@ type App struct {
 	mode  Mode
 	menu  menu
 	sc    *scenery
-	run   *Run            // the menu backdrop and the Run mode share one Run
-	demo  *Demo           // built the first time it is opened
-	fps   map[Mode]*Arena // Arena and Demolition, likewise
+	run   *Run   // the menu backdrop and the Run mode share one Run
+	demo  *Demo  // built the first time it is opened
+	arena *Arena // likewise
 	debug map[Mode]bool
 	quit  bool
 
@@ -103,7 +97,6 @@ func NewApp(opts Options) (*App, error) {
 	a := &App{
 		opts:     opts,
 		sc:       sc,
-		fps:      map[Mode]*Arena{},
 		debug:    map[Mode]bool{ModeDemo: opts.DebugUI},
 		menu:     newMenu(),
 		settings: DefaultSettings(),
@@ -140,19 +133,19 @@ func (a *App) enter(mode Mode) error {
 			}
 			a.demo = d
 		}
-	case ModeArena, ModeDemolition:
-		if m := a.fps[mode]; m != nil {
+	case ModeArena:
+		if m := a.arena; m != nil {
 			if err := m.start(); err != nil {
 				return err
 			}
 			break
 		}
-		m, err := newArena(a.sc, a.opts.Audio, &a.settings, a.opts.Seed, mode == ModeDemolition)
+		m, err := newArena(a.sc, a.opts.Audio, &a.settings, a.opts.Seed)
 		if err != nil {
 			return err
 		}
 		m.Autopilot = a.opts.Autopilot
-		a.fps[mode] = m
+		a.arena = m
 	}
 	a.mode = mode
 	return nil
@@ -220,12 +213,12 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 			return
 		}
 		a.demo.Update(dt, in, mouseFree)
-	case ModeArena, ModeDemolition:
+	case ModeArena:
 		if pausePressed(in) {
 			a.openPause()
 			return
 		}
-		m := a.fps[a.mode]
+		m := a.arena
 		m.debugOpen = a.debug[a.mode]
 		m.Update(dt, in, mouseFree)
 	}
@@ -246,7 +239,7 @@ func (a *App) openSettings(from overlay) {
 
 // pauseItems are the pause menu's entries for the current mode.
 func (a *App) pauseItems() []pauseAction {
-	if a.mode == ModeRun || firstPerson(a.mode) {
+	if a.mode == ModeRun || a.mode == ModeArena {
 		return []pauseAction{pauseResume, pauseRestart, pauseSettings, pauseMainMenu}
 	}
 	return []pauseAction{pauseResume, pauseSettings, pauseMainMenu}
@@ -258,8 +251,8 @@ func (a *App) pauseAction(act pauseAction) {
 		a.overlay = overlayNone
 	case pauseRestart:
 		a.overlay = overlayNone
-		if firstPerson(a.mode) {
-			a.fps[a.mode].restart() // Demolition: a new site
+		if a.mode == ModeArena {
+			a.arena.restart() // a new match on a new site
 		} else {
 			a.run.start(false)
 		}
@@ -308,8 +301,8 @@ func (a *App) CursorLocked() bool {
 		return a.run.CursorLocked()
 	case ModeDemo:
 		return a.demo.CursorLocked()
-	case ModeArena, ModeDemolition:
-		return a.fps[a.mode].CursorLocked()
+	case ModeArena:
+		return a.arena.CursorLocked()
 	}
 	return false
 }
@@ -319,8 +312,8 @@ func (a *App) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, 
 	switch a.mode {
 	case ModeDemo:
 		return a.demo.Render(aspect, out)
-	case ModeArena, ModeDemolition:
-		return a.fps[a.mode].Render(aspect, out)
+	case ModeArena:
+		return a.arena.Render(aspect, out)
 	}
 	return a.run.Render(aspect, out)
 }
@@ -349,8 +342,8 @@ func (a *App) UI(b *ui.Builder, s Stats) {
 		if a.debug[ModeDemo] {
 			a.demo.DebugUI(b, s)
 		}
-	case ModeArena, ModeDemolition:
-		m := a.fps[a.mode]
+	case ModeArena:
+		m := a.arena
 		m.UI(b, a.in)
 		if a.debug[a.mode] {
 			m.DebugUI(b, s)
@@ -360,7 +353,7 @@ func (a *App) UI(b *ui.Builder, s Stats) {
 
 // Main-menu items that aren't modes.
 const (
-	menuSettings Mode = ModeDemolition + 1 + iota
+	menuSettings Mode = ModeArena + 1 + iota
 	menuQuit
 )
 
@@ -377,7 +370,6 @@ var menuItems = []struct {
 }{
 	{"Run", ModeRun},
 	{"Arena", ModeArena},
-	{"Demolition", ModeDemolition},
 	{"Engine Demo", ModeDemo},
 	{"Settings", menuSettings},
 	{"Quit", menuQuit},

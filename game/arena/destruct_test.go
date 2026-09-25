@@ -181,10 +181,15 @@ func TestGenerateSite(t *testing.T) {
 			if abs(c.Centre[0])+c.Half[0] > siteHalf || abs(c.Centre[2])+c.Half[2] > siteHalf {
 				t.Fatalf("%s chunk outside the site at %v", s.Name, c.Centre)
 			}
-			if c.distTo(a.Spawn) < 1.5 {
-				t.Fatalf("%s chunk on top of the spawn point", s.Name)
+			for _, sp := range a.Spawns {
+				if c.distTo(sp.At) < 1.5 {
+					t.Fatalf("%s chunk on top of a spawn point", s.Name)
+				}
 			}
 		}
+	}
+	if len(a.Spawns) != 2 || a.Spawns[0].At[2] <= 0 || a.Spawns[1].At[2] >= 0 {
+		t.Errorf("want a south spawn then a north one, got %+v", a.Spawns)
 	}
 	if total < 300 || total > 5000 {
 		t.Errorf("site has %d chunks, want a few hundred to a few thousand", total)

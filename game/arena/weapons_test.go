@@ -3,38 +3,36 @@ package arena
 import (
 	"math/rand/v2"
 	"testing"
-	"time"
 
 	"CliffCrack/engine/mathx"
 )
 
-// testWall builds an arena (the fixed level, no drones) with one straight
-// wall of the given material 2 m in front of the spawn, facing the player.
-func testWall(m Material) (*Arena, *Structure) {
-	b := newBuilder("test wall", mathx.Vec3{0, 0, Spawn[2] - 2.4}, 0)
+// testWall builds a flat arena with one player and one straight wall of the
+// given material 2 m in front of them, facing them.
+func testWall(m Material) (*Arena, *Player, *Structure) {
+	const z = 10
+	b := newBuilder("test wall", mathx.Vec3{0, 0, z - 2.4}, 0)
 	b.wall(-2.5, 0, 2.5, 0, 0, 3, 0.3, m) // five panels: the middle one is straight ahead
 	s := b.finish()
-	a := newArena(1, Level(), []*Structure{s}, HalfSize, Spawn)
-	run(a, 0.2, Input{}) // settle
-	return a, s
+	a := flatArena([]*Structure{s}, at(0, z, 0))
+	run(a, 0.2) // settle
+	return a, a.Players[0], s
 }
 
 // swing presses fire for one hammer swing and lets it finish.
 func swing(a *Arena) Events {
 	ev := run(a, frame, Input{Fire: true})
-	more := run(a, HammerSwing, Input{})
-	ev.Breaks = append(ev.Breaks, more.Breaks...)
-	ev.Smashes = append(ev.Smashes, more.Smashes...)
+	ev.Merge(run(a, HammerSwing))
 	return ev
 }
 
 func TestHammerSmashesAHole(t *testing.T) {
-	a, s := testWall(Wood)
-	a.Current = WeaponHammer
+	a, p, s := testWall(Wood)
+	p.Current = WeaponHammer
 	before := s.Alive()
 	ev := swing(a)
-	if !ev.Swung || len(ev.Smashes) != 1 || ev.Smashes[0].Mat != Wood {
-		t.Fatalf("swing: swung %v, smashes %+v", ev.Swung, ev.Smashes)
+	if !ev.Did(p, ActSwing) || len(ev.Smashes) != 1 || ev.Smashes[0].Mat != Wood {
+		t.Fatalf("swing: swung %v, smashes %+v", ev.Did(p, ActSwing), ev.Smashes)
 	}
 	broken := before - s.Alive()
 	if broken < 2 || broken > before/3 {
@@ -43,15 +41,15 @@ func TestHammerSmashesAHole(t *testing.T) {
 	if len(a.Debris) == 0 {
 		t.Error("broken panels should leave rubble")
 	}
-	if a.Destroyed != broken || a.Score != broken*ChunkScore {
-		t.Errorf("destroyed %d score %d for %d broken", a.Destroyed, a.Score, broken)
+	if p.Destroyed != broken {
+		t.Errorf("credited with %d destroyed for %d broken", p.Destroyed, broken)
 	}
 }
 
 func TestConcreteTakesMoreBlowsThanWood(t *testing.T) {
 	blowsToBreak := func(m Material) int {
-		a, s := testWall(m)
-		a.Current = WeaponHammer
+		a, p, s := testWall(m)
+		p.Current = WeaponHammer
 		before := s.Alive()
 		for n := 1; n <= 10; n++ {
 			swing(a)
@@ -71,11 +69,10 @@ func TestConcreteTakesMoreBlowsThanWood(t *testing.T) {
 }
 
 func TestRifleChipsAndGlassShatters(t *testing.T) {
-	a, s := testWall(Wood)
-	a.Current = WeaponRifle
+	a, p, s := testWall(Wood)
 	var target *Chunk
 	for _, c := range s.Chunks { // the panel straight ahead at eye height
-		if c.distTo(mathx.Vec3{0, a.Player.Eye(1)[1], c.Centre[2]}) == 0 {
+		if c.distTo(mathx.Vec3{0, p.Eye(1)[1], c.Centre[2]}) == 0 {
 			target = c
 		}
 	}
@@ -91,30 +88,29 @@ func TestRifleChipsAndGlassShatters(t *testing.T) {
 		t.Error("a full second of fire should break a wooden panel")
 	}
 
-	g, gs := testWall(Glass)
-	g.Current = WeaponRifle
+	g, _, gs := testWall(Glass)
 	ev := run(g, frame, Input{Fire: true, FirePressed: true})
 	if len(ev.Breaks) != 1 || ev.Breaks[0].Mat != Glass || gs.Alive() != len(gs.Chunks)-1 {
 		t.Errorf("one round should shatter one glass pane: breaks %+v", ev.Breaks)
 	}
 }
 
-func TestGrenadeBlastsAHoleAndCollapsesTheTop(t *testing.T) {
-	a, s := testWall(Brick)
-	a.Current = WeaponLauncher
-	a.Player.Pitch = -0.25 // at the base of the wall
+func TestGrenadeBlastsAHole(t *testing.T) {
+	a, p, s := testWall(Brick)
+	p.Current = WeaponLauncher
+	p.Pitch = -0.25 // at the base of the wall
 	var ev Events
 	for i := 0; i < 90 && len(ev.Explosions) == 0; i++ {
-		e := a.Step(frame, Input{Fire: i == 0, FirePressed: i == 0})
-		ev.Launched = ev.Launched || e.Launched
-		ev.Explosions = append(ev.Explosions, e.Explosions...)
-		ev.Breaks = append(ev.Breaks, e.Breaks...)
+		ev.Merge(a.Step(frame, []Input{{Fire: i == 0, FirePressed: i == 0}}))
 	}
-	if !ev.Launched || len(ev.Explosions) != 1 {
-		t.Fatalf("launched %v, explosions %d", ev.Launched, len(ev.Explosions))
+	if !ev.Did(p, ActLaunch) || len(ev.Explosions) != 1 {
+		t.Fatalf("launched %v, explosions %d", ev.Did(p, ActLaunch), len(ev.Explosions))
 	}
-	if at := ev.Explosions[0]; at[2] < s.Chunks[0].Centre[2]-0.5 || at[2] > s.Chunks[0].Centre[2]+0.6 {
+	if at := ev.Explosions[0].At; at[2] < s.Chunks[0].Centre[2]-0.5 || at[2] > s.Chunks[0].Centre[2]+0.6 {
 		t.Errorf("grenade went off at %v, want at the wall (z ~ %v)", at, s.Chunks[0].Centre[2])
+	}
+	if ev.Explosions[0].By != p {
+		t.Error("the explosion should be credited to the shooter")
 	}
 	broken := 0
 	for _, b := range ev.Breaks {
@@ -125,19 +121,19 @@ func TestGrenadeBlastsAHoleAndCollapsesTheTop(t *testing.T) {
 	if broken < 6 {
 		t.Errorf("a grenade broke only %d brick panels", broken)
 	}
-	if a.Launcher.Ammo != LauncherMag-1 {
-		t.Errorf("launcher ammo %d, want %d", a.Launcher.Ammo, LauncherMag-1)
+	if p.Launcher.Ammo != LauncherMag-1 {
+		t.Errorf("launcher ammo %d, want %d", p.Launcher.Ammo, LauncherMag-1)
 	}
 }
 
 func TestBlowingOutTheGroundFloorCollapsesAHouse(t *testing.T) {
 	house := House(rand.New(rand.NewPCG(9, 9)), mathx.Vec3{0, 0, 0}, 0)
-	a := newArena(1, Level()[:1], []*Structure{house}, HalfSize, mathx.Vec3{0, PlayerRadius, 20})
+	a := flatArena([]*Structure{house}, at(0, 20, 0))
 	ev := Events{}
 	// Detonate charges along the bottom of every wall.
 	for _, c := range house.Chunks {
 		if c.anchored && c.Alive {
-			a.blast(c.Centre, 0.8, 1000, 2, mathx.Vec3{}, false, &ev)
+			a.blast(c.Centre, 0.8, 1000, 2, mathx.Vec3{}, nil, false, &ev)
 		}
 	}
 	a.settle(&ev)
@@ -154,7 +150,7 @@ func TestBlowingOutTheGroundFloorCollapsesAHouse(t *testing.T) {
 		t.Error("the upper parts should come down as collapsing rubble")
 	}
 	// The rubble falls and comes to rest on the floor.
-	run(a, 3, Input{})
+	run(a, 3)
 	for _, d := range a.Debris {
 		if d.Body.Position[1] < -0.1 {
 			t.Fatalf("rubble fell through the floor: %v", d.Body.Position)
@@ -162,55 +158,22 @@ func TestBlowingOutTheGroundFloorCollapsesAHouse(t *testing.T) {
 	}
 }
 
-func TestRocketJump(t *testing.T) {
-	a, _ := testWall(Concrete)
-	a.Current = WeaponLauncher
-	a.Player.Pitch = -1.4 // straight down at your feet
-	run(a, frame, Input{Fire: true, FirePressed: true})
-	peak := float32(0)
-	for range 60 {
-		a.Step(frame, Input{})
-		peak = max(peak, a.Player.Body.Position[1])
-	}
-	if peak < 1.8 {
-		t.Errorf("a grenade at your feet should launch you: peak y %.2f", peak)
-	}
-}
-
 func TestWeaponSwitching(t *testing.T) {
-	a, _ := testWall(Wood)
-	a.Current = WeaponRifle
-	ev := a.Step(frame, Input{Select: 3})
-	if a.Current != WeaponLauncher || !ev.Switched || a.Switching == 0 {
-		t.Fatalf("select 3: current %v switched %v", a.Current, ev.Switched)
+	a, p, _ := testWall(Wood)
+	ev := a.Step(frame, []Input{{Select: 3}})
+	if p.Current != WeaponLauncher || !ev.Did(p, ActSwitch) || p.Switching == 0 {
+		t.Fatalf("select 3: current %v switched %v", p.Current, ev.Did(p, ActSwitch))
 	}
-	if ev := a.Step(frame, Input{Fire: true, FirePressed: true}); ev.Launched {
+	if ev := a.Step(frame, []Input{{Fire: true, FirePressed: true}}); ev.Did(p, ActLaunch) {
 		t.Error("can't fire while the new weapon is coming up")
 	}
-	run(a, SwitchTime, Input{})
-	a.Step(frame, Input{Cycle: 1}) // wraps round to the hammer
-	if a.Current != WeaponHammer {
-		t.Errorf("cycling past the last slot: current %v, want the hammer", a.Current)
+	run(a, SwitchTime)
+	a.Step(frame, []Input{{Cycle: 1}}) // wraps round to the hammer
+	if p.Current != WeaponHammer {
+		t.Errorf("cycling past the last slot: current %v, want the hammer", p.Current)
 	}
-	a.Step(frame, Input{Cycle: -1})
-	if a.Current != WeaponLauncher {
-		t.Errorf("cycling back: current %v, want the launcher", a.Current)
-	}
-}
-
-func TestDemolitionBotLevelsTheSite(t *testing.T) {
-	a := NewSite(11)
-	start := time.Now()
-	for range 60 * 30 { // 30 s
-		a.Step(frame, a.Autopilot(frame))
-	}
-	elapsed := time.Since(start)
-	if a.Destroyed < 60 {
-		t.Errorf("the bot destroyed only %d chunks in 30 s", a.Destroyed)
-	}
-	t.Logf("destroyed %d chunks (%.0f%% of the site standing), %d debris, 30 s simulated in %v",
-		a.Destroyed, a.Standing()*100, len(a.Debris), elapsed)
-	if elapsed > 15*time.Second {
-		t.Errorf("simulation too slow: 30 s took %v", elapsed)
+	a.Step(frame, []Input{{Cycle: -1}})
+	if p.Current != WeaponLauncher {
+		t.Errorf("cycling back: current %v, want the launcher", p.Current)
 	}
 }

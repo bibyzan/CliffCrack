@@ -26,35 +26,32 @@ const (
 	flashTime    = 0.04
 	holeLife     = 10 // s
 	maxHoles     = 80
-	feedLife     = 1.6 // s a kill-feed line stays up
-	hitMarkTime  = 0.12
+	feedLife     = 3.5 // s a kill-feed line stays up
+	hitMarkTime  = 0.14
 	maxBursts    = 160 // effect puffs alive at once
 	breakSounds  = 3   // per frame, so a collapse doesn't deafen
+
+	local = 0 // the player on this machine is player 0; the bot is player 1
 )
 
-// arenaLight is a mode's sky and lighting.
-type arenaLight struct {
+// Bot difficulty choices, for the debug window.
+var botSkills = []struct {
+	name  string
+	skill arena.BotSkill
+}{{"easy", arena.BotEasy}, {"normal", arena.BotNormal}, {"hard", arena.BotHard}}
+
+// arenaLight is the sky and lighting: a clear afternoon, so the materials read.
+var arenaLight = struct {
 	zenith     [4]float32
 	haze       mathx.Vec3
 	sun, shade mathx.Vec3
 	sunDir     mathx.Vec3
 	fog        float32
+}{
+	zenith: mathx.SRGB(0.30, 0.52, 0.86, 1), haze: srgb3(0.78, 0.84, 0.92),
+	sun: srgb3(1.0, 0.95, 0.86).Scale(1.1), shade: srgb3(0.55, 0.65, 0.85).Scale(0.55),
+	sunDir: mathx.Vec3{0.45, 0.8, 0.35}, fog: 0.006,
 }
-
-var (
-	// Arena: dusk, violet haze.
-	duskLight = arenaLight{
-		zenith: mathx.SRGB(0.10, 0.14, 0.32, 1), haze: srgb3(0.52, 0.44, 0.58),
-		sun: srgb3(1.0, 0.74, 0.52).Scale(1.05), shade: srgb3(0.42, 0.50, 0.72).Scale(0.5),
-		sunDir: mathx.Vec3{-0.55, 0.42, -0.62}, fog: 0.011,
-	}
-	// Demolition: a clear afternoon, so the materials read.
-	dayLight = arenaLight{
-		zenith: mathx.SRGB(0.30, 0.52, 0.86, 1), haze: srgb3(0.78, 0.84, 0.92),
-		sun: srgb3(1.0, 0.95, 0.86).Scale(1.1), shade: srgb3(0.55, 0.65, 0.85).Scale(0.55),
-		sunDir: mathx.Vec3{0.45, 0.8, 0.35}, fog: 0.006,
-	}
-)
 
 // tracer is the visible streak of one bullet.
 type tracer struct {
@@ -80,19 +77,21 @@ type hole struct {
 
 type feedLine struct {
 	text string
+	good bool // you did it
 	age  float32
 }
 
 type arenaSounds struct {
-	shot, hit, kill, reload, empty, jump, land *audio.Sound
-	swing, thud, launch, boom, swap            *audio.Sound
-	breaks                                     [6]*audio.Sound // by material
+	shot, hit, headshot, hurt, kill, reload, empty, jump, land *audio.Sound
+	swing, thud, launch, boom, swap                            *audio.Sound
+	tick, fight, win, lose                                     *audio.Sound
+	breaks                                                     [arena.MaterialCount]*audio.Sound
 }
 
-// Arena is the first-person mode, in two flavours: Arena (a fixed level at
-// dusk with drones to shoot) and Demolition (a random site of destructible
-// buildings to take apart). The simulation lives in package arena; this
-// draws it, maps the player's input and adds effects and sounds.
+// Arena is the first-person mode: a best-of-three duel of single-life
+// rounds against a bot, on a generated site of destructible buildings. The
+// simulation lives in package arena; this maps the local player's input,
+// runs the bot, draws it all and adds effects, sounds and the HUD.
 type Arena struct {
 	sc       *scenery
 	sound    *audio.Mixer
@@ -100,15 +99,18 @@ type Arena struct {
 	as       *arenaAssets
 	sfx      arenaSounds
 	rng      *rand.Rand
-	site     bool // Demolition: generate a random site each match
-	light    arenaLight
 
-	sim   *arena.Arena
+	match *arena.Match
+	round *arena.Arena     // the round the effects belong to
 	level []render.DrawCmd // the indestructible blocks
 	owned []render.Mesh    // the level's meshes, freed when a new site replaces it
-	// Autopilot plays the match (for demos and scripted tests).
+	bots  []*arena.Bot     // per player; nil for the local player
+	// Autopilot hands the local player to a bot too (for demos and scripted tests).
 	Autopilot bool
+	autoBot   *arena.Bot
+	skill     int    // index into botSkills
 	fixedSeed uint64 // non-zero: every match uses this seed (repeatable captures)
+	inputs    []arena.Input
 
 	debugOpen bool // the F1 window is up: the mouse is for the UI unless the right button is held
 	locked    bool
@@ -119,35 +121,45 @@ type Arena struct {
 	feed     []feedLine
 	flash    float32 // seconds of muzzle flash left
 	hitMark  float32
+	headMark bool    // the last hit marker was a headshot
+	hurt     float32 // 0..1 red flash when you take damage
 	shake    float32 // camera shake strength, decays
 	bob      float32 // walk-cycle phase for the weapon sway
-	prevPull bool    // trigger state last frame (for the pad's "pressed")
+	strides  []float32
+	prevPull bool // trigger state last frame (for the pad's "pressed")
 	elapsed  float32
 	glass    []render.DrawCmd // scratch: translucent draws, drawn after the solids
+	viewProj mathx.Mat4       // last frame's, for placing name tags
+	lastTick int              // the countdown second (or phase) last announced
 }
 
-func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64, site bool) (*Arena, error) {
+func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64) (*Arena, error) {
 	m := &Arena{
 		fixedSeed: seed,
 		sc:        sc,
 		sound:     mixer,
 		settings:  settings,
-		site:      site,
-		light:     duskLight,
+		skill:     1,
 		rng:       rand.New(rand.NewPCG(11, 13)),
 		sfx: arenaSounds{
-			shot:   audio.Blip(70*time.Millisecond, 1500, 170, 0.35),
-			hit:    audio.Blip(35*time.Millisecond, 1900, 1700, 0.3),
-			kill:   audio.Blip(420*time.Millisecond, 380, 35, 1),
-			reload: audio.Blip(60*time.Millisecond, 900, 650, 0.35),
-			empty:  audio.Blip(25*time.Millisecond, 2300, 2300, 0.2),
-			jump:   audio.Blip(90*time.Millisecond, 300, 520, 0.25),
-			land:   audio.Blip(70*time.Millisecond, 160, 80, 0.7),
-			swing:  audio.Blip(140*time.Millisecond, 180, 420, 0.18),
-			thud:   audio.Blip(120*time.Millisecond, 140, 60, 0.9),
-			launch: audio.Blip(110*time.Millisecond, 260, 120, 0.6),
-			boom:   audio.Blip(650*time.Millisecond, 170, 28, 1),
-			swap:   audio.Blip(35*time.Millisecond, 950, 950, 0.18),
+			shot:     audio.Blip(70*time.Millisecond, 1500, 170, 0.35),
+			hit:      audio.Blip(35*time.Millisecond, 1900, 1700, 0.3),
+			headshot: audio.Blip(60*time.Millisecond, 2600, 2400, 0.35),
+			hurt:     audio.Blip(90*time.Millisecond, 220, 120, 0.6),
+			kill:     audio.Blip(420*time.Millisecond, 380, 35, 1),
+			reload:   audio.Blip(60*time.Millisecond, 900, 650, 0.35),
+			empty:    audio.Blip(25*time.Millisecond, 2300, 2300, 0.2),
+			jump:     audio.Blip(90*time.Millisecond, 300, 520, 0.25),
+			land:     audio.Blip(70*time.Millisecond, 160, 80, 0.7),
+			swing:    audio.Blip(140*time.Millisecond, 180, 420, 0.18),
+			thud:     audio.Blip(120*time.Millisecond, 140, 60, 0.9),
+			launch:   audio.Blip(110*time.Millisecond, 260, 120, 0.6),
+			boom:     audio.Blip(650*time.Millisecond, 170, 28, 1),
+			swap:     audio.Blip(35*time.Millisecond, 950, 950, 0.18),
+			tick:     audio.Blip(90*time.Millisecond, 880, 880, 0.35),
+			fight:    audio.Blip(300*time.Millisecond, 880, 1760, 0.45),
+			win:      audio.Blip(600*time.Millisecond, 520, 1040, 0.5),
+			lose:     audio.Blip(600*time.Millisecond, 440, 180, 0.5),
 		},
 	}
 	m.sfx.breaks[arena.Wood] = audio.Blip(110*time.Millisecond, 420, 140, 0.45)
@@ -155,10 +167,6 @@ func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64, 
 	m.sfx.breaks[arena.Concrete] = audio.Blip(200*time.Millisecond, 180, 60, 0.65)
 	m.sfx.breaks[arena.Glass] = audio.Blip(150*time.Millisecond, 3200, 2300, 0.3)
 	m.sfx.breaks[arena.Metal] = audio.Blip(260*time.Millisecond, 1200, 1100, 0.35)
-	m.sfx.breaks[arena.Scrap] = m.sfx.breaks[arena.Metal]
-	if site {
-		m.light = dayLight
-	}
 	as, err := newArenaAssets()
 	if err != nil {
 		return nil, err
@@ -170,31 +178,46 @@ func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64, 
 	return m, nil
 }
 
-// start begins a new match (on a new site, in Demolition).
+// start begins a new match on a new site.
 func (m *Arena) start() error {
 	seed := m.fixedSeed
 	if seed == 0 {
 		seed = uint64(time.Now().UnixNano())
 	}
-	if m.site {
-		m.sim = arena.NewSite(seed)
-	} else {
-		m.sim = arena.New(seed)
+	m.match = arena.NewMatch(seed, 2)
+	bot := arena.NewBot(seed + 1)
+	bot.Skill = botSkills[m.skill].skill
+	m.bots = []*arena.Bot{nil, bot}
+	m.autoBot = arena.NewBot(seed + 2)
+	m.inputs = make([]arena.Input, 2)
+	m.strides = make([]float32, 2)
+
+	for _, mesh := range m.owned {
+		render.DestroyMesh(mesh)
 	}
-	if m.site || m.level == nil {
-		for _, mesh := range m.owned {
-			render.DestroyMesh(mesh)
-		}
-		draws, meshes, err := m.as.levelDraws(m.sim.Level)
-		m.owned = meshes
-		if err != nil {
-			return err
-		}
-		m.level = draws
+	draws, meshes, err := m.as.levelDraws(m.sim().Level)
+	m.owned = meshes
+	if err != nil {
+		return err
 	}
-	m.tracers, m.bursts, m.holes, m.feed = m.tracers[:0], m.bursts[:0], m.holes[:0], m.feed[:0]
-	m.flash, m.hitMark, m.shake, m.elapsed = 0, 0, 0, 0
+	m.level = draws
+	m.feed = m.feed[:0]
+	m.newRound()
 	return nil
+}
+
+// newRound clears the last round's effects and the bots' memories.
+func (m *Arena) newRound() {
+	m.round = m.match.Arena
+	m.tracers, m.bursts, m.holes = m.tracers[:0], m.bursts[:0], m.holes[:0]
+	m.flash, m.hitMark, m.hurt, m.shake, m.elapsed = 0, 0, 0, 0, 0
+	m.lastTick = 0
+	clear(m.strides)
+	for _, b := range append(m.bots, m.autoBot) {
+		if b != nil {
+			b.Reset()
+		}
+	}
 }
 
 // restart is start from the pause menu, logging (rather than returning) errors.
@@ -204,6 +227,10 @@ func (m *Arena) restart() {
 	}
 }
 
+// sim is the current round; me is the local player in it.
+func (m *Arena) sim() *arena.Arena { return m.match.Arena }
+func (m *Arena) me() *arena.Player { return m.match.Arena.Players[local] }
+
 // Update advances the match. mouseFree is false while the UI has the mouse.
 // Esc is handled by the App.
 func (m *Arena) Update(dt float32, in *input.State, mouseFree bool) {
@@ -211,17 +238,67 @@ func (m *Arena) Update(dt float32, in *input.State, mouseFree bool) {
 	held := in.MouseDown(input.MouseRight) && (mouseFree || m.locked)
 	m.locked = !m.debugOpen || held
 
-	var ctl arena.Input
-	if m.Autopilot {
-		ctl = m.sim.Autopilot(dt)
-	} else {
-		ctl = m.input(in, dt, mouseFree)
+	if m.match.Phase == arena.PhaseMatchOver && m.match.Timer < -1 &&
+		(confirmPressed(in) || (m.locked && in.MousePressed(input.MouseLeft))) {
+		m.restart() // rematch
+		return
 	}
-	ev := m.sim.Step(dt, ctl)
+
+	a := m.sim()
+	for i, p := range a.Players {
+		switch {
+		case i == local && m.Autopilot:
+			m.inputs[i] = m.autoBot.Think(a, p, dt)
+		case i == local:
+			m.inputs[i] = m.input(in, dt, mouseFree)
+		default:
+			m.inputs[i] = m.bots[i].Think(a, p, dt)
+		}
+	}
+	ev := m.match.Step(dt, m.inputs)
+	for i, b := range m.bots {
+		if b != nil {
+			b.Hear(a, a.Players[i], &ev)
+		}
+	}
+	if m.Autopilot {
+		m.autoBot.Hear(a, a.Players[local], &ev)
+	}
 	m.effects(dt, ev)
+	m.announce()
+	if m.match.Arena != m.round {
+		m.newRound()
+	}
 }
 
-// input maps keyboard, mouse and gamepad to the player's intent.
+// announce plays the countdown ticks and the round results.
+func (m *Arena) announce() {
+	mt := m.match
+	switch mt.Phase {
+	case arena.PhaseCountdown:
+		if s := int(math.Ceil(float64(mt.Timer))); s != m.lastTick && s > 0 {
+			m.lastTick = s
+			m.play(m.sfx.tick, 1)
+		}
+	case arena.PhaseFight:
+		if m.lastTick != -1 {
+			m.lastTick = -1
+			m.play(m.sfx.fight, 1)
+		}
+	case arena.PhaseRoundOver:
+		if m.lastTick != -2 {
+			m.lastTick = -2
+			switch {
+			case mt.RoundWinner == local:
+				m.play(m.sfx.win, 1)
+			case mt.RoundWinner >= 0:
+				m.play(m.sfx.lose, 1)
+			}
+		}
+	}
+}
+
+// input maps keyboard, mouse and gamepad to the local player's intent.
 func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 	var c arena.Input
 	c.Move[0] = in.Axis(input.KeyA, input.KeyD) + in.PadAxis(input.PadLeftX)
@@ -267,10 +344,21 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 	return c
 }
 
+// playerName is how the HUD refers to a player.
+func playerName(p *arena.Player) string {
+	switch {
+	case p == nil:
+		return "THE SITE"
+	case p.ID == local:
+		return "YOU"
+	}
+	return "BOT"
+}
+
 // effects turns the step's events into tracers, bursts, holes, sounds, shake
 // and HUD feedback, and ages the ones already running.
 func (m *Arena) effects(dt float32, ev arena.Events) {
-	p := &m.sim.Player
+	me := m.me()
 	for i := range m.tracers {
 		m.tracers[i].age += dt
 	}
@@ -291,23 +379,32 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 	m.feed = keep(m.feed, func(f feedLine) bool { return f.age < feedLife })
 	m.flash = max(m.flash-dt, 0)
 	m.hitMark = max(m.hitMark-dt, 0)
+	m.hurt *= float32(math.Exp(-3 * float64(dt)))
 	m.shake *= float32(math.Exp(-6 * float64(dt)))
 
-	// Weapon sway follows walking speed on the ground.
-	v := p.Body.Velocity
-	if speed := float32(math.Hypot(float64(v[0]), float64(v[2]))); p.OnGround() && speed > 0.5 {
-		m.bob += dt * speed * 1.6
+	// Walk cycles: the weapon sway, and everyone's legs.
+	for i, p := range m.sim().Players {
+		v := p.Body.Velocity
+		if speed := float32(math.Hypot(float64(v[0]), float64(v[2]))); p.OnGround() && speed > 0.5 && !p.Dead {
+			m.strides[i] += dt * speed * 1.6
+			if p == me {
+				m.bob = m.strides[i]
+			}
+		}
 	}
 
 	for _, s := range ev.Shots {
-		m.flash = flashTime
-		m.tracers = append(m.tracers, tracer{from: m.muzzle(), to: s.To})
-		m.play(m.sfx.shot, 0.7)
+		if s.By == me {
+			m.flash = flashTime
+			m.tracers = append(m.tracers, tracer{from: m.muzzle(), to: s.To})
+			m.play(m.sfx.shot, 0.7)
+		} else {
+			m.tracers = append(m.tracers, tracer{from: weaponMuzzle(s.By), to: s.To})
+			m.playAt(m.sfx.shot, s.From, 0.8)
+		}
 		switch {
-		case s.Drone != nil:
-			m.hitMark = hitMarkTime
-			m.addBurst(burst{at: s.To, size: 0.12, life: 0.08, colour: tracerColor})
-			m.playAt(m.sfx.hit, s.To, 0.8)
+		case s.Victim != nil:
+			m.addBurst(burst{at: s.To, size: 0.1, life: 0.1, colour: suitColor[s.Victim.ID%len(suitColor)]})
 		case s.Normal != (mathx.Vec3{}):
 			m.addBurst(burst{at: s.To.Add(s.Normal.Scale(0.03)), size: 0.07, life: 0.07, colour: flashColor})
 			if s.Chunk == nil || s.Chunk.Alive { // no hole in something that just broke
@@ -318,11 +415,34 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 			}
 		}
 	}
-	for _, d := range ev.Kills {
-		at := d.Body.Position
-		m.addBurst(burst{at: at, size: 1.3, life: 0.28, grow: true, colour: explosionColor})
-		m.addBurst(burst{at: at, size: 0.7, life: 0.16, grow: true, colour: tracerColor})
-		m.feed = append(m.feed, feedLine{text: "+100  DRONE DOWN"})
+	for _, h := range ev.Hurts {
+		switch {
+		case h.Victim == me:
+			m.hurt = min(m.hurt+0.25+h.Damage/60, 1)
+			m.shake = max(m.shake, 0.25+h.Damage/100)
+			m.play(m.sfx.hurt, 0.9)
+		case h.By == me:
+			m.hitMark, m.headMark = hitMarkTime, h.Head
+			if h.Head {
+				m.play(m.sfx.headshot, 0.9)
+			} else {
+				m.play(m.sfx.hit, 0.8)
+			}
+		}
+	}
+	for _, k := range ev.Kills {
+		at := k.Victim.Body.Position.Add(mathx.Vec3{0, 0.8, 0})
+		m.addBurst(burst{at: at, size: 1.1, life: 0.3, grow: true, colour: suitColor[k.Victim.ID%len(suitColor)]})
+		m.addBurst(burst{at: at, size: 0.6, life: 0.18, grow: true, colour: tracerColor})
+		how := arena.WeaponNames[k.Weapon]
+		if k.Head {
+			how += " · HEADSHOT"
+		}
+		line := feedLine{text: playerName(k.By) + "  [" + how + "]  " + playerName(k.Victim), good: k.By == me && k.Victim != me}
+		if k.By == nil || k.By == k.Victim {
+			line.text = playerName(k.Victim) + "  [" + how + "]  SELF"
+		}
+		m.feed = append(m.feed, line)
 		m.playAt(m.sfx.kill, at, 1)
 	}
 	heard := 0
@@ -339,13 +459,17 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 			heard++
 		}
 	}
+	eye := me.Eye(1)
 	for _, s := range ev.Smashes {
-		m.shake = max(m.shake, 0.35)
+		if s.By == me {
+			m.shake = max(m.shake, 0.35)
+		}
 		m.addBurst(burst{at: s.At.Add(s.Normal.Scale(0.05)), size: 0.35, life: 0.15, grow: true, colour: flashColor})
 		m.playAt(m.sfx.thud, s.At, 1)
 	}
-	for _, at := range ev.Explosions {
-		dist := at.Sub(m.sim.Player.Eye(1)).Len()
+	for _, x := range ev.Explosions {
+		at := x.At
+		dist := at.Sub(eye).Len()
 		m.shake = max(m.shake, 1.2*clampf(1-dist/25, 0.15, 1))
 		m.addBurst(burst{at: at, size: arena.BlastRadius * 0.9, life: 0.35, grow: true, colour: explosionColor})
 		m.addBurst(burst{at: at, size: arena.BlastRadius * 0.5, life: 0.2, grow: true, colour: tracerColor})
@@ -353,27 +477,36 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 			colour: withAlpha(smokeColor, 0.55)})
 		m.playAt(m.sfx.boom, at, 1)
 	}
-	if ev.Swung {
-		m.play(m.sfx.swing, 0.8)
-	}
-	if ev.Launched {
-		m.play(m.sfx.launch, 0.9)
-		m.shake = max(m.shake, 0.15)
-	}
-	if ev.Switched {
-		m.play(m.sfx.swap, 1)
-	}
-	switch {
-	case ev.Empty:
-		m.play(m.sfx.empty, 1)
-	case ev.Reloaded:
-		m.play(m.sfx.reload, 0.8)
-	}
-	if ev.Jumped {
-		m.play(m.sfx.jump, 0.6)
-	}
-	if ev.Landed > 0 {
-		m.play(m.sfx.land, min(1, ev.Landed/10))
+	for _, act := range ev.Actions {
+		mine := act.By == me
+		var sound *audio.Sound
+		volume := float32(0.8)
+		switch act.Kind {
+		case arena.ActSwing:
+			sound = m.sfx.swing
+		case arena.ActLaunch:
+			sound, volume = m.sfx.launch, 0.9
+			if mine {
+				m.shake = max(m.shake, 0.15)
+			}
+		case arena.ActSwitch:
+			sound, volume = m.sfx.swap, 1
+		case arena.ActEmpty:
+			sound, volume = m.sfx.empty, 1
+		case arena.ActReload:
+			sound = m.sfx.reload
+		case arena.ActJump:
+			sound, volume = m.sfx.jump, 0.6
+		case arena.ActLand:
+			sound, volume = m.sfx.land, min(1, act.Value/10)
+		}
+		switch {
+		case sound == nil:
+		case mine:
+			m.play(sound, volume)
+		default:
+			m.playAt(sound, act.By.Body.Position, volume)
+		}
 	}
 }
 
@@ -426,9 +559,21 @@ func (m *Arena) playAt(s *audio.Sound, pos mathx.Vec3, volume float32) {
 	m.sound.Play(s, volume/(1+0.04*dist), pan)
 }
 
+// eye is the camera position: the local player's eye, sinking to the
+// ground after they die.
+func (m *Arena) eye() mathx.Vec3 {
+	me := m.me()
+	eye := me.Eye(m.sim().Phys.Alpha())
+	if me.Dead {
+		t := clampf((m.sim().Time-me.DiedAt)/0.6, 0, 1)
+		eye[1] -= (arena.EyeHeight + arena.PlayerRadius - 0.35) * smooth(t)
+	}
+	return eye
+}
+
 // viewAngles is the player's yaw and pitch plus camera shake.
 func (m *Arena) viewAngles() (yaw, pitch float32) {
-	p := &m.sim.Player
+	p := m.me()
 	yaw, pitch = p.Yaw, p.ViewPitch()
 	if m.shake > 0.001 {
 		t := float64(m.elapsed)
@@ -440,13 +585,13 @@ func (m *Arena) viewAngles() (yaw, pitch float32) {
 
 // camWorld is the camera's world transform (camera looks down its -Z).
 func (m *Arena) camWorld() mathx.Mat4 {
-	eye := m.sim.Player.Eye(m.sim.Phys.Alpha())
+	eye := m.eye()
 	yaw, pitch := m.viewAngles()
 	return mathx.Translate(eye[0], eye[1], eye[2]).Mul(mathx.RotateY(-yaw)).Mul(mathx.RotateX(pitch))
 }
 
 func (m *Arena) view() mathx.Mat4 {
-	eye := m.sim.Player.Eye(m.sim.Phys.Alpha())
+	eye := m.eye()
 	yaw, pitch := m.viewAngles()
 	return mathx.LookAt(eye, eye.Add(camera.Direction(yaw, pitch)), mathx.Vec3{0, 1, 0})
 }
@@ -455,7 +600,7 @@ func (m *Arena) view() mathx.Mat4 {
 // the right, swaying as you walk, dropping out of view while switching, and
 // animated by its own action (recoil, reload dip, hammer swing).
 func (m *Arena) weaponModel() mathx.Mat4 {
-	w := &m.sim.Weapons
+	w := &m.me().Weapons
 	offset := mathx.Vec3{0.16, -0.16, -0.4}
 	offset[0] += 0.012 * float32(math.Sin(float64(m.bob)))
 	offset[1] += 0.01 * float32(math.Abs(math.Cos(float64(m.bob))))
@@ -483,22 +628,11 @@ func (m *Arena) weaponModel() mathx.Mat4 {
 		size = 0.7
 		offset = offset.Add(mathx.Vec3{0.08, -0.12, -0.05})
 		pitch, roll = -0.35, 0.3
-		if p := w.Hammer.Progress(); p >= 0 {
-			strike := float32(arena.HammerHitAt / arena.HammerSwing)
-			var s float32 // 0 rest, -0.4 wound up, 1 struck
-			switch {
-			case p < strike*0.45:
-				s = -0.4 * smooth(p/(strike*0.45))
-			case p < strike:
-				s = -0.4 + 1.4*smooth((p-strike*0.45)/(strike*0.55))
-			default:
-				s = 1 - smooth((p-strike)/(1-strike))
-			}
-			pitch -= 1.25 * s
-			yaw = 0.35 * max(s, 0)
-			offset[0] -= 0.12 * max(s, 0)
-			offset[2] -= 0.1 * max(s, 0)
-		}
+		s := hammerPose(w.Hammer.Progress())
+		pitch -= 1.25 * s
+		yaw = 0.35 * max(s, 0)
+		offset[0] -= 0.12 * max(s, 0)
+		offset[2] -= 0.1 * max(s, 0)
 	}
 	return m.camWorld().
 		Mul(mathx.Translate(offset[0], offset[1], offset[2])).
@@ -519,12 +653,13 @@ func (m *Arena) muzzle() mathx.Vec3 { return m.weaponModel().TransformPoint(rifl
 
 // Render returns the frame parameters and the draw list (appended to out[:0]).
 func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
-	eye := m.sim.Player.Eye(m.sim.Phys.Alpha())
+	eye := m.eye()
 	fov := m.settings.fovRadians() * 1.25 // a wider view suits first person
 	proj := mathx.Perspective(min(fov, 1.9), aspect, arenaNear, arenaFar)
-	l := &m.light
+	l := &arenaLight
+	m.viewProj = proj.Mul(m.view())
 	params := render.FrameParams{
-		ViewProj:     proj.Mul(m.view()),
+		ViewProj:     m.viewProj,
 		CameraPos:    eye,
 		SunDirection: l.sunDir,
 		SunColor:     l.sun,
@@ -540,18 +675,25 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 	})
 	out = append(out, m.level...)
 	out = m.appendStructures(out)
-	out = m.appendDrones(out, eye)
+	for i, p := range m.sim().Players {
+		if p != m.me() {
+			out = m.appendCharacter(out, p, m.strides[i])
+		}
+	}
 	out = m.appendDebris(out)
 	out = append(out, m.glass...) // translucent: after every solid
 	out = m.appendEffects(out)
-	return params, m.appendWeapon(out)
+	if !m.me().Dead {
+		out = m.appendWeapon(out)
+	}
+	return params, m.appendHurt(out)
 }
 
 // appendStructures draws every standing chunk, darkening as it takes damage.
 // Glass goes to m.glass, drawn after the solids.
 func (m *Arena) appendStructures(out []render.DrawCmd) []render.DrawCmd {
 	m.glass = m.glass[:0]
-	for _, s := range m.sim.Structures {
+	for _, s := range m.sim().Structures {
 		for _, c := range s.Chunks {
 			if !c.Alive {
 				continue
@@ -575,58 +717,30 @@ func (m *Arena) appendStructures(out []render.DrawCmd) []render.DrawCmd {
 	return out
 }
 
-func (m *Arena) appendDrones(out []render.DrawCmd, eye mathx.Vec3) []render.DrawCmd {
-	alpha := m.sim.Phys.Alpha()
-	for i, d := range m.sim.Drones {
-		if d.Dead {
-			continue
-		}
-		pos, _ := d.Body.Interpolated(alpha)
-		r := d.Body.Radius
-		body := lerpColor(droneColor, [4]float32{1, 1, 1, 1}, d.Flash)
-		spin := mathx.AxisAngle(mathx.Vec3{0, 1, 0}, m.elapsed*2+float32(i))
-		out = append(out, render.DrawCmd{Model: bodyMatrix(pos, spin, r), Color: body, Flags: gfx.DrawFlat, Mesh: m.sc.chip})
-		// The eye tracks the player.
-		look := eye.Sub(pos).Normalize()
-		at := pos.Add(look.Scale(r * 0.78))
-		out = append(out, render.DrawCmd{Model: bodyMatrix(at, mathx.QuatIdentity(), r*0.3), Color: droneEyeColor,
-			Flags: gfx.DrawUnlit, Mesh: m.sc.ball})
-		// A spinning rotor disc on top.
-		rotor := mathx.Translate(pos[0], pos[1]+r*0.95, pos[2]).
-			Mul(mathx.RotateY(m.elapsed * 25)).Mul(mathx.Scale(r*1.1, 1, r*1.1))
-		out = append(out, render.DrawCmd{Model: rotor, Color: [4]float32{0.05, 0.05, 0.06, 0.8}, Flags: gfx.DrawUnlit,
-			Mesh: m.sc.shadow})
-	}
-	return out
-}
-
 // appendDebris draws rubble as tumbling boxes (glass shards translucent) and
 // grenades in flight; pieces shrink away at the end of their life.
 func (m *Arena) appendDebris(out []render.DrawCmd) []render.DrawCmd {
-	alpha := m.sim.Phys.Alpha()
-	for _, d := range m.sim.Debris {
+	alpha := m.sim().Phys.Alpha()
+	for _, d := range m.sim().Debris {
 		pos, rot := d.Body.Interpolated(alpha)
 		h := d.Half.Scale(clampf((d.Life-d.Age)/0.6, 0, 1))
 		model := mathx.Translate(pos[0], pos[1], pos[2]).Mul(rot.Mat4()).Mul(mathx.Scale(h[0], h[1], h[2]))
 		dc := render.DrawCmd{Model: model, Color: materialColor[d.Mat], Texture: m.as.materials[d.Mat], Mesh: m.as.cube}
-		if d.Mat == arena.Scrap {
-			dc.Flags = gfx.DrawFlat
-		}
 		if d.Mat == arena.Glass {
 			m.glass = append(m.glass, dc)
 			continue
 		}
 		out = append(out, dc)
 	}
-	for _, g := range m.sim.Grenades {
-		if g.Age < 0.06 {
-			continue // still leaving the barrel: drawn this close it would fill the view
+	for _, g := range m.sim().Grenades {
+		if g.Age < 0.06 && g.Owner == m.me() {
+			continue // still leaving your barrel: drawn this close it would fill the view
 		}
 		pos, _ := g.Body.Interpolated(alpha)
 		out = append(out,
 			render.DrawCmd{Model: bodyMatrix(pos, mathx.QuatIdentity(), 0.07), Color: launcherGreen, Mesh: m.sc.ball},
 			render.DrawCmd{Model: bodyMatrix(pos, mathx.QuatIdentity(), 0.035+0.015*float32(math.Sin(float64(m.elapsed)*40))),
-				Color: droneEyeColor, Flags: gfx.DrawUnlit, Mesh: m.sc.ball})
+				Color: grenadeGlow, Flags: gfx.DrawUnlit, Mesh: m.sc.ball})
 	}
 	return out
 }
@@ -674,7 +788,7 @@ func (m *Arena) appendEffects(out []render.DrawCmd) []render.DrawCmd {
 func (m *Arena) appendWeapon(out []render.DrawCmd) []render.DrawCmd {
 	model := m.weaponModel()
 	parts := rifleParts
-	switch m.sim.Current {
+	switch m.me().Current {
 	case arena.WeaponHammer:
 		parts = hammerParts
 	case arena.WeaponLauncher:
@@ -685,7 +799,7 @@ func (m *Arena) appendWeapon(out []render.DrawCmd) []render.DrawCmd {
 		pm := model.Mul(mathx.Translate(c[0], c[1], c[2])).Mul(mathx.Scale(h[0], h[1], h[2]))
 		out = append(out, render.DrawCmd{Model: pm, Color: part.color, Flags: part.flags, Mesh: m.as.cube})
 	}
-	if m.flash > 0 && m.sim.Current == arena.WeaponRifle {
+	if m.flash > 0 && m.me().Current == arena.WeaponRifle {
 		size := 0.014 + 0.012*m.rng.Float32() // it's only ~40 cm from the eye
 		spin := mathx.AxisAngle(mathx.Vec3{0, 0, 1}, m.rng.Float32()*math.Pi)
 		at := model.TransformPoint(rifleMuzzle.Add(mathx.Vec3{0, 0, -0.03}))
@@ -693,4 +807,37 @@ func (m *Arena) appendWeapon(out []render.DrawCmd) []render.DrawCmd {
 			Flags: gfx.DrawUnlit, Mesh: m.sc.chip})
 	}
 	return out
+}
+
+// appendHurt tints the view red: a flash when you're hit, a pulse while
+// your health is low, and a steady wash once you're down. It's a disc just
+// in front of the camera.
+func (m *Arena) appendHurt(out []render.DrawCmd) []render.DrawCmd {
+	me := m.me()
+	a := 0.45 * m.hurt
+	if low := 1 - me.Health/arena.MaxHealth; low > 0.6 && !me.Dead {
+		a = max(a, 0.2*(low-0.6)/0.4+0.05*float32(math.Sin(float64(m.elapsed)*5)))
+	}
+	if me.Dead {
+		a = 0.3
+	}
+	if a < 0.01 {
+		return out
+	}
+	model := m.camWorld().Mul(mathx.Translate(0, 0, -0.06)).Mul(mathx.RotateX(math.Pi / 2)).Mul(mathx.Scale(0.3, 1, 0.3))
+	return append(out, render.DrawCmd{Model: model, Color: withAlpha(hurtColor, a), Flags: gfx.DrawUnlit, Mesh: m.sc.shadow})
+}
+
+// project maps a world point to the screen as fractions (0..1 from the top
+// left), and reports whether it's in front of the camera and on screen.
+func (m *Arena) project(p mathx.Vec3) (x, y float32, ok bool) {
+	v := &m.viewProj
+	cx := v[0]*p[0] + v[4]*p[1] + v[8]*p[2] + v[12]
+	cy := v[1]*p[0] + v[5]*p[1] + v[9]*p[2] + v[13]
+	cw := v[3]*p[0] + v[7]*p[1] + v[11]*p[2] + v[15]
+	if cw <= 0.05 {
+		return 0, 0, false
+	}
+	x, y = cx/cw*0.5+0.5, cy/cw*0.5+0.5 // clip-space Y points down
+	return x, y, x > 0.02 && x < 0.98 && y > 0.02 && y < 0.98
 }

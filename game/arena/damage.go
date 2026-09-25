@@ -1,8 +1,6 @@
 package arena
 
 import (
-	"math"
-
 	"CliffCrack/engine/mathx"
 	"CliffCrack/engine/physics"
 )
@@ -10,20 +8,21 @@ import (
 // maxDebris caps loose pieces; beyond it the oldest are cleared first.
 const maxDebris = 450
 
-// damageChunk wears a chunk down and breaks it at zero.
-func (a *Arena) damageChunk(c *Chunk, damage float32, push mathx.Vec3, ev *Events) {
+// damageChunk wears a chunk down and breaks it at zero. by (nil for none)
+// gets the credit.
+func (a *Arena) damageChunk(c *Chunk, damage float32, push mathx.Vec3, by *Player, ev *Events) {
 	if !c.Alive {
 		return
 	}
 	c.HP -= damage
 	if c.HP <= 0 {
-		a.breakChunk(c, push, ev)
+		a.breakChunk(c, push, by, ev)
 	}
 }
 
 // breakChunk shatters a chunk into a few smaller pieces flung by push.
-func (a *Arena) breakChunk(c *Chunk, push mathx.Vec3, ev *Events) {
-	a.removeChunk(c)
+func (a *Arena) breakChunk(c *Chunk, push mathx.Vec3, by *Player, ev *Events) {
+	a.removeChunk(c, by)
 	n := int(volume(c.Half) / 0.05)
 	n = max(1, min(n, 4))
 	if c.Mat == Glass {
@@ -46,13 +45,14 @@ func (a *Arena) breakChunk(c *Chunk, push mathx.Vec3, ev *Events) {
 }
 
 // removeChunk takes a chunk out of its structure and the physics world.
-func (a *Arena) removeChunk(c *Chunk) {
+func (a *Arena) removeChunk(c *Chunk, by *Player) {
 	c.Alive = false
 	c.Structure.alive--
 	c.Structure.dirty = true
 	a.Phys.Remove(c.Body)
-	a.Destroyed++
-	a.Score += ChunkScore
+	if by != nil {
+		by.Destroyed++
+	}
 }
 
 // settle brings down every chunk left without support: each falls as one
@@ -64,7 +64,7 @@ func (a *Arena) settle(ev *Events) {
 		}
 		s.dirty = false
 		for _, c := range s.unsupported() {
-			a.removeChunk(c)
+			a.removeChunk(c, nil)
 			drift := mathx.Vec3{a.rng.Float32() - 0.5, 0, a.rng.Float32() - 0.5}.Scale(0.6)
 			a.addDebris(c.Centre, c.Half, c.Mat, drift)
 			ev.Breaks = append(ev.Breaks, Break{At: c.Centre, Half: c.Half, Mat: c.Mat, Collapsed: true})
@@ -106,11 +106,12 @@ func (a *Arena) ageDebris(dt float32) {
 	a.Debris = alive
 }
 
-// blast damages everything within radius of at (full at the centre, falling
-// to nothing at the edge) and shoves loose bodies outwards. bias is added to
-// every shove (a hammer drives debris away from the swing). With hitsPlayer
-// the player is shoved too.
-func (a *Arena) blast(at mathx.Vec3, radius, damage, push float32, bias mathx.Vec3, hitsPlayer bool, ev *Events) {
+// blast damages every structure chunk within radius of at (full at the
+// centre, falling to nothing at the edge) and shoves loose bodies outwards.
+// bias is added to every shove (a hammer drives debris away from the swing).
+// With hitsPlayers, players in range are hurt and shoved too; by gets the
+// credit.
+func (a *Arena) blast(at mathx.Vec3, radius, damage, push float32, bias mathx.Vec3, by *Player, hitsPlayers bool, ev *Events) {
 	// Pieces this blast breaks off already carry its push; shove only the
 	// ones that were lying around before.
 	loose := append([]*Debris(nil), a.Debris...)
@@ -125,38 +126,40 @@ func (a *Arena) blast(at mathx.Vec3, radius, damage, push float32, bias mathx.Ve
 			}
 			f := 1 - d/radius
 			dir := c.Centre.Sub(at).Normalize()
-			a.damageChunk(c, damage*f, dir.Scale(push*f).Add(bias), ev)
+			a.damageChunk(c, damage*f, dir.Scale(push*f).Add(bias), by, ev)
 		}
 	}
-	for _, d := range a.Drones {
-		if d.Dead {
-			continue
-		}
-		dist := d.Body.Position.Sub(at).Len() - DroneRadius
-		if dist < radius {
-			hurt := int(math.Ceil(float64(DroneHealth * (1 - max(dist, 0)/radius))))
-			a.hurtDrone(d, max(hurt, 1), d.Body.Position.Sub(at).Normalize().Scale(push), ev)
-		}
-	}
-	shove := func(b *physics.Body, scale float32) {
+	shove := func(b *physics.Body, scale float32) mathx.Vec3 {
 		off := b.Position.Sub(at)
 		dist := off.Len()
 		if dist >= radius {
-			return
+			return mathx.Vec3{}
 		}
 		dir := off.Normalize()
 		if dist < 1e-4 {
 			dir = mathx.Vec3{0, 1, 0}
 		}
-		b.Velocity = b.Velocity.Add(dir.Scale(push * (1 - dist/radius) * scale)).Add(bias.Scale(scale))
+		return dir.Scale(push * (1 - dist/radius) * scale).Add(bias.Scale(scale))
 	}
 	for _, d := range loose {
-		shove(d.Body, 1)
+		d.Body.Velocity = d.Body.Velocity.Add(shove(d.Body, 1))
 	}
 	for _, g := range a.Grenades {
-		shove(g.Body, 0.5)
+		g.Body.Velocity = g.Body.Velocity.Add(shove(g.Body, 0.5))
 	}
-	if hitsPlayer {
-		shove(a.Player.Body, 1)
+	if !hitsPlayers {
+		return
+	}
+	for _, p := range a.Players {
+		if p.Dead {
+			continue
+		}
+		kick := shove(p.Body, 1)
+		d := p.hitboxDist(at)
+		if d >= radius {
+			p.Body.Velocity = p.Body.Velocity.Add(kick)
+			continue
+		}
+		a.hurtPlayer(p, by, BlastPlayerDamage*(1-d/radius), false, WeaponLauncher, at, kick, ev)
 	}
 }

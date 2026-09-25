@@ -14,8 +14,7 @@ const (
 	Concrete
 	Glass
 	Metal
-	Scrap // drone parts (debris only)
-	materialCount
+	MaterialCount
 )
 
 // MaterialInfo is how tough a material is and how its pieces behave.
@@ -28,13 +27,12 @@ type MaterialInfo struct {
 	DebrisLife  float32 // seconds broken pieces stay before clearing away
 }
 
-var Materials = [materialCount]MaterialInfo{
+var Materials = [MaterialCount]MaterialInfo{
 	Wood:     {"wood", 45, 500, 0.3, 0.7, 10},
 	Brick:    {"brick", 90, 1800, 0.15, 0.8, 12},
 	Concrete: {"concrete", 160, 2300, 0.1, 0.8, 12},
 	Glass:    {"glass", 4, 2500, 0.2, 0.3, 3},
 	Metal:    {"metal", 600, 7800, 0.35, 0.5, 12},
-	Scrap:    {"scrap", 1, 1200, 0.4, 0.5, 4},
 }
 
 // Chunk is one breakable piece of a structure: an axis-aligned box.
