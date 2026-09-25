@@ -59,6 +59,11 @@ type Body struct {
 	// something below is supporting the body (a contact normal pointing up).
 	Grounded bool
 
+	// FixedRotation makes a dynamic body ignore torque: contacts and friction
+	// only change its velocity, never its spin. Use it for characters, so
+	// friction holds them still on slopes instead of rolling them away.
+	FixedRotation bool
+
 	invMass, invInertia float32
 
 	// State before the latest step, for Interpolated.
@@ -151,7 +156,9 @@ func (w *World) Add(b *Body) error {
 	b.invMass, b.invInertia = 0, 0
 	if b.Kind == Dynamic {
 		b.invMass = 1 / b.Mass
-		b.invInertia = 1 / (0.4 * b.Mass * b.Radius * b.Radius) // solid sphere: 2/5 m r^2
+		if !b.FixedRotation {
+			b.invInertia = 1 / (0.4 * b.Mass * b.Radius * b.Radius) // solid sphere: 2/5 m r^2
+		}
 	}
 	b.Teleported()
 	w.bodies = append(w.bodies, b)

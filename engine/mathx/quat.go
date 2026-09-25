@@ -46,6 +46,29 @@ func Nlerp(a, b Quat, t float32) Quat {
 
 func (q Quat) Mat4() Mat4 { return FromQuat(q.X, q.Y, q.Z, q.W) }
 
+// QuatFromBasis is the rotation taking the X, Y and Z axes to x, y and z,
+// which must be orthonormal and right-handed (x = y cross z).
+func QuatFromBasis(x, y, z Vec3) Quat {
+	m := Identity()
+	m[0], m[1], m[2] = x[0], x[1], x[2]
+	m[4], m[5], m[6] = y[0], y[1], y[2]
+	m[8], m[9], m[10] = z[0], z[1], z[2]
+	_, q, _ := Decompose(m)
+	return q
+}
+
+// LookRotation is a rotation taking +Z to dir (any length), keeping +Y as
+// close to world up as it can.
+func LookRotation(dir Vec3) Quat {
+	z := dir.Normalize()
+	up := Vec3{0, 1, 0}
+	if math.Abs(float64(z.Dot(up))) > 0.999 {
+		up = Vec3{1, 0, 0}
+	}
+	x := up.Cross(z).Normalize()
+	return QuatFromBasis(x, z.Cross(x), z)
+}
+
 // Conjugate is the inverse rotation (for unit quaternions).
 func (q Quat) Conjugate() Quat { return Quat{-q.X, -q.Y, -q.Z, q.W} }
 

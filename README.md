@@ -2,11 +2,13 @@
 
 A game built on its own engine: a **Go host** driving a **native C++ Vulkan 1.3 renderer**.
 
-The main menu offers two modes:
+The main menu offers three modes:
 
 - **Run**, the arcade mode. You're dropped off a cliff and ride a ball down an endless,
   procedurally generated mountain. Steer around rocks and pines, jump the cracks, and go
   as far as you can. The first thing you hit ends the run.
+- **Arena**, a first-person shooter prototype. Run, jump and climb around a walled arena
+  at dusk and shoot down hovering drones with a rifle.
 - **Engine Demo**, the physics sandbox. Roll the checker ball around the arena, bump the
   spinning cubes and drop piles of balls.
 
@@ -46,7 +48,8 @@ You don't need to link against the Vulkan loader: volk loads `vulkan-1.dll` from
 ./build.ps1 -Run              # Debug build, validation layers on
 ./build.ps1 -Config Release
 build/bin/game.exe -validation=false -vsync=false
-build/bin/game.exe -mode run                  # skip the menu: menu | run | demo
+build/bin/game.exe -mode run                  # skip the menu: menu | run | arena | demo
+build/bin/game.exe -mode arena -autopilot -seed 5 -screenshot out.png -frames 90   # a bot plays the arena
 build/bin/game.exe -mode run -seed 42         # replay one course (default: a new one each run)
 build/bin/game.exe -mode run -seed 12 -from 800   # start 800 m down the course (try a particular section)
 build/bin/game.exe -mode run -autopilot -screenshot out.png -frames 600   # a self-driving run
@@ -54,7 +57,7 @@ build/bin/game.exe -model path/to/model.glb   # show a glTF model in the centre
 build/bin/game.exe -screenshot out.png -frames 90   # 90 fixed 1/60 s frames, save the last, exit
 build/bin/game.exe -drop 60                   # start with 60 physics balls
 build/bin/game.exe -hold W -screenshot out.png -frames 110   # scripted input for tests
-go test ./engine/... ./game/course   # engine and course-generation tests (no GPU needed)
+go test ./engine/... ./game/course ./game/arena   # engine, course and arena tests (no GPU needed)
 ```
 
 The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv`.
@@ -71,6 +74,11 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | | mouse | look around (the cursor is captured while riding; with F1 open, hold the right button). The camera swings back behind the ball when you let go; steering always follows the direction of travel |
 | | **R**, **Enter** | ride again after a wipeout |
 | | **Esc** | pause |
+| Arena | **W A S D** | move (**Shift** sprints) |
+| | mouse | aim (the cursor is captured; with F1 open, hold the right button) |
+| | left button | fire (hold for automatic) |
+| | **R** / **Space** | reload / jump |
+| | **Esc** | pause (restart match, settings, main menu) |
 | Engine Demo, orbit (default) | **W A S D** | roll the ball (relative to the camera) |
 | | **Space** / **R** | jump / reset the ball |
 | | left/right mouse drag | orbit the camera around the ball |
@@ -100,6 +108,10 @@ button. The on-screen hints switch to gamepad buttons as soon as you use one.
 | | **Start** | pause |
 | Wipeout card | d-pad, **A** | choose |
 | | **Y** / **B** | ride again / main menu |
+| Arena | left stick / right stick | move / aim |
+| | **RT** | fire |
+| | **A** / **X** / **L3** | jump / reload / sprint |
+| | **Start** | pause |
 | Engine Demo | left stick | roll the ball |
 | | right stick, **LB / RB** | orbit, zoom |
 | | **A** / **X** / **Y** | jump / drop a ball / reset |
@@ -222,6 +234,29 @@ Lighting is a low golden sun with cool blue shade. `ride` (the rules and physics
 graphics, so `go test ./game` plays whole runs headless with an autopilot. The same
 autopilot rides the menu backdrop.
 
+### Arena mode
+
+A first-person shooter prototype in a walled 48 m arena at dusk. There's a raised centre
+platform with ramps, ledges along the east and west walls, four pillars and waist-high
+cover. Glowing trim marks the edges.
+
+- **Movement**: the player is a fixed-rotation physics sphere at the feet, with the eye
+  1.25 m above it. Velocity eases towards the input direction: quickly on the ground,
+  slowly in the air. Friction holds you still on ramps, and gravity is 15 m/s² for snappy
+  jumps. Walls and cover block you through the regular collision solver.
+- **Rifle**: hitscan at 600 rpm with a 30-round magazine and a 1.5 s reload (automatic
+  when empty). The spread widens while moving, jumping and firing bursts. Recoil kicks the
+  view up and settles back. Bullets are physics raycasts, so cover stops them.
+- **Drones**: eight hover on looping patrols. Three hits destroy one: it bursts into
+  bouncing physics debris, scores 100 and returns 3 s later on a new patrol.
+- **Feedback**: tracer streaks from the muzzle, a muzzle flash, impact sparks, bullet
+  holes, a hit marker and a kill feed, plus panned sounds for shots, hits and kills.
+
+`game/arena` holds all the rules and has no graphics, so its tests play the mode headless:
+walking, walls, ramps, jumping, the fire rate, reloading, recoil, cover, kills and respawns.
+They also check that the bot (`-autopilot`, which aims at the nearest drone it can see)
+scores. The physics engine gained `World.Raycast` and `Body.FixedRotation` for it.
+
 ### UI
 
 The menu, HUD and debug windows are Dear ImGui with a custom theme: navy translucent
@@ -294,8 +329,9 @@ engine/
   geom/                CPU mesh data + procedural shapes (cube, plane, sphere, grid, cone, icosphere)
   asset/               file loaders (glTF / GLB)
   script/              yaegi host: loads scripts/, hot-reloads, exposes behaviours
-game/                gameplay code (pure Go, no cgo): app/menu, Run mode, Engine Demo
+game/                gameplay code (pure Go, no cgo): app/menu, Run mode, Arena, Engine Demo
   course/              Run mode's seeded level generator (no GPU; testable on its own)
+  arena/               Arena mode's rules: level, movement, rifle, drones, bot (no GPU)
 scripts/             hot-reloadable behaviours (interpreted at runtime)
 cmd/game/            main package (an .exe on desktop, a c-shared library on Android)
 android/             AndroidManifest.xml for the APK

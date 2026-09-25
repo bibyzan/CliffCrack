@@ -31,6 +31,21 @@ func TestQuat(t *testing.T) {
 	}
 }
 
+func TestLookRotation(t *testing.T) {
+	for _, dir := range []Vec3{{0, 0, 1}, {1, 0, 0}, {0.3, -0.5, -2}, {0, 1, 0}, {0, -3, 0}} {
+		q := LookRotation(dir)
+		if got, want := q.Rotate(Vec3{0, 0, 1}), dir.Normalize(); !nearVec(got, want) {
+			t.Errorf("LookRotation(%v) sends +Z to %v", dir, got)
+		}
+		if up := q.Rotate(Vec3{0, 1, 0}); math.Abs(float64(up.Len()-1)) > 1e-4 {
+			t.Errorf("LookRotation(%v) isn't a pure rotation", dir)
+		}
+	}
+	if up := LookRotation(Vec3{1, 0, 0}).Rotate(Vec3{0, 1, 0}); !nearVec(up, Vec3{0, 1, 0}) {
+		t.Errorf("a level look should keep +Y up, got %v", up)
+	}
+}
+
 func TestDecompose(t *testing.T) {
 	// Cover all four branches of the quaternion extraction.
 	rotations := []Quat{

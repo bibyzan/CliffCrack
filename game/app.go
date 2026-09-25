@@ -1,8 +1,8 @@
 // Package game is the gameplay layer. It only talks to the engine through
 // plain Go types; it never touches cgo or Vulkan.
 //
-// The App switches between the main menu, the Run arcade mode and the Engine
-// Demo sandbox.
+// The App switches between the main menu, the Run arcade mode, the Arena
+// first-person shooter and the Engine Demo sandbox.
 package game
 
 import (
@@ -21,9 +21,10 @@ const (
 	ModeMenu Mode = iota
 	ModeRun
 	ModeDemo
+	ModeArena
 )
 
-// ParseMode maps "menu", "run" or "demo" to a Mode.
+// ParseMode maps "menu", "run", "arena" or "demo" to a Mode.
 func ParseMode(s string) (Mode, bool) {
 	switch s {
 	case "menu":
@@ -32,6 +33,8 @@ func ParseMode(s string) (Mode, bool) {
 		return ModeRun, true
 	case "demo":
 		return ModeDemo, true
+	case "arena":
+		return ModeArena, true
 	}
 	return ModeMenu, false
 }
@@ -68,8 +71,10 @@ type App struct {
 	opts  Options
 	mode  Mode
 	menu  menu
-	run   *Run  // the menu backdrop and the Run mode share one Run
-	demo  *Demo // built the first time it is opened
+	sc    *scenery
+	run   *Run   // the menu backdrop and the Run mode share one Run
+	demo  *Demo  // built the first time it is opened
+	arena *Arena // likewise
 	debug map[Mode]bool
 	quit  bool
 
@@ -91,6 +96,7 @@ func NewApp(opts Options) (*App, error) {
 	}
 	a := &App{
 		opts:     opts,
+		sc:       sc,
 		debug:    map[Mode]bool{ModeDemo: opts.DebugUI},
 		menu:     newMenu(),
 		settings: DefaultSettings(),
@@ -126,6 +132,17 @@ func (a *App) enter(mode Mode) error {
 				return err
 			}
 			a.demo = d
+		}
+	case ModeArena:
+		if a.arena == nil {
+			m, err := newArena(a.sc, a.opts.Audio, &a.settings, a.opts.Seed)
+			if err != nil {
+				return err
+			}
+			m.Autopilot = a.opts.Autopilot
+			a.arena = m
+		} else {
+			a.arena.start()
 		}
 	}
 	a.mode = mode
@@ -194,6 +211,13 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 			return
 		}
 		a.demo.Update(dt, in, mouseFree)
+	case ModeArena:
+		if pausePressed(in) {
+			a.openPause()
+			return
+		}
+		a.arena.debugOpen = a.debug[ModeArena]
+		a.arena.Update(dt, in, mouseFree)
 	}
 }
 
@@ -212,7 +236,7 @@ func (a *App) openSettings(from overlay) {
 
 // pauseItems are the pause menu's entries for the current mode.
 func (a *App) pauseItems() []pauseAction {
-	if a.mode == ModeRun {
+	if a.mode == ModeRun || a.mode == ModeArena {
 		return []pauseAction{pauseResume, pauseRestart, pauseSettings, pauseMainMenu}
 	}
 	return []pauseAction{pauseResume, pauseSettings, pauseMainMenu}
@@ -224,7 +248,11 @@ func (a *App) pauseAction(act pauseAction) {
 		a.overlay = overlayNone
 	case pauseRestart:
 		a.overlay = overlayNone
-		a.run.start(false)
+		if a.mode == ModeArena {
+			a.arena.start()
+		} else {
+			a.run.start(false)
+		}
 	case pauseSettings:
 		a.openSettings(overlayPause)
 	case pauseMainMenu:
@@ -270,14 +298,19 @@ func (a *App) CursorLocked() bool {
 		return a.run.CursorLocked()
 	case ModeDemo:
 		return a.demo.CursorLocked()
+	case ModeArena:
+		return a.arena.CursorLocked()
 	}
 	return false
 }
 
 // Render returns the active mode's frame parameters and draw list.
 func (a *App) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
-	if a.mode == ModeDemo {
+	switch a.mode {
+	case ModeDemo:
 		return a.demo.Render(aspect, out)
+	case ModeArena:
+		return a.arena.Render(aspect, out)
 	}
 	return a.run.Render(aspect, out)
 }
@@ -306,12 +339,17 @@ func (a *App) UI(b *ui.Builder, s Stats) {
 		if a.debug[ModeDemo] {
 			a.demo.DebugUI(b, s)
 		}
+	case ModeArena:
+		a.arena.UI(b, a.in)
+		if a.debug[ModeArena] {
+			a.arena.DebugUI(b, s)
+		}
 	}
 }
 
 // Main-menu items that aren't modes.
 const (
-	menuSettings Mode = ModeDemo + 1 + iota
+	menuSettings Mode = ModeArena + 1 + iota
 	menuQuit
 )
 
@@ -327,6 +365,7 @@ var menuItems = []struct {
 	mode  Mode
 }{
 	{"Run", ModeRun},
+	{"Arena", ModeArena},
 	{"Engine Demo", ModeDemo},
 	{"Settings", menuSettings},
 	{"Quit", menuQuit},
