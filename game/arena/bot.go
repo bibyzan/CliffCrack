@@ -6,6 +6,7 @@ import (
 
 	"CliffCrack/engine/camera"
 	"CliffCrack/engine/mathx"
+	"CliffCrack/engine/physics"
 )
 
 // BotSkill tunes how well a bot plays.
@@ -155,8 +156,7 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 	default:
 		// Roam the site looking for them.
 		if b.goalT <= 0 || flat(b.goal.Sub(feet)).Len() < 2 {
-			r := a.Bounds - 4
-			b.goal = mathx.Vec3{(b.rng.Float32()*2 - 1) * r, 0, (b.rng.Float32()*2 - 1) * r}
+			b.goal = mathx.Vec3{(b.rng.Float32()*2 - 1) * (a.Bounds[0] - 4), 0, (b.rng.Float32()*2 - 1) * (a.Bounds[1] - 4)}
 			b.goalT = 8 + b.rng.Float32()*6
 		}
 		move = toward(b.goal)
@@ -172,7 +172,8 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 		dir := move.Normalize()
 		knee := feet.Add(mathx.Vec3{0, -0.05, 0})
 		chest := feet.Add(mathx.Vec3{0, 0.55, 0})
-		if hit, ok := a.Phys.Raycast(chest, dir, probeReach, a.ignoreForAim); ok {
+		walkable := func(h physics.RayHit) bool { return h.Normal[1] > 0.5 } // a ramp, not a wall
+		if hit, ok := a.Phys.Raycast(chest, dir, probeReach, a.ignoreForAim); ok && !walkable(hit) {
 			if c, isChunk := hit.Body.UserData.(*Chunk); isChunk && !b.sees {
 				if c != b.smash {
 					b.smash, b.smashT = c, 0
@@ -180,7 +181,7 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 			} else if b.avoidT <= 0 {
 				b.avoid, b.avoidT = float32(1-2*b.rng.IntN(2)), 0.8
 			}
-		} else if _, ok := a.Phys.Raycast(knee, dir, probeReach*0.7, a.ignoreForAim); ok {
+		} else if hit, ok := a.Phys.Raycast(knee, dir, probeReach*0.7, a.ignoreForAim); ok && !walkable(hit) {
 			in.Jump = true
 		}
 	}

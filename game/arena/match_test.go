@@ -69,8 +69,8 @@ func TestRoundGoesToTheLastOneStanding(t *testing.T) {
 		t.Fatalf("round %d phase %v: want a fresh round 2 in its countdown", m.Round, m.Phase)
 	}
 	// Sides swap: player 1 starts where player 0 did.
-	if p1 := m.Arena.Players[1].Body.Position; p1.Sub(south).Len() > 0.1 {
-		t.Errorf("player 1 starts round 2 at %v, want the south spawn %v", p1, south)
+	if p1 := m.Arena.Players[1].Body.Position; p1[2]*south[2] <= 0 {
+		t.Errorf("player 1 starts round 2 at %v, want the south end (where player 0 was, %v)", p1, south)
 	}
 	if m.Arena.Players[0].Dead || m.Arena.Players[1].Health != MaxHealth || m.Arena.Standing() != 1 {
 		t.Error("a new round starts with everyone alive on an untouched site")

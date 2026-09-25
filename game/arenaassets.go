@@ -12,13 +12,15 @@ import (
 	"CliffCrack/game/arena"
 )
 
-// Arena's look: a slate ground and boundary with glowing orange trim, and
-// the structures in their materials' colours.
+// Arena's look, after Halo 5's Breakout: a clean white simulation space
+// outlined in glowing trim, each end in its team's colour, with the
+// structures in their materials' colours.
 var (
-	arenaFloorColor = mathx.SRGB(0.40, 0.42, 0.48, 1)
-	arenaWallColor  = mathx.SRGB(0.46, 0.49, 0.58, 1)
-	arenaTrimCyan   = mathx.SRGB(0.25, 0.92, 1.00, 1)
-	arenaTrimOrange = mathx.SRGB(1.00, 0.58, 0.18, 1)
+	arenaFloorColor    = mathx.SRGB(0.74, 0.76, 0.80, 1)
+	arenaWallColor     = mathx.SRGB(0.90, 0.91, 0.93, 1)
+	arenaPlatformColor = mathx.SRGB(0.95, 0.95, 0.96, 1)
+	arenaBayColor      = mathx.SRGB(0.50, 0.53, 0.58, 1)
+	arenaTrimCyan      = mathx.SRGB(0.25, 0.92, 1.00, 1)
 
 	grenadeGlow    = mathx.SRGB(1.00, 0.18, 0.12, 1)
 	hurtColor      = mathx.SRGB(0.85, 0.04, 0.04, 1)
@@ -90,14 +92,21 @@ func newArenaAssets() (*arenaAssets, error) {
 	return as, nil // glass uses the white texture (handle 0)
 }
 
-// levelDraws builds the draws (and meshes) for a level's indestructible blocks.
+// levelDraws builds the draws (and meshes) for a level's indestructible
+// blocks: white clean-sim panels, a lighter grid floor and darker launch
+// bays. Their glowing trim comes from trimDraws.
 func (as *arenaAssets) levelDraws(level []arena.Block) ([]render.DrawCmd, []render.Mesh, error) {
 	var draws []render.DrawCmd
 	var meshes []render.Mesh
 	for _, b := range level {
 		tile, tex, col := float32(2), as.panel, arenaWallColor
-		if b.Kind == arena.Floor {
+		switch b.Kind {
+		case arena.Floor:
 			tile, tex, col = 4, as.floor, arenaFloorColor
+		case arena.Platform, arena.Pillar, arena.Ramp:
+			col = arenaPlatformColor
+		case arena.Bay:
+			col = arenaBayColor
 		}
 		mesh, err := render.CreateMesh(boxMesh(b.Half, tile))
 		if err != nil {
@@ -106,20 +115,53 @@ func (as *arenaAssets) levelDraws(level []arena.Block) ([]render.DrawCmd, []rend
 		meshes = append(meshes, mesh)
 		model := mathx.Translate(b.Centre[0], b.Centre[1], b.Centre[2]).Mul(b.Rotation.Mat4())
 		draws = append(draws, render.DrawCmd{Model: model, Color: col, Texture: tex, Mesh: mesh})
-		draws = as.appendTrim(draws, b)
 	}
 	return draws, meshes, nil
 }
 
-// appendTrim adds a glowing orange band along the top of the boundary walls.
-func (as *arenaAssets) appendTrim(out []render.DrawCmd, b arena.Block) []render.DrawCmd {
-	if b.Kind != arena.Wall {
-		return out
+// trimDraws are the glowing bands that outline the level: along the tops of
+// walls and platforms, the edges of ramps and rings round the pillars. Each
+// end glows in the colour of the player who starts there (south, north);
+// the middle is neutral.
+func (as *arenaAssets) trimDraws(level []arena.Block, south, north [4]float32) []render.DrawCmd {
+	var out []render.DrawCmd
+	for _, b := range level {
+		col := arenaTrimCyan
+		switch {
+		case b.Centre[2] > 3:
+			col = south
+		case b.Centre[2] < -3:
+			col = north
+		}
+		// band adds a strip at local (offset, half) in the block's frame.
+		band := func(offset, half mathx.Vec3) {
+			c := b.Centre
+			m := mathx.Translate(c[0], c[1], c[2]).Mul(b.Rotation.Mat4()).
+				Mul(mathx.Translate(offset[0], offset[1], offset[2])).Mul(mathx.Scale(half[0], half[1], half[2]))
+			out = append(out, render.DrawCmd{Model: m, Color: col, Flags: gfx.DrawUnlit, Mesh: as.cube})
+		}
+		h := b.Half
+		switch b.Kind {
+		case arena.Wall, arena.Bay, arena.Platform:
+			if b.Kind == arena.Bay && h[1] > 1.8 {
+				// A bay floor: a strip along its lip.
+				band(mathx.Vec3{0, h[1] - 0.05, 0}, mathx.Vec3{h[0] + 0.01, 0.05, h[2] + 0.01})
+				continue
+			}
+			band(mathx.Vec3{0, h[1] - 0.1, 0}, mathx.Vec3{h[0] + 0.012, 0.05, h[2] + 0.012})
+			if b.Kind == arena.Wall && h[1] > 2 {
+				band(mathx.Vec3{0, -h[1] + 0.9, 0}, mathx.Vec3{h[0] + 0.012, 0.025, h[2] + 0.012})
+			}
+		case arena.Pillar:
+			band(mathx.Vec3{0, -h[1] + 1.4, 0}, mathx.Vec3{h[0] + 0.015, 0.06, h[2] + 0.015})
+			band(mathx.Vec3{0, h[1] - 0.1, 0}, mathx.Vec3{h[0] + 0.015, 0.05, h[2] + 0.015})
+		case arena.Ramp:
+			for _, sx := range []float32{-1, 1} {
+				band(mathx.Vec3{sx * (h[0] - 0.04), h[1] + 0.005, 0}, mathx.Vec3{0.04, 0.012, h[2] - 0.3})
+			}
+		}
 	}
-	c, h := b.Centre, b.Half
-	centre, half := mathx.Vec3{c[0], c[1] + h[1] - 0.12, c[2]}, mathx.Vec3{h[0] + 0.01, 0.06, h[2] + 0.01}
-	m := mathx.Translate(centre[0], centre[1], centre[2]).Mul(b.Rotation.Mat4()).Mul(mathx.Scale(half[0], half[1], half[2]))
-	return append(out, render.DrawCmd{Model: m, Color: arenaTrimOrange, Flags: gfx.DrawUnlit, Mesh: as.cube})
+	return out
 }
 
 // boxMesh is a box with the given half extents and texture coordinates

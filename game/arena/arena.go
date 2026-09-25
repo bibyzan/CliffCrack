@@ -16,7 +16,7 @@ const (
 	walkSpeed    = 6.5  // m/s
 	sprintSpeed  = 9.5
 	groundAccel  = 14.0 // 1/s: how quickly velocity reaches the target on the ground
-	airAccel     = 2.5  // ... and in the air
+	airAccel     = 12   // m/s^2 of steering in the air
 	jumpSpeed    = 6.2  // m/s; with gravity 15 the apex is ~1.3 m
 	jumpCooldown = 0.25 // s: the feet still touch the floor for a step after take-off
 	gravity      = 15.0 // snappier than 9.81 for a shooter
@@ -73,6 +73,7 @@ type Player struct {
 	recoil    float32 // pitch added by recoil, recovering over time
 	onGround  bool
 	sinceJump float32
+	sincePad  float32 // since a launch pad threw them
 }
 
 // Eye is the camera position. alpha interpolates between physics steps.
@@ -167,6 +168,7 @@ const (
 	ActSwitch
 	ActReload
 	ActEmpty // the trigger was pulled on an empty magazine
+	ActBoost // a launch pad threw them
 )
 
 // Action is one player action; Value is the impact speed for ActLand.
@@ -222,20 +224,22 @@ func (ev *Events) Merge(o Events) {
 	ev.Actions = append(ev.Actions, o.Actions...)
 }
 
-// Arena is one round's state: the site (indestructible ground and walls,
-// destructible structures), the players, and the debris and grenades flying
-// about.
+// Arena is one round's state: the site (the indestructible shell,
+// destructible structures and launch pads), the players, and the debris and
+// grenades flying about.
 type Arena struct {
 	Phys       *physics.World
 	Level      []Block      // indestructible
 	Structures []*Structure // destructible
-	Bounds     float32      // the playable square is -Bounds..Bounds
+	Pads       []Pad
+	Bounds     [2]float32 // the playable floor is -Bounds..Bounds on X and Z
 	Spawns     []Spawn
 	Players    []*Player
 	Debris     []*Debris
 	Grenades   []*Grenade
 
 	Time         float32
+	Live         bool // the round has started: the launch bays' pads fire
 	InfiniteAmmo bool // debug
 
 	rng *rand.Rand
@@ -245,26 +249,26 @@ type Arena struct {
 // starts at spawn i + side (so a match can swap sides between rounds). The
 // same seed always gives the same site.
 func New(seed uint64, players, side int) *Arena {
-	site := GenerateSite(seed)
-	a := newArena(seed, site.Blocks, site.Structures, site.HalfSize, site.Spawns)
+	a := newArena(seed, GenerateSite(seed))
 	for i := range players {
 		a.AddPlayer(a.Spawns[(i+side)%len(a.Spawns)])
 	}
 	return a
 }
 
-func newArena(seed uint64, level []Block, structures []*Structure, bounds float32, spawns []Spawn) *Arena {
+func newArena(seed uint64, site *Site) *Arena {
 	a := &Arena{
 		Phys:       physics.NewWorld(),
-		Level:      level,
-		Structures: structures,
-		Bounds:     bounds,
-		Spawns:     spawns,
+		Level:      site.Blocks,
+		Structures: site.Structures,
+		Pads:       site.Pads,
+		Bounds:     site.Bounds,
+		Spawns:     site.Spawns,
 		rng:        rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)),
 	}
 	a.Phys.Gravity = mathx.Vec3{0, -gravity, 0}
 	addLevel(a.Phys, a.Level)
-	for _, s := range structures {
+	for _, s := range a.Structures {
 		for _, c := range s.Chunks {
 			c.Body = physics.NewBox(c.Half, physics.Static)
 			c.Body.Position = c.Centre
@@ -283,7 +287,7 @@ func (a *Arena) AddPlayer(sp Spawn) *Player {
 	b.Friction = 1
 	b.Restitution = 0
 	b.Position = sp.At
-	p := &Player{ID: len(a.Players), Body: b, Yaw: sp.Yaw, Health: MaxHealth, Weapons: newWeapons()}
+	p := &Player{ID: len(a.Players), Body: b, Yaw: sp.Yaw, Health: MaxHealth, Weapons: newWeapons(), sincePad: padCooldown}
 	p.Current = WeaponRifle
 	b.UserData = p
 	if err := a.Phys.Add(b); err != nil {
@@ -324,13 +328,14 @@ func (a *Arena) Step(dt float32, inputs []Input) Events {
 			continue
 		}
 		was := p.onGround
-		p.onGround = p.Body.Grounded
+		p.onGround = p.Body.Grounded && p.sincePad > padGrace // just launched: still leaving the pad
 		if p.onGround && !was && fall[i] > 2 {
 			ev.act(p, ActLand, fall[i])
 		}
 		if p.Body.Position[1] < fallDeath {
 			a.hurtPlayer(p, nil, p.Health, false, WeaponRifle, p.Body.Position, mathx.Vec3{}, &ev)
 		}
+		a.usePads(p, &ev)
 	}
 	a.updateGrenades(dt, &ev)
 	a.settle(&ev)
@@ -349,16 +354,23 @@ func (a *Arena) movePlayer(p *Player, dt float32, in Input, ev *Events) {
 	if in.Sprint && in.Move[1] > 0.3 {
 		speed = sprintSpeed
 	}
-	rate := float32(airAccel)
-	if p.onGround {
-		rate = groundAccel
-	}
 	v := p.Body.Velocity
 	flat := mathx.Vec3{v[0], 0, v[2]}
-	flat = flat.Add(wish.Scale(speed).Sub(flat).Scale(1 - float32(math.Exp(-float64(rate*dt)))))
+	if p.onGround {
+		flat = flat.Add(wish.Scale(speed).Sub(flat).Scale(1 - float32(math.Exp(-groundAccel*float64(dt)))))
+	} else {
+		// In the air you can steer, but nothing slows you down: a launch keeps
+		// its speed unless you push against it.
+		top := max(flat.Len(), speed)
+		flat = flat.Add(wish.Scale(airAccel * dt))
+		if l := flat.Len(); l > top {
+			flat = flat.Scale(top / l)
+		}
+	}
 	p.Body.Velocity = mathx.Vec3{flat[0], v[1], flat[2]}
 
 	p.sinceJump += dt
+	p.sincePad += dt
 	if in.Jump && p.onGround && p.sinceJump >= jumpCooldown {
 		p.Body.Velocity[1] = jumpSpeed
 		p.onGround = false

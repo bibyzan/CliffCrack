@@ -156,9 +156,9 @@ func (m *Arena) banner(b *ui.Builder, in *input.State) {
 	switch mt.Phase {
 	case arena.PhaseCountdown:
 		title = fmt.Sprintf("%d", int(math.Ceil(float64(mt.Timer))))
-		sub = fmt.Sprintf("ROUND %d", mt.Round)
+		sub = fmt.Sprintf("ROUND %d  ·  LAUNCHING IN", mt.Round)
 		if mt.Round == 3 {
-			sub = "FINAL ROUND"
+			sub = "FINAL ROUND  ·  LAUNCHING IN"
 		}
 	case arena.PhaseFight:
 		if mt.Timer > arena.RoundTime-0.8 {

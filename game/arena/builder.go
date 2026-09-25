@@ -253,3 +253,36 @@ func Crates(rng *rand.Rand, origin mathx.Vec3, turns int) *Structure {
 	}
 	return b.finish()
 }
+
+// coverMaterial picks wood, brick or concrete.
+func coverMaterial(rng *rand.Rand) Material { return []Material{Wood, Brick, Concrete}[rng.IntN(3)] }
+
+// LowWall is a waist-high wall: cover you can shoot over, or hop.
+func LowWall(rng *rand.Rand, origin mathx.Vec3, turns int) *Structure {
+	b := newBuilder("low wall", origin, turns)
+	l := float32(3 + rng.IntN(3))
+	b.wall(-l/2, 0, l/2, 0, 0, 1.2, 0.35, coverMaterial(rng))
+	return b.finish()
+}
+
+// TallWall is a head-high wall, sometimes with a window to shoot through.
+func TallWall(rng *rand.Rand, origin mathx.Vec3, turns int) *Structure {
+	b := newBuilder("tall wall", origin, turns)
+	l := float32(3 + rng.IntN(3))
+	var holes []opening
+	if rng.IntN(2) == 0 {
+		holes = append(holes, opening{l/2 - 0.6, l/2 + 0.6, 1.2, 1.95, rng.IntN(2) == 0})
+	}
+	b.wall(-l/2, 0, l/2, 0, 0, 2.6, 0.3, coverMaterial(rng), holes...)
+	return b.finish()
+}
+
+// LCover is two walls meeting in an L, one waist-high and one head-high.
+func LCover(rng *rand.Rand, origin mathx.Vec3, turns int) *Structure {
+	b := newBuilder("l cover", origin, turns)
+	m := coverMaterial(rng)
+	l := float32(3 + rng.IntN(2))
+	b.wall(-l/2, 0, l/2, 0, 0, 2.6, 0.3, m)
+	b.wall(l/2-0.15, 0.15, l/2-0.15, 2.5, 0, 1.2, 0.3, m)
+	return b.finish()
+}

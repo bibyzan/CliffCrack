@@ -164,38 +164,3 @@ func TestQuarterTurnsKeepShape(t *testing.T) {
 		t.Errorf("a quarter turn should swap the footprint: %vx%v vs %vx%v", ax, az, bx, bz)
 	}
 }
-
-func TestGenerateSite(t *testing.T) {
-	a, b := GenerateSite(42), GenerateSite(42)
-	if len(a.Structures) != len(b.Structures) {
-		t.Fatal("the same seed should give the same site")
-	}
-	total := 0
-	for i, s := range a.Structures {
-		if len(s.Chunks) != len(b.Structures[i].Chunks) {
-			t.Fatal("the same seed should give the same structures")
-		}
-		total += len(s.Chunks)
-		allStanding(t, s)
-		for _, c := range s.Chunks {
-			if abs(c.Centre[0])+c.Half[0] > siteHalf || abs(c.Centre[2])+c.Half[2] > siteHalf {
-				t.Fatalf("%s chunk outside the site at %v", s.Name, c.Centre)
-			}
-			for _, sp := range a.Spawns {
-				if c.distTo(sp.At) < 1.5 {
-					t.Fatalf("%s chunk on top of a spawn point", s.Name)
-				}
-			}
-		}
-	}
-	if len(a.Spawns) != 2 || a.Spawns[0].At[2] <= 0 || a.Spawns[1].At[2] >= 0 {
-		t.Errorf("want a south spawn then a north one, got %+v", a.Spawns)
-	}
-	if total < 300 || total > 5000 {
-		t.Errorf("site has %d chunks, want a few hundred to a few thousand", total)
-	}
-	if c := GenerateSite(43); len(c.Structures) == len(a.Structures) && len(c.Structures[0].Chunks) == len(a.Structures[0].Chunks) &&
-		len(c.Structures[1].Chunks) == len(a.Structures[1].Chunks) {
-		t.Log("seeds 42 and 43 happen to start alike") // not an error, just unlikely
-	}
-}

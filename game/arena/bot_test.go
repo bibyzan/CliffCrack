@@ -103,7 +103,7 @@ func TestBotBreaksThroughToAHiddenPlayer(t *testing.T) {
 	// A wooden wall right across the arena between them; the target stays
 	// behind it and gives itself away with one shot.
 	b := newBuilder("wall", mathx.Vec3{0, 0, 0}, 0)
-	b.wall(-siteHalf, 0, siteHalf, 0, 0, 3, 0.3, Wood)
+	b.wall(-flatHalf, 0, flatHalf, 0, 0, 3, 0.3, Wood)
 	wall := b.finish()
 	a := flatArena([]*Structure{wall}, at(0, 5, 0), at(0, -6, math.Pi))
 	target := a.Players[0]

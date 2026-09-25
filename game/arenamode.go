@@ -40,7 +40,7 @@ var botSkills = []struct {
 	skill arena.BotSkill
 }{{"easy", arena.BotEasy}, {"normal", arena.BotNormal}, {"hard", arena.BotHard}}
 
-// arenaLight is the sky and lighting: a clear afternoon, so the materials read.
+// arenaLight is the sky and lighting: a bright, hazy simulation space.
 var arenaLight = struct {
 	zenith     [4]float32
 	haze       mathx.Vec3
@@ -48,7 +48,7 @@ var arenaLight = struct {
 	sunDir     mathx.Vec3
 	fog        float32
 }{
-	zenith: mathx.SRGB(0.30, 0.52, 0.86, 1), haze: srgb3(0.78, 0.84, 0.92),
+	zenith: mathx.SRGB(0.42, 0.62, 0.92, 1), haze: srgb3(0.86, 0.90, 0.96),
 	sun: srgb3(1.0, 0.95, 0.86).Scale(1.1), shade: srgb3(0.55, 0.65, 0.85).Scale(0.55),
 	sunDir: mathx.Vec3{0.45, 0.8, 0.35}, fog: 0.006,
 }
@@ -83,7 +83,7 @@ type feedLine struct {
 
 type arenaSounds struct {
 	shot, hit, headshot, hurt, kill, reload, empty, jump, land *audio.Sound
-	swing, thud, launch, boom, swap                            *audio.Sound
+	swing, thud, launch, boom, swap, boost                     *audio.Sound
 	tick, fight, win, lose                                     *audio.Sound
 	breaks                                                     [arena.MaterialCount]*audio.Sound
 }
@@ -103,6 +103,8 @@ type Arena struct {
 	match *arena.Match
 	round *arena.Arena     // the round the effects belong to
 	level []render.DrawCmd // the indestructible blocks
+	trim  []render.DrawCmd // their glowing outlines, in the colours of whoever starts at each end
+	ends  [2][4]float32    // south and north trim colours this round
 	owned []render.Mesh    // the level's meshes, freed when a new site replaces it
 	bots  []*arena.Bot     // per player; nil for the local player
 	// Autopilot hands the local player to a bot too (for demos and scripted tests).
@@ -131,6 +133,7 @@ type Arena struct {
 	glass    []render.DrawCmd // scratch: translucent draws, drawn after the solids
 	viewProj mathx.Mat4       // last frame's, for placing name tags
 	lastTick int              // the countdown second (or phase) last announced
+	fovKick  float32          // 0..1 widening of the view as a launch pad throws you
 }
 
 func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64) (*Arena, error) {
@@ -156,6 +159,7 @@ func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64) 
 			launch:   audio.Blip(110*time.Millisecond, 260, 120, 0.6),
 			boom:     audio.Blip(650*time.Millisecond, 170, 28, 1),
 			swap:     audio.Blip(35*time.Millisecond, 950, 950, 0.18),
+			boost:    audio.Blip(450*time.Millisecond, 140, 900, 0.6),
 			tick:     audio.Blip(90*time.Millisecond, 880, 880, 0.35),
 			fight:    audio.Blip(300*time.Millisecond, 880, 1760, 0.45),
 			win:      audio.Blip(600*time.Millisecond, 520, 1040, 0.5),
@@ -209,6 +213,14 @@ func (m *Arena) start() error {
 // newRound clears the last round's effects and the bots' memories.
 func (m *Arena) newRound() {
 	m.round = m.match.Arena
+	// Each end's trim takes the colour of the player who starts there.
+	south, north := teamGlow[0], teamGlow[1]
+	if m.me().Body.Position[2] < 0 {
+		south, north = north, south
+	}
+	m.trim = m.as.trimDraws(m.round.Level, south, north)
+	m.ends = [2][4]float32{south, north}
+	m.fovKick = 0
 	m.tracers, m.bursts, m.holes = m.tracers[:0], m.bursts[:0], m.holes[:0]
 	m.flash, m.hitMark, m.hurt, m.shake, m.elapsed = 0, 0, 0, 0, 0
 	m.lastTick = 0
@@ -381,6 +393,7 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 	m.hitMark = max(m.hitMark-dt, 0)
 	m.hurt *= float32(math.Exp(-3 * float64(dt)))
 	m.shake *= float32(math.Exp(-6 * float64(dt)))
+	m.fovKick *= float32(math.Exp(-2.5 * float64(dt)))
 
 	// Walk cycles: the weapon sway, and everyone's legs.
 	for i, p := range m.sim().Players {
@@ -499,6 +512,11 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 			sound, volume = m.sfx.jump, 0.6
 		case arena.ActLand:
 			sound, volume = m.sfx.land, min(1, act.Value/10)
+		case arena.ActBoost:
+			sound, volume = m.sfx.boost, 1
+			if mine {
+				m.shake, m.fovKick = max(m.shake, 0.5), 1
+			}
 		}
 		switch {
 		case sound == nil:
@@ -654,7 +672,7 @@ func (m *Arena) muzzle() mathx.Vec3 { return m.weaponModel().TransformPoint(rifl
 // Render returns the frame parameters and the draw list (appended to out[:0]).
 func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
 	eye := m.eye()
-	fov := m.settings.fovRadians() * 1.25 // a wider view suits first person
+	fov := m.settings.fovRadians() * 1.25 * (1 + 0.18*m.fovKick) // a wider view suits first person; wider still in a launch
 	proj := mathx.Perspective(min(fov, 1.9), aspect, arenaNear, arenaFar)
 	l := &arenaLight
 	m.viewProj = proj.Mul(m.view())
@@ -674,6 +692,8 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 		Color: l.zenith, Flags: gfx.DrawSky, Mesh: m.sc.sky,
 	})
 	out = append(out, m.level...)
+	out = append(out, m.trim...)
+	out = m.appendPads(out)
 	out = m.appendStructures(out)
 	for i, p := range m.sim().Players {
 		if p != m.me() {
@@ -840,4 +860,34 @@ func (m *Arena) project(p mathx.Vec3) (x, y float32, ok bool) {
 	}
 	x, y = cx/cw*0.5+0.5, cy/cw*0.5+0.5 // clip-space Y points down
 	return x, y, x > 0.02 && x < 0.98 && y > 0.02 && y < 0.98
+}
+
+// appendPads draws the launch pads: a glowing disc in their end's colour
+// with a pulse rising through it. The launch bays' pads stay dim until the
+// round goes live.
+func (m *Arena) appendPads(out []render.DrawCmd) []render.DrawCmd {
+	s := m.sim()
+	for _, p := range s.Pads {
+		col := m.ends[0]
+		if p.Centre[2] < 0 {
+			col = m.ends[1]
+		}
+		glow := float32(0.8)
+		if p.Spawn && !s.Live {
+			glow = 0.3 + 0.15*float32(math.Sin(float64(m.elapsed)*4))
+		}
+		c := p.Centre
+		disc := func(y, r, a float32) {
+			model := mathx.Translate(c[0], c[1]+y, c[2]).Mul(mathx.Scale(r, 1, r))
+			out = append(out, render.DrawCmd{Model: model, Color: withAlpha(col, a), Flags: gfx.DrawUnlit, Mesh: m.sc.shadow})
+		}
+		disc(0.012, p.Radius, 0.35*glow+0.2)
+		disc(0.02, p.Radius*0.55, 0.6*glow)
+		// Pulses rise off the pad and fade.
+		for k := range 2 {
+			t := float32(math.Mod(float64(m.elapsed)*0.9+float64(k)*0.5, 1))
+			disc(0.05+t*1.6, p.Radius*(0.95-0.4*t), 0.45*glow*(1-t))
+		}
+	}
+	return out
 }

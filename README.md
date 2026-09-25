@@ -7,10 +7,11 @@ The main menu offers three modes:
 - **Run**, the arcade mode. You're dropped off a cliff and ride a ball down an endless,
   procedurally generated mountain. Steer around rocks and pines, jump the cracks, and go
   as far as you can. The first thing you hit ends the run.
-- **Arena**, a first-person duel in the spirit of THE FINALS: best of three single-life
-  rounds against a bot, on a randomly generated site of destructible houses, towers,
-  bunkers and glasshouses, with a sledgehammer, rifle and grenade launcher that tear
-  them apart. It's the groundwork for an online multiplayer arena game.
+- **Arena**, a first-person duel: best of three single-life rounds against a bot. You're
+  launched out of a bay into a Halo 5 Breakout-style arena of white panels and team-
+  coloured light, with destructible cover in the spirit of THE FINALS and a
+  sledgehammer, rifle and grenade launcher to tear it apart. It's the groundwork for an
+  online multiplayer arena game.
 - **Engine Demo**, the physics sandbox. Roll the checker ball around the arena, bump the
   spinning cubes and drop piles of balls.
 
@@ -241,19 +242,32 @@ autopilot rides the menu backdrop.
 
 ### Arena mode
 
-A first-person duel in the spirit of THE FINALS, and the groundwork for an online
-multiplayer arena game. You (blue) face a bot (red) in a **best of three**: each round is
-**one life each**, and the last one standing takes it. First to two rounds wins the
-match; Enter, A or a click starts a rematch on a new site.
+A first-person duel, and the groundwork for an online multiplayer arena game. The map
+takes after Halo 5's Breakout, and the destruction after THE FINALS. You (blue) face a
+bot (red) in a **best of three**: each round is **one life each**, and the last one
+standing takes it. First to two rounds wins the match; Enter, A or a click starts a
+rematch on a new site.
 
-- **Rounds**: a 3 s countdown (you can look around and pick a weapon, but not move or
-  fire), then the fight, with a 2:30 clock. When time runs out the healthier player
-  takes the round, and level health is a draw. Every round starts on a fresh copy of the
-  same site, with the players swapping spawns.
-- **The site** is generated from a seed: a 68 m walled square split into a 3×3 grid of
-  lots. The north and south middle lots are the spawns, facing each other across the
-  centre. Each other lot gets a house, a three-storey tower, a bunker, a glasshouse, a
-  maze of walls or a crate stack, jittered and turned by a random quarter turn.
+- **Rounds**: you start in a launch bay raised behind your end wall, looking out over
+  the arena. During the 3 s countdown you can look around and pick a weapon, but not move
+  or fire. At FIGHT the bay's pad fires you over the wall into the arena, with a whoosh,
+  a jolt and a widening of the view. The round has a 2:30 clock: when time runs out the
+  healthier player takes it, and level health is a draw. Every round starts on a fresh
+  copy of the same site, with the players swapping ends.
+- **The arena** is a compact 40 × 60 m box of white clean-sim panels outlined in glowing
+  trim. Each end's trim glows in the colour of whoever starts there, so it follows you
+  when you swap ends. The shell is the same every time:
+  - a raised centre platform, with ramps down to the east and west
+  - raised ledges along both side walls, with ramps at their ends
+  - four tall pillars
+  - a jump pad at each end that throws you onto the centre platform
+  - a launch bay behind each end wall, with two pads (room for 2v2 later)
+- **Cover** is generated from the seed: low walls, head-high walls (some with windows,
+  some glazed), L-shaped cover, crates and the odd bunker. It's placed in the south half
+  and mirrored through the centre into the north half, so both ends play the same. It
+  never blocks the ramps, pads, pillars or landing zones.
+- **Launch pads** throw whoever stands on them. In the air you can steer, but nothing
+  slows you down, so a launch keeps its speed.
 - **Players** have 150 health. Movement is a fixed-rotation physics sphere at the feet,
   with the eye 1.25 m above it. Velocity eases towards the input direction: quickly on
   the ground, slowly in the air. Gravity is 15 m/s² for snappy jumps. Bullets, blows and
@@ -327,7 +341,10 @@ and the bot's `Think` are just two sources of commands for the same step.
 `game/arena`'s tests play all of it headless:
 - movement, hitboxes and headshots, cover, each weapon against players and structures,
   rocket jumps and self-damage
-- countdowns, round wins, side swaps, best of three, timeouts and draws
+- countdowns, round wins, side swaps, best of three, timeouts and draws; the launch bays
+  firing only once the round is live and landing you in the arena, and the jump pads
+  reaching the centre platform
+- the site: the same seed gives the same arena, and its cover is mirrored exactly
 - structures: support, collapse, the footing rule, every blueprint in every rotation
 - the bot: it kills a standing target but not instantly, and it can't see through walls
   but hears gunfire. It breaks through a wall to reach a hidden player, the skill levels

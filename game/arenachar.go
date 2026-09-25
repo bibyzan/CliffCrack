@@ -168,3 +168,6 @@ func hammerPose(p float32) float32 {
 		return 1 - smooth((p-strike)/(1-strike))
 	}
 }
+
+// teamGlow is each player's colour as a glowing trim, by player index.
+var teamGlow = [...][4]float32{mathx.SRGB(0.30, 0.66, 1.00, 1), mathx.SRGB(1.00, 0.32, 0.24, 1)}

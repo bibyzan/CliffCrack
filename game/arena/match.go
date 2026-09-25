@@ -65,6 +65,7 @@ func (m *Match) Step(dt float32, inputs []Input) Events {
 	case PhaseCountdown:
 		if m.Timer <= 0 {
 			m.Phase, m.Timer = PhaseFight, RoundTime
+			m.Arena.Live = true // the launch bays fire
 		}
 	case PhaseFight:
 		if alive := m.Arena.Alive(); alive <= 1 || m.Timer <= 0 {

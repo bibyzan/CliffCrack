@@ -19,11 +19,21 @@ func run(a *Arena, seconds float32, inputs ...Input) Events {
 	return all
 }
 
-// flatArena is the site's ground and boundary with no structures, and
-// players at the given spots.
+// flatHalf is the half size of flatArena's floor.
+const flatHalf = 34
+
+// flatArena is a plain walled floor with the given structures, and players
+// at the given spots.
 func flatArena(structures []*Structure, spots ...Spawn) *Arena {
-	site := GenerateSite(1)
-	a := newArena(1, site.Blocks, structures, site.HalfSize, site.Spawns)
+	id := mathx.QuatIdentity()
+	site := &Site{Structures: structures, Bounds: [2]float32{flatHalf, flatHalf}, Blocks: []Block{
+		{Kind: Floor, Centre: mathx.Vec3{0, -0.5, 0}, Half: mathx.Vec3{flatHalf + 1, 0.5, flatHalf + 1}, Rotation: id},
+		{Kind: Wall, Centre: mathx.Vec3{0, 1.5, -flatHalf - 0.5}, Half: mathx.Vec3{flatHalf + 1, 1.5, 0.5}, Rotation: id},
+		{Kind: Wall, Centre: mathx.Vec3{0, 1.5, flatHalf + 0.5}, Half: mathx.Vec3{flatHalf + 1, 1.5, 0.5}, Rotation: id},
+		{Kind: Wall, Centre: mathx.Vec3{-flatHalf - 0.5, 1.5, 0}, Half: mathx.Vec3{0.5, 1.5, flatHalf + 1}, Rotation: id},
+		{Kind: Wall, Centre: mathx.Vec3{flatHalf + 0.5, 1.5, 0}, Half: mathx.Vec3{0.5, 1.5, flatHalf + 1}, Rotation: id},
+	}}
+	a := newArena(1, site)
 	for _, sp := range spots {
 		a.AddPlayer(sp)
 	}
@@ -67,9 +77,9 @@ func TestWalkForwardOnTheFloor(t *testing.T) {
 }
 
 func TestWallsStopThePlayer(t *testing.T) {
-	a := flatArena(nil, at(0, siteHalf-6, math.Pi)) // facing south, towards the nearest wall
+	a := flatArena(nil, at(0, flatHalf-6, math.Pi)) // facing south, towards the nearest wall
 	run(a, 4, Input{Move: [2]float32{0, 1}, Sprint: true})
-	if z := a.Players[0].Body.Position[2]; z > siteHalf-PlayerRadius+0.02 {
+	if z := a.Players[0].Body.Position[2]; z > flatHalf-PlayerRadius+0.02 {
 		t.Errorf("walked through the south wall: z = %v", z)
 	}
 }
