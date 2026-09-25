@@ -33,6 +33,11 @@ type Match struct {
 	RoundWinner int
 	Winner      int
 	Seed        uint64
+
+	// Practice is the firing range: no rounds, and Dummies (players 1 and
+	// up) strafe and get back up.
+	Practice bool
+	Dummies  []Dummy
 }
 
 // NewMatch starts a match for players on the site generated from seed.
@@ -51,6 +56,9 @@ func (m *Match) startRound() {
 // Step advances the match by dt with one input per player. During the
 // countdown and once the match is over players can only look around.
 func (m *Match) Step(dt float32, inputs []Input) Events {
+	if m.Practice {
+		return m.stepRange(dt, inputs)
+	}
 	if m.Phase == PhaseCountdown || m.Phase == PhaseMatchOver {
 		held := make([]Input, len(inputs))
 		for i, in := range inputs {
@@ -85,7 +93,8 @@ func (m *Match) Step(dt float32, inputs []Input) Events {
 }
 
 // endRound scores the round: the last one standing, or when time runs out
-// the one with the most health left. A tie is a draw and scores nobody.
+// the one with the most armour and health left. A tie is a draw and scores
+// nobody.
 func (m *Match) endRound() {
 	m.RoundWinner = -1
 	best, tied := float32(0), false
@@ -94,9 +103,9 @@ func (m *Match) endRound() {
 			continue
 		}
 		switch {
-		case p.Health > best:
-			m.RoundWinner, best, tied = i, p.Health, false
-		case p.Health == best:
+		case p.Durability() > best:
+			m.RoundWinner, best, tied = i, p.Durability(), false
+		case p.Durability() == best:
 			tied = true
 		}
 	}

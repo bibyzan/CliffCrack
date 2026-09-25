@@ -51,7 +51,7 @@ You don't need to link against the Vulkan loader: volk loads `vulkan-1.dll` from
 ./build.ps1 -Run              # Debug build, validation layers on
 ./build.ps1 -Config Release
 build/bin/game.exe -validation=false -vsync=false
-build/bin/game.exe -mode run                  # skip the menu: menu | run | arena | demo
+build/bin/game.exe -mode run                  # skip the menu: menu | run | arena | range | demo
 build/bin/game.exe -mode arena -autopilot -seed 11 -screenshot out.png -frames 700   # bot vs bot on site 11
 build/bin/game.exe -mode run -seed 42         # replay one course (default: a new one each run)
 build/bin/game.exe -mode run -seed 12 -from 800   # start 800 m down the course (try a particular section)
@@ -61,6 +61,7 @@ build/bin/game.exe -screenshot out.png -frames 90   # 90 fixed 1/60 s frames, sa
 build/bin/game.exe -drop 60                   # start with 60 physics balls
 build/bin/game.exe -hold W -screenshot out.png -frames 110   # scripted input for tests
 build/bin/game.exe -mode arena -hold W -click -screenshot out.png -frames 250   # ... -click holds the left button
+build/bin/game.exe -mode range -weapon sniper -aim -screenshot out.png -frames 90    # the firing range, sniper scoped (-aim holds the right button)
 go test ./engine/... ./game/course ./game/arena   # engine, course and arena tests (no GPU needed)
 ```
 
@@ -79,9 +80,13 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | | **R**, **Enter** | ride again after a wipeout |
 | | **Esc** | pause |
 | Arena | **W A S D** | move (**Shift** sprints) |
-| | mouse | aim (the cursor is captured; with F1 open, hold the right button) |
-| | left button | fire / swing (hold for automatic) |
-| | **1 2 3**, scroll | hammer / rifle / launcher, or cycle |
+| | mouse | look (the cursor is captured; with F1 open, hold the right button) |
+| | left button | fire (hold for the rifle; click per shot for the rest) |
+| | right button | aim down the sights (the sniper's scope; **Shift** there holds your breath) |
+| | **1** / **2**, scroll | your two weapons: pick one, or swap |
+| | **E** | pick up the weapon at your feet (swapping it for the one in hand) |
+| | **F** | swing the hammer |
+| | **G** / **Q** | throw a grenade / switch frags and stickies |
 | | **R** / **Space** | reload / jump |
 | | **Esc** | pause (restart match, settings, main menu) |
 | Engine Demo, orbit (default) | **W A S D** | roll the ball (relative to the camera) |
@@ -113,10 +118,12 @@ button. The on-screen hints switch to gamepad buttons as soon as you use one.
 | | **Start** | pause |
 | Wipeout card | d-pad, **A** | choose |
 | | **Y** / **B** | ride again / main menu |
-| Arena | left stick / right stick | move / aim |
-| | **RT** | fire / swing |
-| | **A** / **X** / **L3** | jump / reload / sprint |
-| | **RB** / **Y**, **LB** | next / previous weapon |
+| Arena | left stick / right stick | move / look |
+| | **RT** / **LT** | fire, aim down the sights |
+| | **A** / **L3** | jump / sprint (hold breath when scoped) |
+| | **X** | reload; hold to pick up |
+| | **Y** | swap weapons |
+| | **RB** / **LB** / **B** | hammer / throw a grenade / switch grenades |
 | | **Start** | pause |
 | Engine Demo | left stick | roll the ball |
 | | right stick, **LB / RB** | orbit, zoom |
@@ -297,7 +304,16 @@ rematch on a new site.
 - **Stairs** are solid, breakable steps, but each tread collides as its stretch of a
   smooth ramp, so you walk up them at full speed. You also step up onto anything up to
   35 cm high.
-- **Players** have 150 health. Movement is a fixed-rotation physics sphere at the feet,
+- **Players** have **armour** (100) over their health (60). Armour takes hits first,
+  and paint from a gun stops there: the shot that breaks it does no more. Once it
+  breaks you're **popped** (a burst of paint and a pop): exposed, and one headshot from
+  a precision gun (the pistol or the sniper) kills you. Blasts, hammer blows, rubble
+  and falls carry on through armour into health. Armour recharges 4 s after you last
+  took damage. There's no bar: the HUD reads ARMOUR, ARMOUR CRACKED (under half), or
+  ARMOUR dimmed red with your health under it once it's gone, and your view pulses.
+  Other players wear a faint glowing shell while their armour holds, and their suit
+  picks up the shooter's paint as it goes. Name tags are just names. Movement is a
+  fixed-rotation physics sphere at the feet,
   with the eye 1.25 m above it. Velocity eases towards the input direction: quickly on
   the ground, slowly in the air. Gravity is 15 m/s² for snappy jumps. The body is a
   sphere at the feet, so the space above your head is checked too: jump under a low
@@ -306,19 +322,69 @@ rematch on a new site.
   speed on the ground and steer. You only start sliding back to running pace a quarter
   second after landing, so jumping again straight away keeps it all: bunny hop off a
   pad and carry the speed across the map. A jump pressed just before you land is taken
-  as you land. Pull back to brake. Bullets, blows and
-  blasts use a separate **hitbox**: a capsule for the body and a sphere for the head,
-  which takes 1.75× damage.
-- **Sledgehammer** (1): a 0.7 s swing that lands 0.22 s in, with 2.8 m reach. Two blows
-  down a player (80 each) and knock them back. Against a structure it spreads 120 damage
-  over a 0.75 m radius, enough to hole brick or wood in one hit; concrete takes two.
-- **Rifle** (2): hitscan at 600 rpm with a 30-round magazine and a 1.5 s reload. It does
-  14 damage (24.5 to the head), chips wood and shatters glass. The spread widens while
-  moving, jumping and firing bursts, and recoil kicks the view up and settles back.
-- **Grenade launcher** (3): six rounds, 2.2 s reload. Grenades arc under gravity and go
+  as you land. Pull back to brake. Shots, blows and blasts use a separate **hitbox**: a
+  capsule for the body and a sphere for the head.
+- **Two weapons, a hammer and grenades**, as in Halo: you carry two weapons (you
+  start with the rifle and the pistol), swing the sledgehammer as your melee whatever
+  you're holding, and throw grenades. Everything else is picked up: **E** (hold **X**)
+  takes the weapon at your feet in place of the one in hand, which is dropped there.
+  Walking over a weapon you already carry takes its ammo; walking over grenades takes
+  them. Guns have a magazine and a reserve (shown as 24 | 144): run the reserve dry and
+  you can't reload.
+- **In the arena** everyone starts with the rifle and pistol. The sniper, the launcher,
+  shotguns and crates of frags and stickies spawn at random spots each match (the same
+  at both ends): up the spire, on the ledges, bridges, keep, towers and mountains, and
+  on the floor where you land. A spawned weapon hovers and turns over a glowing ring (a
+  column of light over the power weapons) and comes back 25 to 45 s after it's taken.
+  Dropped weapons are cleared after 30 s.
+- **Grenades** (two frags and a sticky to start, up to four of each): **frags** bounce,
+  settle and go off 2.2 s after the throw (130 at the centre, 5 m); **stickies** stick
+  to whatever they touch first, players included, glowing and chirping, and go off 1.6 s
+  later (200, 4 m): stuck to someone, that's them done.
+- **The guns are paintball markers**, after Halo: Combat Evolved's loadout: bright
+  plastic bodies with a paint hopper fed in from the side (clear of the sights), a gas
+  tank, rails, grips and guards, and proper sights: a holographic sight with a red ring
+  reticle on the rifle, three-dot tritium irons on the pistol, a big ghost ring and a
+  glowing fibre bead on the shotgun, a scope on the sniper and a ladder on the
+  launcher. Shots are instant, but you see each paintball fly out at the gun's speed and
+  burst into a splat of the shooter's colour (yours cyan, theirs orange) that stays for
+  30 s, or until the piece it's on breaks.
+- **Aim down the sights** (right button / LT): the gun comes up to your eye, close in
+  so the sight frames the target, the view zooms and its edges darken. Spread tightens
+  and bloom grows more slowly, but you move slower and can't sprint. The sniper goes to
+  a full scope: a tinted lens with a cyan rim, duplex posts, mil-dots, range ticks and
+  an illuminated centre. Scoped in, the aim sways; hold sprint to hold your breath and
+  steady it for up to 3 s (run out and it shakes harder). A scoped sniper's lens glints
+  for everyone else to see. Taking a hit while zoomed 2× or more knocks you out of your
+  sights for half a second.
+- **Hipfire bloom**: every shot widens the spread, which settles back over a moment;
+  moving and jumping widen it further at the hip. The crosshair is drawn as wide as the
+  cone your next shot can go anywhere in, so you can see it bloom.
+- **Sledgehammer** (F): a 0.7 s swing that lands 0.22 s in, with 2.8 m reach, the gun
+  put aside while it swings. Two blows down a player (80 each, through armour) and knock
+  them back. Against a structure it
+  spreads 120 damage over a 0.75 m radius, enough to hole brick or wood in one hit;
+  concrete takes two.
+- **Rifle**: 48 rounds (and 144 in reserve) at 800 rpm, 9 a ball. Wild from the hip and blooms fast;
+  its climb has to be pulled down.
+- **Pistol**: 12 rounds (48), one per click, 40 a ball. Three to the body pop armour,
+  then one to the head kills. 2× zoom.
+- **Shotgun** (a pickup): 8 pumps (16) of 12 pellets (14 each). Point-blank it all but kills
+  through full armour; past 7 m it falls away fast. Its pellets shred walls.
+- **Sniper** (a pickup): 4 rounds (12), 110 a ball. A headshot always kills; a body shot pops
+  armour and a second one finishes. Wild from the hip, dead on through the 5× scope.
+- **Grenade launcher** (a pickup): six rounds of paint grenades (12 more), 2.2 s reload. Grenades arc under gravity and go
   off on impact, on reaching a player, or after 2.5 s. The 4.2 m blast does up to 120 to
   players and destroys chunks. Your own grenades hurt you at half damage, so a rocket
   jump costs some health.
+- **The firing range** (the main menu's Firing Range, or `-mode range`): a platform over
+  the chasm with a firing line, a board 12 m out to read your grouping and bloom off
+  the paint, distance posts every 10 m, and dummies from 10 to 85 m (two of them
+  strafing) with armour like a player's. Downed dummies get back up after 1.5 s. Walls
+  of wood, brick and concrete, a bunker and a glasshouse are there to shoot through.
+  A **weapon table** by the line has every weapon and crates of both grenades, none of
+  which run out, and reloads there don't use up your reserve.
+  The HUD shows what's under the crosshair and how far, your accuracy and headshots.
 - **Everything but the girders, the bays and the mountains breaks**: the floor, the
   keep, bridges, sky bridges, ledges, towers, stairs and parapets are structures like
   the cover (about 2,500 chunks in all). Blow out a sky bridge and whoever's on it drops.
@@ -342,11 +408,16 @@ rematch on a new site.
   it loose) and damages the structures it hits, so a collapse can bring down what's
   below. Rubble clears after 3–12 s or once it falls into the chasm, with at most 700
   pieces kept. A big collapse rumbles and shakes the view.
-- **HUD and feedback**: the round score and clock, health, a name tag and health bar over
-  the bot while it's in sight, a hit marker (red for headshots), a kill feed, the weapon
-  bar and ammo, countdown and result banners. Taking damage flashes the view red and
+- **HUD and feedback**: the round score and clock, your armour, a name tag over the bot
+  while it's in sight, a crosshair that turns orange on a hit (red for the head), a kill
+  feed, your two weapons with the ammo and grenades, a prompt when a weapon's in reach,
+  and the countdown and result banners. Taking damage flashes the view red and
   low health pulses it; tracers, dust in each material's colour, explosions, screen
-  shake and panned sounds do the rest. The bot is a blocky soldier whose legs, head and
+  shake and panned sounds do the rest. The sounds are synthesised at startup
+  (`audio.Synth`: layers of swept tones and filtered noise, with an echo for the chasm):
+  gas pops for the markers, a wet splut where paint lands, a tink off armour and a
+  glassy shatter when it pops, a crack, crunch, tinkle or clang for each material, and
+  booms and collapses that echo off the walls. The bot is a blocky soldier whose legs, head and
   weapon follow its movement and aim; it flashes when hit and topples when it dies.
 
 #### The bot
@@ -360,10 +431,16 @@ the site's layout but not where you are:
 - On a fresh sighting its aim starts off target and settles. It reacts after about a
   third of a second, and its aim always drifts a little. It tracks by following your
   motion across its view, as a player does.
-- In the open it strafes and keeps to a comfortable range with the rifle, jumping now and
-  then. Close in, or while its rifle reloads nearby, it charges with the hammer.
-- When it has lost sight of you it heads for where it last saw or heard you, lobbing
-  grenades at that spot on a ballistic arc. It hammers through walls in its way, hops
+- In the open it strafes and keeps to a comfortable range, jumping now and then. It
+  swings the hammer point-blank, and otherwise picks whichever of its two weapons suits
+  the range: the shotgun close, the rifle in the middle, the pistol at range and the
+  sniper far off (skipping one that's empty and reloading). With the pistol or sniper it
+  aims down the sights, and goes for the head once your armour's gone (always, with the
+  sniper).
+- It goes for weapons better than its worst one, and grenades when it's short: while
+  roaming, or on the way past when you're not close, swapping out the lesser gun.
+- When it has lost sight of you it heads for where it last saw or heard you, lobbing a
+  frag (or a launcher round) at that spot on a ballistic arc. It hammers through walls in its way, hops
   low obstacles, and sidesteps whatever it can't break. It never walks or jumps off an
   edge or into a hole blown in the floor: it turns along it instead.
 - Skill levels are easy, normal (the default) and hard, switchable in the F1 window. That

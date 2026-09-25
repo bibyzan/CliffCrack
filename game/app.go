@@ -6,8 +6,6 @@
 package game
 
 import (
-	"time"
-
 	"CliffCrack/engine/audio"
 	"CliffCrack/engine/input"
 	"CliffCrack/engine/render"
@@ -22,9 +20,10 @@ const (
 	ModeRun
 	ModeDemo
 	ModeArena
+	ModeRange // the Arena's firing range
 )
 
-// ParseMode maps "menu", "run", "arena" or "demo" to a Mode.
+// ParseMode maps "menu", "run", "arena", "range" or "demo" to a Mode.
 func ParseMode(s string) (Mode, bool) {
 	switch s {
 	case "menu":
@@ -35,6 +34,8 @@ func ParseMode(s string) (Mode, bool) {
 		return ModeDemo, true
 	case "arena":
 		return ModeArena, true
+	case "range":
+		return ModeRange, true
 	}
 	return ModeMenu, false
 }
@@ -51,6 +52,7 @@ type Options struct {
 	Seed      uint64  // non-zero: every run uses this course
 	StartAt   float32 // non-zero: runs start this many metres down the course (for testing sections)
 	Autopilot bool    // the player's runs steer themselves
+	Weapon    string  // Arena: start holding this weapon (by name; for screenshots)
 	DebugUI   bool    // show the Engine Demo's debug window at startup (F1 toggles)
 	Audio     *audio.Mixer
 	Demo      DemoOptions
@@ -133,18 +135,22 @@ func (a *App) enter(mode Mode) error {
 			}
 			a.demo = d
 		}
-	case ModeArena:
+	case ModeArena, ModeRange:
+		practice := mode == ModeRange
 		if m := a.arena; m != nil {
+			m.Practice = practice
 			if err := m.start(); err != nil {
 				return err
 			}
 			break
 		}
-		m, err := newArena(a.sc, a.opts.Audio, &a.settings, a.opts.Seed)
+		m, err := newArena(a.sc, a.opts.Audio, &a.settings, a.opts.Seed, practice)
 		if err != nil {
 			return err
 		}
 		m.Autopilot = a.opts.Autopilot
+		m.startWeapon = a.opts.Weapon
+		m.newRound() // again, now it knows what to hand you
 		a.arena = m
 	}
 	a.mode = mode
@@ -213,7 +219,7 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 			return
 		}
 		a.demo.Update(dt, in, mouseFree)
-	case ModeArena:
+	case ModeArena, ModeRange:
 		if pausePressed(in) {
 			a.openPause()
 			return
@@ -239,7 +245,7 @@ func (a *App) openSettings(from overlay) {
 
 // pauseItems are the pause menu's entries for the current mode.
 func (a *App) pauseItems() []pauseAction {
-	if a.mode == ModeRun || a.mode == ModeArena {
+	if a.mode == ModeRun || a.mode == ModeArena || a.mode == ModeRange {
 		return []pauseAction{pauseResume, pauseRestart, pauseSettings, pauseMainMenu}
 	}
 	return []pauseAction{pauseResume, pauseSettings, pauseMainMenu}
@@ -251,8 +257,8 @@ func (a *App) pauseAction(act pauseAction) {
 		a.overlay = overlayNone
 	case pauseRestart:
 		a.overlay = overlayNone
-		if a.mode == ModeArena {
-			a.arena.restart() // a new match on a new site
+		if a.mode == ModeArena || a.mode == ModeRange {
+			a.arena.restart() // a new match on a new site, or a fresh range
 		} else {
 			a.run.start(false)
 		}
@@ -301,7 +307,7 @@ func (a *App) CursorLocked() bool {
 		return a.run.CursorLocked()
 	case ModeDemo:
 		return a.demo.CursorLocked()
-	case ModeArena:
+	case ModeArena, ModeRange:
 		return a.arena.CursorLocked()
 	}
 	return false
@@ -312,7 +318,7 @@ func (a *App) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, 
 	switch a.mode {
 	case ModeDemo:
 		return a.demo.Render(aspect, out)
-	case ModeArena:
+	case ModeArena, ModeRange:
 		return a.arena.Render(aspect, out)
 	}
 	return a.run.Render(aspect, out)
@@ -342,7 +348,7 @@ func (a *App) UI(b *ui.Builder, s Stats) {
 		if a.debug[ModeDemo] {
 			a.demo.DebugUI(b, s)
 		}
-	case ModeArena:
+	case ModeArena, ModeRange:
 		m := a.arena
 		m.UI(b, a.in)
 		if a.debug[a.mode] {
@@ -353,7 +359,7 @@ func (a *App) UI(b *ui.Builder, s Stats) {
 
 // Main-menu items that aren't modes.
 const (
-	menuSettings Mode = ModeArena + 1 + iota
+	menuSettings Mode = ModeRange + 1 + iota
 	menuQuit
 )
 
@@ -370,6 +376,7 @@ var menuItems = []struct {
 }{
 	{"Run", ModeRun},
 	{"Arena", ModeArena},
+	{"Firing Range", ModeRange},
 	{"Engine Demo", ModeDemo},
 	{"Settings", menuSettings},
 	{"Quit", menuQuit},
@@ -377,8 +384,8 @@ var menuItems = []struct {
 
 func newMenu() menu {
 	return menu{
-		move: audio.Blip(40*time.Millisecond, 700, 700, 0.25),
-		pick: audio.Blip(120*time.Millisecond, 520, 1040, 0.5),
+		move: uiMoveSound(),
+		pick: uiPickSound(),
 	}
 }
 

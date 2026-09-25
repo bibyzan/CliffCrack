@@ -6,6 +6,7 @@ import (
 
 	"CliffCrack/engine/gfx"
 	"CliffCrack/engine/input"
+	"CliffCrack/engine/mathx"
 	"CliffCrack/engine/ui"
 	"CliffCrack/game/arena"
 )
@@ -19,47 +20,44 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 	mt, me := m.match, m.me()
 	anchored := hudText &^ gfx.UICentered
 
-	// Score: YOU 1 : 0 BOT, the round and its clock.
-	b.Panel("##score", 0.5, 0.02, anchored, 1.7)
-	b.ColorText(suitColor[0], "YOU")
-	b.SameLine(14)
-	b.Text("%d : %d", mt.Wins[0], mt.Wins[1])
-	b.SameLine(14)
-	b.ColorText(suitColor[1], "BOT")
-	b.End()
-	b.Panel("##round", 0.5, 0.085, hudText, 1.1)
-	clock := ""
-	if mt.Phase == arena.PhaseFight {
-		t := int(math.Ceil(float64(mt.Timer)))
-		clock = fmt.Sprintf("   ·   %d:%02d", t/60, t%60)
-	}
-	b.ColorText(uiMuted, "ROUND %d  ·  FIRST TO %d%s", mt.Round, arena.RoundsToWin, clock)
-	b.End()
-
-	if !me.Dead {
-		b.Panel("##crosshair", 0.5, 0.5, hudText, 1.5)
-		switch {
-		case m.hitMark > 0 && m.headMark:
-			b.ColorText(hurtColor, "X")
-		case m.hitMark > 0:
-			b.ColorText(uiAccent, "X")
-		default:
-			b.ColorText(withAlpha(uiWhite, 0.9), "+")
+	if mt.Practice {
+		m.rangeHUD(b)
+	} else {
+		// Score: YOU 1 : 0 BOT, the round and its clock.
+		b.Panel("##score", 0.5, 0.02, anchored, 1.7)
+		b.ColorText(suitColor[0], "YOU")
+		b.SameLine(14)
+		b.Text("%d : %d", mt.Wins[0], mt.Wins[1])
+		b.SameLine(14)
+		b.ColorText(suitColor[1], "BOT")
+		b.End()
+		b.Panel("##round", 0.5, 0.085, hudText, 1.1)
+		clock := ""
+		if mt.Phase == arena.PhaseFight {
+			t := int(math.Ceil(float64(mt.Timer)))
+			clock = fmt.Sprintf("   ·   %d:%02d", t/60, t%60)
 		}
+		b.ColorText(uiMuted, "ROUND %d  ·  FIRST TO %d%s", mt.Round, arena.RoundsToWin, clock)
 		b.End()
 	}
+
 	m.nameTags(b)
 
-	// Health, bottom left.
-	b.Panel("##health", 0.02, 0.975, anchored, 2.4)
-	col := uiWhite
-	if me.Health < arena.MaxHealth*0.35 {
-		col = hurtColor
+	// Armour, bottom left: a word, not a bar. With it gone, the word dims
+	// red and your health shows under it.
+	b.Panel("##armour", 0.02, 0.975, anchored, 2)
+	switch {
+	case me.Popped():
+		pulse := 0.45 + 0.25*float32(math.Sin(float64(m.elapsed)*6))
+		b.ColorText(withAlpha(hurtColor, pulse), "ARMOUR")
+		b.Progress("", me.Health/arena.MaxHealth, 150, 6)
+	case m.charging:
+		b.ColorText(uiMuted, "ARMOUR")
+	case me.Shield < arena.MaxShield*0.5:
+		b.ColorText(uiAccent, "ARMOUR CRACKED")
+	default:
+		b.ColorText(uiWhite, "ARMOUR")
 	}
-	b.ColorText(col, "%d", int(math.Ceil(float64(me.Health))))
-	b.SameLine(8)
-	b.ColorText(uiMuted, "HP")
-	b.Progress("", me.Health/arena.MaxHealth, 150, 6)
 	b.End()
 
 	// Kill feed, top right.
@@ -75,7 +73,7 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 	}
 
 	if !me.Dead {
-		m.weaponHUD(b, me)
+		m.weaponHUD(b, in, me)
 	}
 	m.banner(b, in)
 
@@ -83,51 +81,75 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 		fade := clampf((arenaHintTime-m.elapsed)*2, 0, 1)
 		b.Panel("##arenahint", 0.5, 0.975, hudText, 1.05)
 		b.ColorText(withAlpha(uiMuted, fade), "%s", prompt(in,
-			"WASD  move    Mouse  aim    LMB  fire / swing    1 2 3 / wheel  weapon    R  reload    Space  jump    Shift  sprint",
-			"L-stick  move    R-stick  aim    RT  fire / swing    LB RB Y  weapon    X  reload    A  jump    L3  sprint"))
+			"LMB  fire    RMB  aim    1 2 / wheel  swap    R  reload    E  pick up    F  hammer    G  grenade    Q  frag / sticky",
+			"RT  fire    LT  aim    Y  swap    X  reload (hold: pick up)    RB  hammer    LB  grenade    B  frag / sticky"))
 		b.End()
 	}
 }
 
-// weaponHUD is the weapon bar (bottom centre), the ammo count (bottom
-// right) and the reload bar.
-func (m *Arena) weaponHUD(b *ui.Builder, me *arena.Player) {
+// weaponHUD is the loadout, bottom right: the weapon in hand over the other,
+// its magazine and reserve, and the grenades (the kind G throws lit). A
+// weapon in reach gets a prompt to pick it up.
+func (m *Arena) weaponHUD(b *ui.Builder, in *input.State, me *arena.Player) {
 	anchored := hudText &^ gfx.UICentered
-	b.Panel("##weapons", 0.5, 0.905, anchored, 1.15)
-	for i, name := range arena.WeaponNames {
-		if i > 0 {
-			b.SameLine(28)
-		}
-		if arena.WeaponKind(i) == me.Current {
-			b.ColorText(uiAccent, "%d %s", i+1, name)
-		} else {
-			b.ColorText(withAlpha(uiMuted, 0.7), "%d %s", i+1, name)
-		}
+	b.Panel("##ammo", 0.985, 0.975, anchored, 2.8)
+	switch g, s := me.Gun(); {
+	case g != nil:
+		ammoText(b, s.Ammo, s.Reserve, s.Reloading > 0)
+	case me.Current == arena.WeaponLauncher:
+		ammoText(b, me.Launcher.Ammo, me.Launcher.Reserve, me.Launcher.Reloading > 0)
+	default:
+		b.ColorText(uiMuted, "--")
 	}
 	b.End()
 
-	b.Panel("##ammo", 0.985, 0.975, anchored, 2.8)
-	switch me.Current {
-	case arena.WeaponHammer:
-		b.ColorText(uiMuted, "--")
-	case arena.WeaponRifle:
-		ammoText(b, me.Rifle.Ammo, arena.MagSize, me.Rifle.Reloading > 0)
-	case arena.WeaponLauncher:
-		ammoText(b, me.Launcher.Ammo, arena.LauncherMag, me.Launcher.Reloading > 0)
+	b.Panel("##loadout", 0.985, 0.86, anchored, 1.2)
+	b.ColorText(uiAccent, "%s", arena.WeaponNames[me.Current])
+	if other := me.Other(); other != arena.NoWeapon {
+		b.SameLine(16)
+		b.ColorText(withAlpha(uiMuted, 0.75), "%s", arena.WeaponNames[other])
 	}
 	b.End()
+	b.Panel("##grenades", 0.985, 0.815, anchored, 1.05)
+	for k := range arena.GrenadeKinds {
+		if k > 0 {
+			b.SameLine(14)
+		}
+		col := withAlpha(uiMuted, 0.7)
+		if k == me.GrenadeKind {
+			col = uiWhite
+		}
+		if me.Grenades[k] == 0 {
+			col = withAlpha(col, 0.35)
+		}
+		b.ColorText(col, "%s x%d", arena.GrenadeNames[k], me.Grenades[k])
+	}
+	b.End()
+
 	if t, ok := me.Reloading(); ok {
 		b.Panel("##reload", 0.5, 0.64, hudText, 1.2)
 		b.ColorText(uiAccent, "RELOADING")
 		b.Progress("", t, 220, 6)
 		b.End()
 	}
+	if p := m.sim().NearestPickup(me); p != nil {
+		b.Panel("##pickup", 0.5, 0.6, hudText, 1.15)
+		verb := "pick up"
+		if me.Other() != arena.NoWeapon {
+			verb = "swap " + arena.WeaponNames[me.Current] + " for"
+		}
+		b.ColorText(uiWhite, "%s", prompt(in, "E  "+verb+" "+p.Name(), "hold X  "+verb+" "+p.Name()))
+		b.End()
+	}
 }
 
-// nameTags labels the other players you can see, with their health.
+// nameTags labels the other players you can see.
 func (m *Arena) nameTags(b *ui.Builder) {
 	s, me := m.sim(), m.me()
 	eye := m.eye()
+	if mk, ok := m.markerFor(me.Current); ok && mk.scope && me.ADS > 0.85 {
+		return // through a scope you see them, not labels
+	}
 	for _, p := range s.Players {
 		if p == me || p.Dead || !s.CanSee(eye, p.Head()) {
 			continue
@@ -141,8 +163,7 @@ func (m *Arena) nameTags(b *ui.Builder) {
 		dist := tag.Sub(eye).Len()
 		scale := clampf(1.3-dist/60, 0.75, 1.3)
 		b.Panel(fmt.Sprintf("##tag%d", p.ID), x, y, hudText, scale)
-		b.ColorText(suitColor[p.ID%len(suitColor)], "%s", playerName(p))
-		b.Progress("", p.Health/arena.MaxHealth, 70, 4)
+		b.ColorText(suitColor[team(p)], "%s", m.playerName(p))
 		b.End()
 	}
 }
@@ -214,14 +235,40 @@ func (m *Arena) roundResult() (title, sub string, colour [4]float32) {
 	return title, "the bot is down", colour
 }
 
-func ammoText(b *ui.Builder, ammo, mag int, reloading bool) {
+// ammoText is the magazine, big, and the reserve beside it.
+func ammoText(b *ui.Builder, ammo, reserve int, reloading bool) {
 	if ammo == 0 && !reloading {
 		b.ColorText(uiAccent, "%d", ammo)
 	} else {
 		b.Text("%d", ammo)
 	}
 	b.SameLine(10)
-	b.ColorText(uiMuted, "/ %d", mag)
+	b.ColorText(uiMuted, "| %d", reserve)
+}
+
+// rangeHUD is the firing range's panel: what's under the crosshair and how
+// far, and how you're shooting.
+func (m *Arena) rangeHUD(b *ui.Builder) {
+	s, me := m.sim(), m.me()
+	b.Panel("##range", 0.5, 0.02, hudText&^gfx.UICentered, 1.5)
+	b.ColorText(paintColor[0], "FIRING RANGE")
+	b.End()
+	b.Panel("##rangeinfo", 0.5, 0.08, hudText, 1.05)
+	what := "--"
+	if !me.Dead {
+		shot := s.Trace(me, me.Eye(1), me.Forward(), 300)
+		dist := shot.To.Sub(shot.From).Len()
+		switch {
+		case shot.Victim != nil && shot.Head:
+			what = fmt.Sprintf("DUMMY · HEAD · %.0f m", dist)
+		case shot.Victim != nil:
+			what = fmt.Sprintf("DUMMY · %.0f m", dist)
+		case shot.Normal != (mathx.Vec3{}):
+			what = fmt.Sprintf("%.0f m", dist)
+		}
+	}
+	b.ColorText(uiMuted, "%s   ·   accuracy %.0f%%   headshots %d   downed %d", what, me.Accuracy()*100, me.Headshots, me.Kills)
+	b.End()
 }
 
 // DebugUI is the F1 window.

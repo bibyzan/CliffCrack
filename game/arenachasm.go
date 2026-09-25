@@ -154,9 +154,15 @@ func newChasm() (*chasm, error) {
 	return c, nil
 }
 
-func (c *chasm) appendDraws(out []render.DrawCmd) []render.DrawCmd {
+// appendDraws draws the chasm: its walls and water, and with crags the
+// ridges along the arena's sides.
+func (c *chasm) appendDraws(out []render.DrawCmd, crags bool) []render.DrawCmd {
 	id := mathx.Translate(0, 0, 0)
-	for _, w := range append(c.walls[:], c.crags[:]...) {
+	meshes := c.walls[:]
+	if crags {
+		meshes = append(meshes, c.crags[:]...)
+	}
+	for _, w := range meshes {
 		out = append(out, render.DrawCmd{Model: id, Color: chasmRockColor, Flags: gfx.DrawFlat | gfx.DrawSnow, Mesh: w})
 	}
 	return append(out, render.DrawCmd{Model: id, Color: waterColor, Flags: gfx.DrawFlat, Mesh: c.water})

@@ -7,22 +7,30 @@ import (
 	"CliffCrack/engine/physics"
 )
 
-// WeaponKind is a loadout slot.
+// WeaponKind is a weapon. A player carries two (see Weapons.Slots), swings
+// the hammer as their melee, and throws grenades.
 type WeaponKind int
 
 const (
-	WeaponHammer WeaponKind = iota
-	WeaponRifle
+	WeaponHammer WeaponKind = iota // the melee: always to hand, never in a slot
+	WeaponRifle                    // the assault rifle
+	WeaponPistol
+	WeaponShotgun
+	WeaponSniper
 	WeaponLauncher
 	weaponCount
 
-	// Not weapons, but what else can take a player down.
+	// Not carried, but what else can take a player down.
 	WeaponRubble = weaponCount     // crushed by falling debris
 	WeaponDrop   = weaponCount + 1 // fell into the pit
+	WeaponFrag   = weaponCount + 2 // a frag grenade
+	WeaponSticky = weaponCount + 3 // a sticky grenade
+
+	NoWeapon WeaponKind = -1 // an empty slot
 )
 
-// WeaponNames are the HUD labels, by slot.
-var WeaponNames = [weaponCount]string{"HAMMER", "RIFLE", "LAUNCHER"}
+// WeaponNames are the HUD labels.
+var WeaponNames = [weaponCount]string{"HAMMER", "RIFLE", "PISTOL", "SHOTGUN", "SNIPER", "LAUNCHER"}
 
 // Cause is how the kill feed names what took a player down.
 func (k WeaponKind) Cause() string {
@@ -31,25 +39,20 @@ func (k WeaponKind) Cause() string {
 		return "RUBBLE"
 	case WeaponDrop:
 		return "THE DROP"
+	case WeaponFrag:
+		return "FRAG"
+	case WeaponSticky:
+		return "STICKY"
 	}
-	return WeaponNames[k]
+	if k >= 0 && k < weaponCount {
+		return WeaponNames[k]
+	}
+	return "?"
 }
 
-// Weapon tuning.
+// Weapon tuning that isn't per gun (see Guns for those).
 const (
-	SwitchTime = 0.3 // s to put one weapon away and bring the next up
-
-	MagSize          = 30
-	fireInterval     = 0.1 // s between rifle shots (600 rpm)
-	ReloadTime       = 1.5 // s
-	maxRange         = 200
-	baseSpread       = 0.002 // radians of cone half-angle standing still
-	moveSpread       = 0.012 // extra while moving
-	bloomPerShot     = 0.004 // extra per shot in a burst, decays quickly
-	recoilKick       = 0.012 // radians of pitch per shot
-	recoilReturn     = 4.0   // 1/s: sustained fire climbs ~2 degrees, then settles
-	rifleChunkDamage = 12
-	RifleDamage      = 14 // per round to a player (x headMult in the head)
+	SwitchTime = 0.3 // s to put one weapon away and bring the other up
 
 	HammerSwing        = 0.7  // s per swing
 	HammerHitAt        = 0.22 // s into the swing when the head lands
@@ -57,9 +60,10 @@ const (
 	hammerDamage       = 120  // to structures, at the point of impact
 	hammerRadius       = 0.75 // m: the crater it smashes (about a panel or two of wood)
 	hammerPush         = 7    // m/s given to rubble
-	HammerPlayerDamage = 80   // two blows down a player
+	HammerPlayerDamage = 80   // gets through armour: two blows down a player
 
 	LauncherMag       = 6
+	LauncherReserve   = 12
 	launcherInterval  = 0.7 // s
 	LauncherReload    = 2.2 // s
 	grenadeRadius     = 0.1
@@ -67,17 +71,21 @@ const (
 	grenadeFuse       = 2.5
 	BlastRadius       = 4.2
 	blastDamage       = 330 // to structures
-	BlastPlayerDamage = 120 // to a player at the centre
+	BlastPlayerDamage = 120 // to a player at the centre (through armour)
 	blastPush         = 13  // m/s at the centre
+
+	recoilReturn = 4.0 // 1/s: how quickly recoil's climb settles
+	descopeTime  = 0.5 // s: hit while zoomed in, your sights are knocked down this long
 )
 
-// RifleState is the rifle's magazine and timers.
-type RifleState struct {
+// GunState is one gun's magazine, reserve, timers, bloom and kick.
+type GunState struct {
 	Ammo      int
+	Reserve   int     // rounds carried beyond the magazine
 	Reloading float32 // seconds left, 0 when ready
-	cooldown  float32
-	bloom     float32
 	Kick      float32 // 0..1 visual recoil for the gun model, decays fast
+	cooldown  float32
+	bloom     float32 // extra spread from firing, radians; settles back
 }
 
 // HammerState is the sledgehammer's swing.
@@ -97,162 +105,205 @@ func (h HammerState) Progress() float32 {
 // LauncherState is the grenade launcher's magazine and timers.
 type LauncherState struct {
 	Ammo      int
+	Reserve   int
 	Reloading float32
 	cooldown  float32
 	Kick      float32
 }
 
-// Grenade is a launched round in flight: it explodes on its first impact,
-// when it reaches another player, or when its fuse runs out.
-type Grenade struct {
-	Body  *physics.Body
-	Owner *Player
-	Age   float32
-}
-
-// Weapons is a player's loadout.
+// Weapons is a player's loadout: two weapons in slots, the one in hand, the
+// hammer to swing, and grenades.
 type Weapons struct {
-	Current   WeaponKind
-	Switching float32 // seconds until the new weapon is ready
-	Rifle     RifleState
+	Slots     [2]WeaponKind
+	Active    int        // which slot is in hand
+	Current   WeaponKind // the weapon in hand: Slots[Active]
+	Switching float32    // seconds until the weapon coming up is ready
+	States    [weaponCount]GunState
 	Hammer    HammerState
 	Launcher  LauncherState
+	// ADS is how far the sights are raised, 0 (hip) to 1 (aiming down them).
+	ADS     float32
+	descope float32
+
+	Grenades    [GrenadeKinds]int // carried, by kind
+	GrenadeKind GrenadeKind       // which kind G throws
+	throwWait   float32           // s before another can be thrown
 }
 
+// newWeapons is the loadout everyone starts with: the rifle in hand, the
+// pistol on the hip, two frags and a sticky. Every gun's state starts full,
+// so one picked up later comes loaded.
 func newWeapons() Weapons {
-	return Weapons{
-		Rifle:    RifleState{Ammo: MagSize},
-		Hammer:   HammerState{Swing: -1},
-		Launcher: LauncherState{Ammo: LauncherMag},
+	w := Weapons{Slots: [2]WeaponKind{WeaponRifle, WeaponPistol}, Current: WeaponRifle,
+		Hammer: HammerState{Swing: -1}, Launcher: LauncherState{Ammo: LauncherMag, Reserve: LauncherReserve}}
+	for k, g := range Guns {
+		if g != nil {
+			w.States[k].Ammo, w.States[k].Reserve = g.Mag, g.Reserve
+		}
 	}
+	w.Grenades = [GrenadeKinds]int{Frag: 2, Sticky: 1}
+	return w
+}
+
+// Holds reports whether k is in one of the slots.
+func (w *Weapons) Holds(k WeaponKind) bool { return w.Slots[0] == k || w.Slots[1] == k }
+
+// Other is the weapon in the slot not in hand.
+func (w *Weapons) Other() WeaponKind { return w.Slots[1-w.Active] }
+
+// setActive brings slot i up.
+func (w *Weapons) setActive(i int) {
+	w.Active, w.Current = i, w.Slots[i]
+	w.Switching, w.ADS = SwitchTime, 0
+}
+
+// Gun is the current weapon's spec and state, or nil for the launcher (or
+// an empty hand).
+func (w *Weapons) Gun() (*GunSpec, *GunState) {
+	if g := gunFor(w.Current); g != nil {
+		return g, &w.States[w.Current]
+	}
+	return nil, nil
 }
 
 // Reloading reports the current weapon's reload progress (0..1) and whether it's reloading.
 func (w *Weapons) Reloading() (float32, bool) {
-	switch w.Current {
-	case WeaponRifle:
-		if w.Rifle.Reloading > 0 {
-			return 1 - w.Rifle.Reloading/ReloadTime, true
+	if g, s := w.Gun(); g != nil {
+		if s.Reloading > 0 {
+			return 1 - s.Reloading/g.Reload, true
 		}
-	case WeaponLauncher:
-		if w.Launcher.Reloading > 0 {
-			return 1 - w.Launcher.Reloading/LauncherReload, true
-		}
+		return 0, false
+	}
+	if w.Current == WeaponLauncher && w.Launcher.Reloading > 0 {
+		return 1 - w.Launcher.Reloading/LauncherReload, true
 	}
 	return 0, false
 }
 
+// Swinging reports whether the hammer is mid-swing (the gun is put aside).
+func (w *Weapons) Swinging() bool { return w.Hammer.Swing >= 0 }
+
+// Zoom is how much the view is magnified right now: 1 at the hip, up to the
+// gun's zoom with its sights all the way up.
+func (w *Weapons) Zoom() float32 {
+	g, _ := w.Gun()
+	if g == nil {
+		return 1
+	}
+	return 1 + (g.Zoom-1)*smoothstep(w.ADS)
+}
+
+func smoothstep(t float32) float32 {
+	t = clamp(t, 0, 1)
+	return t * t * (3 - 2*t)
+}
+
 func (a *Arena) updateWeapons(p *Player, dt float32, in Input, ev *Events) {
 	w := &p.Weapons
-	w.Rifle.Kick *= float32(math.Exp(-18 * float64(dt)))
-	w.Launcher.Kick *= float32(math.Exp(-10 * float64(dt)))
-	w.Rifle.bloom *= float32(math.Exp(-6 * float64(dt)))
-	// Reloads carry on in the background, so switching away doesn't lose one.
-	if w.Rifle.Reloading > 0 {
-		if w.Rifle.Reloading = max(w.Rifle.Reloading-dt, 0); w.Rifle.Reloading == 0 {
-			w.Rifle.Ammo = MagSize
+	for k, g := range Guns {
+		s := &w.States[k]
+		s.Kick *= float32(math.Exp(-14 * float64(dt)))
+		if g == nil {
+			continue
+		}
+		s.bloom *= float32(math.Exp(-float64(g.BloomDecay * dt)))
+		// Reloads carry on in the background, so switching away doesn't lose one.
+		if s.Reloading > 0 {
+			if s.Reloading = max(s.Reloading-dt, 0); s.Reloading == 0 {
+				take := g.Mag - s.Ammo
+				if !a.FreeAmmo {
+					take = min(take, s.Reserve)
+					s.Reserve -= take
+				}
+				s.Ammo += take
+			}
 		}
 	}
+	w.Launcher.Kick *= float32(math.Exp(-10 * float64(dt)))
 	if w.Launcher.Reloading > 0 {
 		if w.Launcher.Reloading = max(w.Launcher.Reloading-dt, 0); w.Launcher.Reloading == 0 {
-			w.Launcher.Ammo = LauncherMag
+			take := LauncherMag - w.Launcher.Ammo
+			if !a.FreeAmmo {
+				take = min(take, w.Launcher.Reserve)
+				w.Launcher.Reserve -= take
+			}
+			w.Launcher.Ammo += take
 		}
 	}
 
-	next := w.Current
-	if in.Select >= 1 && in.Select <= int(weaponCount) {
-		next = WeaponKind(in.Select - 1)
+	// The other slot: picked by number, or swapped to.
+	next := w.Active
+	if in.Select >= 1 && in.Select <= 2 {
+		next = in.Select - 1
 	}
 	if in.Cycle != 0 {
-		next = WeaponKind((int(w.Current) + in.Cycle + int(weaponCount)) % int(weaponCount))
+		next = 1 - w.Active
 	}
-	if next != w.Current {
-		w.Current = next
-		w.Switching = SwitchTime
-		w.Hammer = HammerState{Swing: -1}
+	if next != w.Active && w.Slots[next] != NoWeapon && !w.Swinging() {
+		w.setActive(next)
 		ev.act(p, ActSwitch, 0)
 	}
+	if in.SwitchGrenade {
+		w.GrenadeKind = (w.GrenadeKind + 1) % GrenadeKinds
+		ev.act(p, ActSwitch, 0)
+	}
+	if in.Interact {
+		a.pickUp(p, ev)
+	}
+
+	// Aiming down the sights: raised over the gun's ADS time while the aim
+	// button is held, and dropped while switching, reloading, sprinting,
+	// swinging or knocked out of a scope.
+	w.descope = max(w.descope-dt, 0)
+	g, s := w.Gun()
+	// (Sprint held while scoped in holds your breath rather than sprinting.)
+	breathing := g != nil && g.Zoom >= 4 && w.ADS > 0.5
+	aiming := g != nil && in.Aim && w.Switching == 0 && s.Reloading == 0 && w.descope == 0 && (!sprinting(in) || breathing) && !w.Swinging()
+	switch {
+	case g == nil:
+		w.ADS = 0
+	case aiming:
+		w.ADS = min(w.ADS+dt/g.ADSTime, 1)
+	default:
+		w.ADS = max(w.ADS-dt/g.ADSTime, 0)
+	}
+
+	// The hammer and grenades are to hand whatever's held; a swing puts the
+	// gun aside until it's done.
+	w.throwWait = max(w.throwWait-dt, 0)
+	if in.Melee && !w.Swinging() {
+		w.Hammer = HammerState{Swing: 0}
+		w.ADS = 0
+		ev.act(p, ActSwing, 0)
+	}
+	if w.Swinging() {
+		a.updateHammer(p, dt, ev)
+		return
+	}
+	if in.Throw {
+		a.throwGrenade(p, ev)
+	}
+
 	if w.Switching > 0 {
 		w.Switching = max(w.Switching-dt, 0)
-		w.Rifle.cooldown = max(w.Rifle.cooldown-dt, 0)
+		for k := range w.States {
+			w.States[k].cooldown = max(w.States[k].cooldown-dt, 0)
+		}
 		w.Launcher.cooldown = max(w.Launcher.cooldown-dt, 0)
 		return
 	}
 
 	switch w.Current {
-	case WeaponHammer:
-		a.updateHammer(p, dt, in, ev)
-	case WeaponRifle:
-		a.updateRifle(p, dt, in, ev)
 	case WeaponLauncher:
 		a.updateLauncher(p, dt, in, ev)
+	case NoWeapon:
+	default:
+		a.updateGun(p, dt, in, ev)
 	}
 }
 
-func (a *Arena) updateRifle(p *Player, dt float32, in Input, ev *Events) {
-	w := &p.Rifle
-	// The cooldown may go negative while the trigger is held, so leftover time
-	// carries into the next shot and the fire rate doesn't depend on frame rate.
-	w.cooldown -= dt
-	if !in.Fire || w.Reloading > 0 {
-		w.cooldown = max(w.cooldown, 0)
-	}
-	if w.Reloading > 0 {
-		return
-	}
-	if in.Reload && w.Ammo < MagSize {
-		w.Reloading = ReloadTime
-		ev.act(p, ActReload, 0)
-		return
-	}
-	if !in.Fire || w.cooldown > 0 {
-		return
-	}
-	if w.Ammo == 0 {
-		if in.FirePressed {
-			ev.act(p, ActEmpty, 0)
-			w.Reloading = ReloadTime
-			ev.act(p, ActReload, 0)
-		}
-		return
-	}
-
-	w.cooldown += fireInterval
-	if !a.InfiniteAmmo {
-		w.Ammo--
-	}
-	p.ShotsFired++
-
-	moving := mathx.Vec3{p.Body.Velocity[0], 0, p.Body.Velocity[2]}.Len() / walkSpeed
-	spread := baseSpread + moveSpread*min(moving, 1) + w.bloom
-	if !p.onGround {
-		spread += moveSpread
-	}
-	dir := a.jitter(p.Forward(), spread)
-	shot := a.trace(p, p.Eye(1), dir, maxRange)
-	ev.Shots = append(ev.Shots, shot)
-
-	w.bloom = min(w.bloom+bloomPerShot, 0.03)
-	w.Kick = 1
-	p.recoil += recoilKick
-
-	switch {
-	case shot.Victim != nil:
-		p.ShotsHit++
-		damage := float32(RifleDamage)
-		if shot.Head {
-			damage *= headMult
-			p.Headshots++
-		}
-		a.hurtPlayer(shot.Victim, p, damage, shot.Head, WeaponRifle, shot.From, dir.Scale(0.4), ev)
-	case shot.Chunk != nil:
-		a.damageChunk(shot.Chunk, rifleChunkDamage, dir.Scale(3), p, ev)
-	}
-	if w.Ammo == 0 && !a.InfiniteAmmo {
-		w.Reloading = ReloadTime // auto-reload after the last round
-		ev.act(p, ActReload, 0)
-	}
-}
+// sprinting reports whether the input sprints (forward, with sprint held).
+func sprinting(in Input) bool { return in.Sprint && in.Move[1] > 0.3 }
 
 // trace follows a ray from by's eye up to reach: to the first solid surface,
 // or a player's hitbox in front of it. It ignores the shooter, debris and
@@ -279,6 +330,12 @@ func (a *Arena) trace(by *Player, from, dir mathx.Vec3, reach float32) Shot {
 	return shot
 }
 
+// Trace is where a ray from by's eye first hits: a player's hitbox, or a
+// solid surface.
+func (a *Arena) Trace(by *Player, from, dir mathx.Vec3, reach float32) Shot {
+	return a.trace(by, from, dir, reach)
+}
+
 // jitter tilts dir by a random angle up to spread radians.
 func (a *Arena) jitter(dir mathx.Vec3, spread float32) mathx.Vec3 {
 	if spread <= 0 {
@@ -300,21 +357,16 @@ func basis(dir mathx.Vec3) (right, up mathx.Vec3) {
 	return right, right.Cross(dir)
 }
 
-func (a *Arena) updateHammer(p *Player, dt float32, in Input, ev *Events) {
+// updateHammer carries a swing through: the blow lands HammerHitAt in.
+func (a *Arena) updateHammer(p *Player, dt float32, ev *Events) {
 	h := &p.Hammer
-	if h.Swing >= 0 {
-		h.Swing += dt
-		if !h.struck && h.Swing >= HammerHitAt {
-			h.struck = true
-			a.hammerStrike(p, ev)
-		}
-		if h.Swing >= HammerSwing {
-			h.Swing = -1
-		}
+	h.Swing += dt
+	if !h.struck && h.Swing >= HammerHitAt {
+		h.struck = true
+		a.hammerStrike(p, ev)
 	}
-	if h.Swing < 0 && in.Fire {
-		h.Swing, h.struck = 0, false
-		ev.act(p, ActSwing, 0)
+	if h.Swing >= HammerSwing {
+		h.Swing = -1
 	}
 }
 
@@ -353,7 +405,7 @@ func (a *Arena) hammerStrike(p *Player, ev *Events) {
 		if best.Chunk != nil {
 			smash.Mat = best.Chunk.Mat
 		}
-		a.blast(best.To, hammerRadius, hammerDamage, hammerPush, fwd.Scale(hammerPush*0.5), p, false, ev)
+		a.blast(best.To, hammerRadius, hammerDamage, 0, hammerPush, fwd.Scale(hammerPush*0.5), p, WeaponHammer, ev)
 	}
 	ev.Smashes = append(ev.Smashes, smash)
 	p.recoil += 0.035 // the jolt of the impact
@@ -365,7 +417,8 @@ func (a *Arena) updateLauncher(p *Player, dt float32, in Input, ev *Events) {
 	if l.Reloading > 0 {
 		return
 	}
-	if in.Reload && l.Ammo < LauncherMag {
+	canReload := l.Reserve > 0 || a.FreeAmmo
+	if in.Reload && l.Ammo < LauncherMag && canReload {
 		l.Reloading = LauncherReload
 		ev.act(p, ActReload, 0)
 		return
@@ -376,8 +429,10 @@ func (a *Arena) updateLauncher(p *Player, dt float32, in Input, ev *Events) {
 	if l.Ammo == 0 {
 		if in.FirePressed {
 			ev.act(p, ActEmpty, 0)
-			l.Reloading = LauncherReload
-			ev.act(p, ActReload, 0)
+			if canReload {
+				l.Reloading = LauncherReload
+				ev.act(p, ActReload, 0)
+			}
 		}
 		return
 	}
@@ -386,61 +441,30 @@ func (a *Arena) updateLauncher(p *Player, dt float32, in Input, ev *Events) {
 		l.Ammo--
 	}
 	fwd := p.Forward()
-	b := physics.NewSphere(grenadeRadius, 0.6)
-	b.Position = p.Eye(1).Add(fwd.Scale(0.7))
-	b.Velocity = fwd.Scale(grenadeSpeed).Add(mathx.Vec3{0, 1.5, 0}).Add(p.Body.Velocity)
-	b.Restitution = 0.3
-	b.Ignore = p.Body // it leaves the barrel from inside your own collider
-	g := &Grenade{Body: b, Owner: p}
-	b.UserData = g
-	a.Phys.Add(b)
-	a.Grenades = append(a.Grenades, g)
+	a.launch(p, GrenadeRound, p.Eye(1).Add(fwd.Scale(0.7)), fwd.Scale(grenadeSpeed).Add(mathx.Vec3{0, 1.5, 0}))
 	ev.act(p, ActLaunch, 0)
 	l.Kick = 1
 	p.recoil += 0.05
-	if l.Ammo == 0 && !a.InfiniteAmmo {
+	if l.Ammo == 0 && !a.InfiniteAmmo && (l.Reserve > 0 || a.FreeAmmo) {
 		l.Reloading = LauncherReload
 		ev.act(p, ActReload, 0)
 	}
 }
 
-// updateGrenades detonates grenades that hit something, reached another
-// player or ran out of fuse.
-func (a *Arena) updateGrenades(dt float32, ev *Events) {
-	if len(a.Grenades) == 0 {
-		return
+// launch puts a grenade of kind in flight from at, leaving the owner at
+// vel on top of their own velocity.
+func (a *Arena) launch(p *Player, kind GrenadeKind, at, vel mathx.Vec3) *Grenade {
+	spec := grenadeSpecs[kind]
+	b := physics.NewSphere(grenadeRadius, 0.6)
+	b.Position = at
+	b.Velocity = vel.Add(p.Body.Velocity)
+	b.Restitution = spec.Bounce
+	b.Ignore = p.Body // it leaves from inside your own collider
+	g := &Grenade{Body: b, Owner: p, Kind: kind}
+	b.UserData = g
+	if err := a.Phys.Add(b); err != nil {
+		panic(err)
 	}
-	hit := map[*physics.Body]bool{}
-	for _, im := range a.Phys.Impacts() {
-		hit[im.A], hit[im.B] = true, true
-	}
-	live := a.Grenades[:0]
-	for _, g := range a.Grenades {
-		g.Age += dt
-		if !hit[g.Body] && !a.nearEnemy(g) && g.Age < grenadeFuse && g.Body.Position[1] > fallDeath {
-			live = append(live, g)
-			continue
-		}
-		a.Phys.Remove(g.Body)
-		a.explode(g.Body.Position, g.Owner, ev)
-	}
-	clear(a.Grenades[len(live):])
-	a.Grenades = live
-}
-
-// nearEnemy reports whether a grenade has reached someone else's hitbox.
-func (a *Arena) nearEnemy(g *Grenade) bool {
-	for _, p := range a.Players {
-		if p != g.Owner && !p.Dead && p.hitboxDist(g.Body.Position) <= grenadeRadius {
-			return true
-		}
-	}
-	return false
-}
-
-// explode is a grenade going off: heavy damage and a shove in a radius,
-// including players (rocket jumps work, and cost some health).
-func (a *Arena) explode(at mathx.Vec3, by *Player, ev *Events) {
-	ev.Explosions = append(ev.Explosions, Explosion{At: at, By: by})
-	a.blast(at, BlastRadius, blastDamage, blastPush, mathx.Vec3{}, by, true, ev)
+	a.Grenades = append(a.Grenades, g)
+	return g
 }

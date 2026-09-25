@@ -98,7 +98,7 @@ func TestKnockedIntoThePitCreditsTheAttacker(t *testing.T) {
 	victim.Body.Teleported()
 	run(a, 0.3)
 	var ev Events
-	a.blast(mathx.Vec3{5, 0.1, 21}, 2.5, 1000, 2, mathx.Vec3{}, p0, true, &ev)
+	a.blast(mathx.Vec3{5, 0.1, 21}, 2.5, 1000, BlastPlayerDamage, 2, mathx.Vec3{}, p0, WeaponLauncher, &ev)
 	if victim.Dead {
 		t.Fatal("the blast alone shouldn't kill")
 	}
@@ -147,15 +147,15 @@ func TestFallingRubbleHurts(t *testing.T) {
 	d := a.addDebris(p.Body.Position.Add(mathx.Vec3{0, 4, 0}), mathx.Vec3{0.5, 0.5, 0.5}, Concrete, mathx.Vec3{0, -10, 0})
 	d.By = nil
 	ev := run(a, 0.5)
-	if p.Health >= MaxHealth || len(ev.Hurts) == 0 {
-		t.Fatalf("a falling block of concrete didn't hurt: health %v", p.Health)
+	if p.Durability() >= MaxShield+MaxHealth || len(ev.Hurts) == 0 {
+		t.Fatalf("a falling block of concrete didn't hurt: %v left", p.Durability())
 	}
 	// Lying still, it's harmless to walk into.
-	health := p.Health
+	health := p.Durability()
 	run(a, 1.5)
 	run(a, 0.5, Input{Move: [2]float32{0.3, 0.3}})
-	if p.Health != health {
-		t.Errorf("rubble at rest hurt: %v -> %v", health, p.Health)
+	if p.Durability() < health {
+		t.Errorf("rubble at rest hurt: %v -> %v", health, p.Durability())
 	}
 }
 

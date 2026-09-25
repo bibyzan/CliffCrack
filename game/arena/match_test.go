@@ -19,7 +19,7 @@ func toFight(t *testing.T, m *Match) {
 func kill(m *Match, victim, by int) {
 	var ev Events
 	a := m.Arena
-	a.hurtPlayer(a.Players[victim], a.Players[by], MaxHealth, false, WeaponRifle, a.Players[by].Eye(1), a.Players[by].Forward(), &ev)
+	a.hurtPlayer(a.Players[victim], a.Players[by], 1e6, false, WeaponLauncher, a.Players[by].Eye(1), a.Players[by].Forward(), &ev)
 	m.Step(frame, nil)
 }
 
@@ -131,8 +131,8 @@ func TestBothDownIsADraw(t *testing.T) {
 	toFight(t, m)
 	var ev Events
 	a := m.Arena
-	a.hurtPlayer(a.Players[0], a.Players[1], MaxHealth, false, WeaponLauncher, a.Players[1].Eye(1), a.Players[1].Forward().Scale(0), &ev)
-	a.hurtPlayer(a.Players[1], a.Players[1], MaxHealth/selfDamage, false, WeaponLauncher, a.Players[1].Eye(1), a.Players[1].Forward().Scale(0), &ev)
+	a.hurtPlayer(a.Players[0], a.Players[1], 1e6, false, WeaponLauncher, a.Players[1].Eye(1), a.Players[1].Forward().Scale(0), &ev)
+	a.hurtPlayer(a.Players[1], a.Players[1], 1e6, false, WeaponLauncher, a.Players[1].Eye(1), a.Players[1].Forward().Scale(0), &ev)
 	m.Step(frame, nil)
 	if m.Phase != PhaseRoundOver || m.RoundWinner != -1 {
 		t.Errorf("both down: phase %v round winner %d, want a draw", m.Phase, m.RoundWinner)

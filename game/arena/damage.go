@@ -171,9 +171,9 @@ func (a *Arena) ageDebris(dt float32) {
 // blast damages every structure chunk within radius of at (full at the
 // centre, falling to nothing at the edge) and shoves loose bodies outwards.
 // bias is added to every shove (a hammer drives debris away from the swing).
-// With hitsPlayers, players in range are hurt and shoved too; by gets the
-// credit.
-func (a *Arena) blast(at mathx.Vec3, radius, damage, push float32, bias mathx.Vec3, by *Player, hitsPlayers bool, ev *Events) {
+// With playerDamage (at the centre), players in range are hurt by cause and
+// shoved too; by gets the credit.
+func (a *Arena) blast(at mathx.Vec3, radius, damage, playerDamage, push float32, bias mathx.Vec3, by *Player, cause WeaponKind, ev *Events) {
 	// Pieces this blast breaks off already carry its push; shove only the
 	// ones that were lying around before.
 	loose := append([]*Debris(nil), a.Debris...)
@@ -207,9 +207,11 @@ func (a *Arena) blast(at mathx.Vec3, radius, damage, push float32, bias mathx.Ve
 		d.Body.Velocity = d.Body.Velocity.Add(shove(d.Body, 1))
 	}
 	for _, g := range a.Grenades {
-		g.Body.Velocity = g.Body.Velocity.Add(shove(g.Body, 0.5))
+		if !g.Stuck {
+			g.Body.Velocity = g.Body.Velocity.Add(shove(g.Body, 0.5))
+		}
 	}
-	if !hitsPlayers {
+	if playerDamage <= 0 {
 		return
 	}
 	for _, p := range a.Players {
@@ -222,6 +224,6 @@ func (a *Arena) blast(at mathx.Vec3, radius, damage, push float32, bias mathx.Ve
 			p.Body.Velocity = p.Body.Velocity.Add(kick)
 			continue
 		}
-		a.hurtPlayer(p, by, BlastPlayerDamage*(1-d/radius), false, WeaponLauncher, at, kick, ev)
+		a.hurtPlayer(p, by, playerDamage*(1-d/radius), false, cause, at, kick, ev)
 	}
 }

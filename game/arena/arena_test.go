@@ -19,6 +19,11 @@ func run(a *Arena, seconds float32, inputs ...Input) Events {
 	return all
 }
 
+// arm puts weapon k in p's hand, in place of what they held.
+func arm(p *Player, k WeaponKind) {
+	p.Slots[p.Active], p.Current, p.Switching = k, k, 0
+}
+
 // flatHalf is the half size of flatArena's floor.
 const flatHalf = 34
 
@@ -114,19 +119,20 @@ func TestMagazineAndReload(t *testing.T) {
 	a := flatArena(nil, at(0, 10, 0))
 	p := a.Players[0]
 	p.Pitch = 0.5 // shoot at the sky
-	ev := run(a, float32(MagSize)*fireInterval+0.05, Input{Fire: true})
-	if len(ev.Shots) != MagSize {
-		t.Errorf("fired %d shots from a full magazine, want %d", len(ev.Shots), MagSize)
+	g, s := Guns[WeaponRifle], &p.States[WeaponRifle]
+	ev := run(a, float32(g.Mag)*g.Interval+0.05, Input{Fire: true})
+	if len(ev.Shots) != g.Mag {
+		t.Errorf("fired %d shots from a full magazine, want %d", len(ev.Shots), g.Mag)
 	}
-	if !ev.Did(p, ActReload) || p.Rifle.Reloading == 0 {
+	if !ev.Did(p, ActReload) || s.Reloading == 0 {
 		t.Fatal("an empty magazine should start a reload")
 	}
 	if ev := run(a, 0.5, Input{Fire: true}); len(ev.Shots) != 0 {
 		t.Error("can't fire while reloading")
 	}
-	run(a, ReloadTime)
-	if p.Rifle.Ammo != MagSize || p.Rifle.Reloading != 0 {
-		t.Errorf("after reloading: ammo %d, reloading %v", p.Rifle.Ammo, p.Rifle.Reloading)
+	run(a, g.Reload)
+	if s.Ammo != g.Mag || s.Reloading != 0 {
+		t.Errorf("after reloading: ammo %d, reloading %v", s.Ammo, s.Reloading)
 	}
 
 	// Manual reload of a partial magazine.
@@ -188,18 +194,18 @@ func TestRifleKillsAPlayer(t *testing.T) {
 			}
 		}
 	}
-	if hits == 0 || target.Health != MaxHealth-float32(hits)*RifleDamage {
-		t.Fatalf("%d hits left the target at %v health", hits, target.Health)
+	if hits == 0 || target.Shield != MaxShield-float32(hits)*Guns[WeaponRifle].Damage || target.Health != MaxHealth {
+		t.Fatalf("%d hits left the target at %v armour, %v health: want the armour to take them", hits, target.Shield, target.Health)
 	}
 	if target.Flash == 0 {
 		t.Error("a hit should flash the target")
 	}
 
-	ev.Merge(run(a, 2, Input{Fire: true}))
+	ev.Merge(run(a, 5, Input{Fire: true}))
 	if !target.Dead || len(ev.Kills) != 1 || ev.Kills[0].By != shooter || ev.Kills[0].Weapon != WeaponRifle {
 		t.Fatalf("sustained fire should kill: dead %v, kills %+v, health %v", target.Dead, ev.Kills, target.Health)
 	}
-	if shooter.Kills != 1 || shooter.Damage != MaxHealth {
+	if shooter.Kills != 1 || shooter.Damage != MaxShield+MaxHealth {
 		t.Errorf("shooter credited with %d kills, %v damage", shooter.Kills, shooter.Damage)
 	}
 	// The dead can't be shot and don't move.
@@ -222,7 +228,7 @@ func TestHeadshotsHitHarder(t *testing.T) {
 	if len(ev.Hurts) != 1 || !ev.Hurts[0].Head {
 		t.Fatalf("a shot at the head: hurts %+v", ev.Hurts)
 	}
-	if want := float32(RifleDamage * headMult); math.Abs(float64(ev.Hurts[0].Damage-want)) > 1e-3 {
+	if want := Guns[WeaponRifle].Damage * Guns[WeaponRifle].HeadMult; math.Abs(float64(ev.Hurts[0].Damage-want)) > 1e-3 {
 		t.Errorf("headshot damage %v, want %v", ev.Hurts[0].Damage, want)
 	}
 	if shooter.Headshots != 1 {
@@ -239,8 +245,8 @@ func TestCoverBlocksShots(t *testing.T) {
 	if len(ev.Shots) == 0 {
 		t.Fatal("no shots fired")
 	}
-	if h := a.Players[1].Health; h != MaxHealth {
-		t.Errorf("the player behind the wall took damage: health %v", h)
+	if h := a.Players[1].Durability(); h != MaxShield+MaxHealth {
+		t.Errorf("the player behind the wall took damage: %v left", h)
 	}
 	if a.CanSee(a.Players[0].Eye(1), a.Players[1].Head()) {
 		t.Error("CanSee through a wall")
@@ -249,16 +255,15 @@ func TestCoverBlocksShots(t *testing.T) {
 
 func TestHammerTwoBlowsDownAPlayer(t *testing.T) {
 	a, attacker, target := duel(2.2)
-	attacker.Current = WeaponHammer
 	attacker.Pitch = -0.1
 	before := target.Body.Position
-	ev := run(a, frame, Input{Fire: true})
+	ev := run(a, frame, Input{Melee: true})
 	ev.Merge(run(a, HammerSwing))
 	if len(ev.Smashes) != 1 || ev.Smashes[0].Victim != target {
 		t.Fatalf("the blow should land on the player: smashes %+v", ev.Smashes)
 	}
-	if target.Health != MaxHealth-HammerPlayerDamage {
-		t.Errorf("health after one blow %v", target.Health)
+	if target.Durability() != MaxShield+MaxHealth-HammerPlayerDamage {
+		t.Errorf("armour and health after one blow %v, %v", target.Shield, target.Health)
 	}
 	if pushed := before[2] - target.Body.Position[2]; pushed < 0.3 {
 		t.Error("a hammer blow should knock the target back")
@@ -266,7 +271,7 @@ func TestHammerTwoBlowsDownAPlayer(t *testing.T) {
 	// Close in again and swing.
 	target.Body.Position, target.Body.Velocity = attacker.Body.Position.Add(mathx.Vec3{0, 0, -2.2}), mathx.Vec3{}
 	target.Body.Teleported()
-	run(a, frame, Input{Fire: true})
+	run(a, frame, Input{Melee: true})
 	run(a, HammerSwing)
 	if !target.Dead {
 		t.Errorf("two blows should kill: health %v", target.Health)
@@ -275,10 +280,10 @@ func TestHammerTwoBlowsDownAPlayer(t *testing.T) {
 
 func TestGrenadesHurtAndSelfDamageIsHalved(t *testing.T) {
 	a, shooter, target := duel(12)
-	shooter.Current = WeaponLauncher
+	arm(shooter, WeaponLauncher)
 	// Lob it onto the target.
 	muzzle := shooter.Eye(1).Add(shooter.Forward().Scale(0.7))
-	dir := lobDirection(target.Chest().Sub(muzzle))
+	dir := lobDirection(target.Chest().Sub(muzzle), grenadeSpeed)
 	shooter.Pitch = float32(math.Asin(float64(dir[1])))
 	var ev Events
 	for i := 0; i < 120 && len(ev.Explosions) == 0; i++ {
@@ -287,7 +292,7 @@ func TestGrenadesHurtAndSelfDamageIsHalved(t *testing.T) {
 	if len(ev.Explosions) != 1 {
 		t.Fatalf("explosions %d", len(ev.Explosions))
 	}
-	if lost := MaxHealth - target.Health; lost < BlastPlayerDamage*0.6 {
+	if lost := MaxShield + MaxHealth - target.Durability(); lost < BlastPlayerDamage*0.6 {
 		t.Errorf("a grenade on the target took only %v health (exploded at %v, target at %v)",
 			lost, ev.Explosions[0].At, target.Body.Position)
 	}
@@ -296,7 +301,8 @@ func TestGrenadesHurtAndSelfDamageIsHalved(t *testing.T) {
 	a2 := flatArena(nil, at(0, 10, 0))
 	p := a2.Players[0]
 	run(a2, 0.3)
-	p.Current, p.Pitch = WeaponLauncher, -1.4
+	arm(p, WeaponLauncher)
+	p.Pitch = -1.4
 	run(a2, frame, Input{Fire: true, FirePressed: true})
 	peak := float32(0)
 	for range 60 {
@@ -306,7 +312,7 @@ func TestGrenadesHurtAndSelfDamageIsHalved(t *testing.T) {
 	if peak < 1.8 {
 		t.Errorf("a grenade at your feet should launch you: peak y %.2f", peak)
 	}
-	if lost := MaxHealth - p.Health; lost <= 0 || lost > BlastPlayerDamage*selfDamage+1e-3 {
+	if lost := MaxShield + MaxHealth - p.Durability(); lost <= 0 || lost > BlastPlayerDamage*selfDamage+1e-3 {
 		t.Errorf("rocket jump cost %v health, want some but at most %v", lost, BlastPlayerDamage*selfDamage)
 	}
 }

@@ -15,7 +15,8 @@ type Site struct {
 	Structures []*Structure
 	Pads       []Pad
 	Spawns     []Spawn
-	Bounds     [2]float32 // half extents of the playable floor on X and Z
+	Spots      []PickupSpot // where weapons and grenades spawn
+	Bounds     [2]float32   // half extents of the playable floor on X and Z
 }
 
 // Spawn is where a player starts a round, and which way they face.
@@ -111,7 +112,46 @@ func GenerateSite(seed uint64) *Site {
 		s.Structures = append(s.Structures, south[i], north[i])
 	}
 	s.cover(rng)
+	s.pickupSpots(rng)
 	return s
+}
+
+// pickupSpotsSouth are places a weapon or grenades can spawn, in the south
+// half (each is mirrored into the north): up the spire, on the ledges,
+// bridges, keep and towers, and out on the mountains.
+var pickupSpotsSouth = []mathx.Vec3{
+	{0, SpireH, 1.5},       // the spire's cap
+	{17, PlatformH, 6},     // a side ledge
+	{towerX, TopH, 19.6},   // a tower top
+	{28, SummitH, 0.8},     // a mountain's summit
+	{0, PlatformH, 5.2},    // the keep's deck
+	{11.5, PlatformH, 0.6}, // a bridge
+	{27.5, TopH, 18},       // a mountain's lower terrace
+	{28, CrownH, 8.5},      // ... and upper terrace
+	{0, 0, 16.5},           // the floor, where you land from the bay
+	{towerX, 0, 22.2},      // the floor behind a tower
+}
+
+// pickupSpots puts the power weapons and grenades at random spots, the same
+// at both ends. Everyone starts with the rifle and pistol; these are what's
+// worth going out for.
+func (s *Site) pickupSpots(rng *rand.Rand) {
+	pool := []Pickup{
+		weaponPickup(WeaponSniper, mathx.Vec3{}), weaponPickup(WeaponLauncher, mathx.Vec3{}),
+		weaponPickup(WeaponShotgun, mathx.Vec3{}), weaponPickup(WeaponShotgun, mathx.Vec3{}),
+		grenadePickup(Frag, 2, mathx.Vec3{}), grenadePickup(Sticky, 2, mathx.Vec3{}),
+	}
+	spots := rng.Perm(len(pickupSpotsSouth))
+	for i, p := range pool {
+		at := pickupSpotsSouth[spots[i]]
+		p.Yaw = rng.Float32() * 2 * math.Pi
+		for _, mirror := range []float32{1, -1} {
+			q := p
+			q.At = mathx.Vec3{mirror * at[0], at[1], mirror * at[2]}
+			q.Yaw += (1 - mirror) * math.Pi / 2
+			s.Spots = append(s.Spots, PickupSpot{Pickup: q, Respawn: respawnFor(q)})
+		}
+	}
 }
 
 // link links the site's structures together as an Arena does, returning
@@ -417,8 +457,8 @@ var keepClear = [][2]mathx.Vec3{
 	{{-9.5, 0, -1}, {9.5, 0, 14}},                       // the keep, its stairs and the jump pads
 	{{-arenaHalfX, 0, -1}, {-arenaHalfX + 7.5, 0, 21}},  // west ledge, its stairs and the sky bridge's column
 	{{arenaHalfX - 7.5, 0, -1}, {arenaHalfX, 0, 21}},    // east ...
-	{{-towerX - 2.5, 0, 11}, {-towerX + 2.5, 0, 21}},    // towers and their lift pads
-	{{towerX - 2.5, 0, 11}, {towerX + 2.5, 0, 21}},      //
+	{{-towerX - 2.5, 0, 11}, {-towerX + 2.5, 0, 23}},    // towers, their lift pads and the pickup behind them
+	{{towerX - 2.5, 0, 11}, {towerX + 2.5, 0, 23}},      //
 	{{-6, 0, 14}, {6, 0, 23}},                           // landing zone
 	{{-arenaHalfX, 0, 27}, {arenaHalfX, 0, arenaHalfZ}}, // along the end parapet
 }

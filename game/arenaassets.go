@@ -68,6 +68,8 @@ type arenaAssets struct {
 	panel     render.Texture
 	materials [len(materialColor)]render.Texture
 	chasm     *chasm
+	ring      render.Mesh // the sniper scope's surround
+	thinRing  render.Mesh // reticles: a ring of radius 1, 0.18 thick
 }
 
 func newArenaAssets() (*arenaAssets, error) {
@@ -100,6 +102,12 @@ func newArenaAssets() (*arenaAssets, error) {
 	as.materials[arena.Panel] = as.panel
 	as.materials[arena.Plate] = as.floor
 	if as.chasm, err = newChasm(); err != nil {
+		return nil, err
+	}
+	if as.ring, err = render.CreateMesh(ring(40, 64)); err != nil {
+		return nil, err
+	}
+	if as.thinRing, err = render.CreateMesh(ring(1.18, 40)); err != nil {
 		return nil, err
 	}
 	return as, nil // glass uses the white texture (handle 0)
@@ -306,36 +314,22 @@ type gunPart struct {
 	centre, half mathx.Vec3
 	color        [4]float32
 	flags        gfx.DrawFlags
+	round        bool // a ball (a paint hopper, a gas tank) rather than a box
+	ring         bool // a thin ring in the XY plane (a sight's reticle), half X and Y its radius
 }
 
-var rifleParts = []gunPart{
-	{mathx.Vec3{0, 0, 0}, mathx.Vec3{0.034, 0.048, 0.17}, gunMetal, 0},                          // receiver
-	{mathx.Vec3{0, 0.012, -0.29}, mathx.Vec3{0.011, 0.011, 0.13}, gunBlack, 0},                  // barrel
-	{mathx.Vec3{0, 0.002, -0.21}, mathx.Vec3{0.028, 0.034, 0.075}, uiAccent, 0},                 // handguard
-	{mathx.Vec3{0, -0.085, -0.03}, mathx.Vec3{0.021, 0.06, 0.032}, gunBlack, 0},                 // magazine
-	{mathx.Vec3{0, -0.012, 0.21}, mathx.Vec3{0.024, 0.042, 0.07}, gunMetal, 0},                  // stock
-	{mathx.Vec3{0, 0.062, -0.02}, mathx.Vec3{0.012, 0.016, 0.045}, gunBlack, 0},                 // sight
-	{mathx.Vec3{0, -0.07, 0.085}, mathx.Vec3{0.019, 0.05, 0.024}, gunBlack, 0},                  // grip
-	{mathx.Vec3{0, 0.08, -0.02}, mathx.Vec3{0.004, 0.004, 0.004}, arenaTrimCyan, gfx.DrawUnlit}, // sight dot (glows)
-}
-
-// rifleMuzzle is the barrel's tip in weapon space.
-var rifleMuzzle = mathx.Vec3{0, 0.012, -0.43}
-
-var launcherParts = []gunPart{
-	{mathx.Vec3{0, 0, -0.08}, mathx.Vec3{0.055, 0.055, 0.26}, launcherGreen, 0},                  // tube
-	{mathx.Vec3{0, 0, -0.345}, mathx.Vec3{0.064, 0.064, 0.02}, gunBlack, 0},                      // muzzle ring
-	{mathx.Vec3{0, -0.09, 0.03}, mathx.Vec3{0.02, 0.06, 0.028}, gunBlack, 0},                     // grip
-	{mathx.Vec3{0, -0.075, -0.2}, mathx.Vec3{0.018, 0.045, 0.03}, gunBlack, 0},                   // fore grip
-	{mathx.Vec3{0, 0.07, -0.05}, mathx.Vec3{0.014, 0.018, 0.05}, gunMetal, 0},                    // sight
-	{mathx.Vec3{0, 0.05, 0.16}, mathx.Vec3{0.04, 0.03, 0.05}, uiAccent, 0},                       // shell box
-	{mathx.Vec3{0, 0.092, -0.05}, mathx.Vec3{0.005, 0.005, 0.005}, arenaTrimCyan, gfx.DrawUnlit}, // sight dot
-}
-
-// The sledgehammer, handle along +Y, the head's striking face towards -Z.
+// The sledgehammer, handle along +Y, the head's striking face towards -Z:
+// a taped grip, a steel head with a painted band, and a striking face in
+// the team orange.
 var hammerParts = []gunPart{
-	{mathx.Vec3{0, 0.05, 0}, mathx.Vec3{0.018, 0.42, 0.018}, hammerHandle, 0},   // handle
-	{mathx.Vec3{0, -0.3, 0}, mathx.Vec3{0.022, 0.09, 0.022}, gunBlack, 0},       // grip wrap
-	{mathx.Vec3{0, 0.52, -0.02}, mathx.Vec3{0.065, 0.065, 0.15}, gunMetal, 0},   // head
-	{mathx.Vec3{0, 0.52, -0.175}, mathx.Vec3{0.072, 0.072, 0.012}, uiAccent, 0}, // striking face
+	b(0, 0.05, 0, 0.018, 0.42, 0.018, hammerHandle),   // handle
+	b(0, -0.3, 0, 0.022, 0.09, 0.022, gunBlack),       // grip wrap
+	b(0, -0.2, 0, 0.0225, 0.004, 0.0225, gunMetal),    // tape edge
+	b(0, -0.395, 0, 0.024, 0.008, 0.024, gunMetal),    // pommel
+	b(0, 0.4, 0, 0.022, 0.03, 0.022, gunMetal),        // collar
+	b(0, 0.52, -0.02, 0.065, 0.065, 0.15, gunMetal),   // head
+	b(0, 0.52, -0.02, 0.067, 0.02, 0.1, markerOrange), // painted band
+	b(0, 0.52, 0.14, 0.055, 0.055, 0.012, gunBlack),   // back face
+	b(0, 0.52, -0.175, 0.072, 0.072, 0.012, uiAccent), // striking face
+	b(0, 0.52, -0.19, 0.06, 0.06, 0.004, gunBlack),    // face bevel
 }

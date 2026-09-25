@@ -6,7 +6,6 @@ import (
 	"math"
 	"math/rand/v2"
 	"strings"
-	"time"
 
 	"CliffCrack/engine/asset"
 	"CliffCrack/engine/audio"
@@ -72,10 +71,10 @@ func NewDemo(opts DemoOptions) (*Demo, error) {
 		timeScale:    1,
 		rng:          rand.New(rand.NewPCG(1, 2)),
 		sound:        opts.Audio,
-		dropSound:    audio.Blip(120*time.Millisecond, 520, 880, 0.5),
-		clearSound:   audio.Blip(250*time.Millisecond, 600, 180, 0.6),
-		bounceSound:  audio.Blip(60*time.Millisecond, 260, 140, 0.8),
-		bonkSound:    audio.Blip(90*time.Millisecond, 180, 90, 1),
+		dropSound:    audio.Synth(0.5, tone(audio.Triangle, 520, 880, 0, 140, 12, 0.8), click(0, 0.3)),
+		clearSound:   audio.Synth(0.6, hiss(0, 280, 10, 0.7, 1500, 0), tone(audio.Sine, 600, 180, 0, 260, 8, 0.7)),
+		bounceSound:  audio.Synth(0.8, tone(audio.Sine, 240, 150, 0, 70, 40, 1), hiss(0, 40, 70, 0.4, 2000, 0)),
+		bonkSound:    audio.Synth(1, tone(audio.Sine, 170, 85, 0, 110, 30, 1), hiss(0, 70, 45, 0.6, 1200, 0), click(0, 0.4)),
 		cubes:        map[scene.ID]bool{},
 		bumpedAt:     map[scene.ID]float32{},
 	}

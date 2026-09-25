@@ -71,8 +71,11 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 		t := clampf((m.sim().Time-p.DiedAt)/0.5, 0, 1)
 		base = base.Mul(mathx.RotateX(smooth(t) * math.Pi / 2 * 0.97))
 	}
-	i := p.ID % len(suitColor)
-	suit := lerpColor(suitColor[i], [4]float32{1, 1, 1, 1}, p.Flash*0.8)
+	i := team(p)
+	// Paint builds up on the suit as the armour goes, in the shooter's colour.
+	cover := 1 - p.Shield/arena.MaxShield
+	suit := lerpColor(suitColor[i], paintColor[1-i], 0.6*cover)
+	suit = lerpColor(suit, [4]float32{1, 1, 1, 1}, p.Flash*0.8)
 	if p.Dead {
 		suit = lerpColor(suit, armour, 0.5)
 	}
@@ -116,10 +119,9 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 	aim := base.Mul(mathx.Translate(0, shoulderHeight, 0)).Mul(mathx.RotateX(pitch))
 	draw(aim, charArms)
 	weapon := aim.Mul(mathx.Translate(0.16, -0.12, -0.42))
-	parts := rifleParts
-	switch p.Current {
+	parts := partsFor(heldKind(&p.Weapons))
+	switch heldKind(&p.Weapons) {
 	case arena.WeaponLauncher:
-		parts = launcherParts
 		weapon = weapon.Mul(mathx.Translate(0, 0, 0.1))
 	case arena.WeaponHammer:
 		parts = hammerParts
@@ -129,10 +131,21 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 	if p.Switching > 0 {
 		weapon = weapon.Mul(mathx.RotateX(-1.2 * p.Switching / arena.SwitchTime))
 	}
-	for _, part := range parts {
-		c, h := part.centre, part.half
-		pm := weapon.Mul(mathx.Translate(c[0], c[1], c[2])).Mul(mathx.Scale(h[0], h[1], h[2]))
-		out = append(out, render.DrawCmd{Model: pm, Color: part.color, Flags: part.flags, Mesh: m.as.cube})
+	out = m.drawParts(out, weapon, parts)
+	// A scoped sniper's lens catches the light: a glint you can spot them by.
+	if mk, ok := m.markerFor(p.Current); ok && mk.scope && p.ADS > 0.5 && !p.Dead {
+		lens := weapon.TransformPoint(mathx.Vec3{0, 0.085, -0.17})
+		flicker := 0.7 + 0.3*float32(math.Sin(float64(m.elapsed)*9))
+		m.glass = append(m.glass, render.DrawCmd{Model: bodyMatrix(lens, mathx.QuatIdentity(), 0.12*flicker),
+			Color: withAlpha(uiWhite, 0.8), Flags: gfx.DrawUnlit, Mesh: m.sc.chip})
+	}
+
+	// Armour: a faint shell round them that flares when hit, gone once
+	// it's popped. It's translucent, so it's drawn with the glass.
+	if !p.Dead && p.Shield > 0 {
+		glow := 0.05 + 0.4*p.Flash
+		shell := base.Mul(mathx.Translate(0, 0.98, 0)).Mul(mathx.Scale(0.36, 0.98, 0.28))
+		m.glass = append(m.glass, render.DrawCmd{Model: shell, Color: withAlpha(teamGlow[i], glow), Flags: gfx.DrawUnlit, Mesh: m.sc.ball})
 	}
 	return out
 }

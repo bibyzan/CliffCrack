@@ -19,16 +19,15 @@ func testWall(m Material) (*Arena, *Player, *Structure) {
 	return a, a.Players[0], s
 }
 
-// swing presses fire for one hammer swing and lets it finish.
+// swing presses melee for one hammer swing and lets it finish.
 func swing(a *Arena) Events {
-	ev := run(a, frame, Input{Fire: true})
+	ev := run(a, frame, Input{Melee: true})
 	ev.Merge(run(a, HammerSwing))
 	return ev
 }
 
 func TestHammerSmashesAHole(t *testing.T) {
 	a, p, s := testWall(Wood)
-	p.Current = WeaponHammer
 	before := s.Alive()
 	ev := swing(a)
 	if !ev.Did(p, ActSwing) || len(ev.Smashes) != 1 || ev.Smashes[0].Mat != Wood {
@@ -48,8 +47,7 @@ func TestHammerSmashesAHole(t *testing.T) {
 
 func TestConcreteTakesMoreBlowsThanWood(t *testing.T) {
 	blowsToBreak := func(m Material) int {
-		a, p, s := testWall(m)
-		p.Current = WeaponHammer
+		a, _, s := testWall(m)
 		before := s.Alive()
 		for n := 1; n <= 10; n++ {
 			swing(a)
@@ -97,7 +95,7 @@ func TestRifleChipsAndGlassShatters(t *testing.T) {
 
 func TestGrenadeBlastsAHole(t *testing.T) {
 	a, p, s := testWall(Brick)
-	p.Current = WeaponLauncher
+	arm(p, WeaponLauncher)
 	p.Pitch = -0.25 // at the base of the wall
 	var ev Events
 	for i := 0; i < 90 && len(ev.Explosions) == 0; i++ {
@@ -133,7 +131,7 @@ func TestBlowingOutTheGroundFloorCollapsesAHouse(t *testing.T) {
 	// Detonate charges along the bottom of every wall.
 	for _, c := range house.Chunks {
 		if c.anchored && c.Alive {
-			a.blast(c.Centre, 0.8, 1000, 2, mathx.Vec3{}, nil, false, &ev)
+			a.blast(c.Centre, 0.8, 1000, 0, 2, mathx.Vec3{}, nil, WeaponLauncher, &ev)
 		}
 	}
 	a.settle(&ev)
@@ -158,22 +156,26 @@ func TestBlowingOutTheGroundFloorCollapsesAHouse(t *testing.T) {
 	}
 }
 
-func TestWeaponSwitching(t *testing.T) {
+func TestTwoSlotsAndSwitching(t *testing.T) {
 	a, p, _ := testWall(Wood)
-	ev := a.Step(frame, []Input{{Select: 3}})
-	if p.Current != WeaponLauncher || !ev.Did(p, ActSwitch) || p.Switching == 0 {
-		t.Fatalf("select 3: current %v switched %v", p.Current, ev.Did(p, ActSwitch))
+	if p.Slots != [2]WeaponKind{WeaponRifle, WeaponPistol} || p.Current != WeaponRifle {
+		t.Fatalf("start with the rifle in hand and the pistol: slots %v current %v", p.Slots, p.Current)
 	}
-	if ev := a.Step(frame, []Input{{Fire: true, FirePressed: true}}); ev.Did(p, ActLaunch) {
-		t.Error("can't fire while the new weapon is coming up")
+	ev := a.Step(frame, []Input{{Select: 2}})
+	if p.Current != WeaponPistol || !ev.Did(p, ActSwitch) || p.Switching == 0 {
+		t.Fatalf("select slot 2: current %v switched %v", p.Current, ev.Did(p, ActSwitch))
+	}
+	if ev := a.Step(frame, []Input{{Fire: true, FirePressed: true}}); len(ev.Shots) != 0 {
+		t.Error("can't fire while the other weapon is coming up")
 	}
 	run(a, SwitchTime)
-	a.Step(frame, []Input{{Cycle: 1}}) // wraps round to the hammer
-	if p.Current != WeaponHammer {
-		t.Errorf("cycling past the last slot: current %v, want the hammer", p.Current)
+	a.Step(frame, []Input{{Cycle: 1}})
+	if p.Current != WeaponRifle {
+		t.Errorf("swapping back: current %v, want the rifle", p.Current)
 	}
-	a.Step(frame, []Input{{Cycle: -1}})
-	if p.Current != WeaponLauncher {
-		t.Errorf("cycling back: current %v, want the launcher", p.Current)
+	// The hammer is to hand whatever's held.
+	run(a, SwitchTime)
+	if ev := swing(a); !ev.Did(p, ActSwing) || p.Current != WeaponRifle {
+		t.Errorf("melee: swung %v, holding %v", ev.Did(p, ActSwing), p.Current)
 	}
 }

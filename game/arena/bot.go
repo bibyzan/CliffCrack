@@ -90,7 +90,8 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 	b.avoidT -= dt
 
 	eye, feet := self.Eye(1), self.Body.Position
-	want := WeaponRifle
+	want := self.Current // the gun it wants in hand
+	melee, throw := false, false
 	var look mathx.Vec3          // where it wants to aim
 	var move mathx.Vec3          // which way it wants to go (world, flat)
 	cone := float32(0.08)        // how close the aim must be to fire
@@ -105,14 +106,23 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 		drift = drift.Scale(b.Skill.Wobble * min(dist/15, 1.5))
 		look = enemy.Chest().Add(enemy.Body.Velocity.Scale(0.06)).Add(b.aimErr).Add(drift)
 		fire = b.seenFor >= b.Skill.Reaction
-		reloading := self.Rifle.Reloading > 0
-		if dist < hammerRange || (reloading && dist < 9) {
-			// Close in and swing.
-			want, move, sprint = WeaponHammer, toward(enemy.Body.Position), true
+		if dist < 2.5 {
+			// Close in and swing the hammer.
+			move, sprint = toward(enemy.Body.Position), true
 			look = enemy.Chest()
 			cone = 0.3
-			fire = fire && dist < hammerReach-0.2
+			melee = fire && dist < hammerReach-0.2
+			fire = false
 			break
+		}
+		want = gunForRange(self, dist)
+		// Precision guns at range: sights up, and for the head once the
+		// armour's popped.
+		if want == WeaponPistol || want == WeaponSniper {
+			in.Aim = true
+			if enemy.Popped() || want == WeaponSniper {
+				look = enemy.Head().Add(b.aimErr.Scale(0.5)).Add(drift.Scale(0.5))
+			}
 		}
 		cone = max(float32(math.Atan(float64(bodyRadius/dist))), 0.015)
 		// Strafe, and keep to a comfortable range.
@@ -133,6 +143,11 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 			in.Jump = b.rng.IntN(3) == 0
 			b.jumpT = 1.5 + b.rng.Float32()*2.5
 		}
+		// Something worth having close by, and them not too close: grab it.
+		if p := b.wanted(a, self); p != nil && dist > 12 && flat(p.At.Sub(feet)).Len() < 7 {
+			move = toward(p.At).Add(move.Scale(0.3))
+			b.takePickup(a, self, p, &want, &in)
+		}
 
 	case b.known:
 		// Head for where they were; now and then lob a grenade at them.
@@ -141,20 +156,32 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 		look = target.Add(mathx.Vec3{0, 0.5, 0})
 		move, sprint = toward(target), true
 		since := a.Time - b.lastInfo
-		if since > 0.6 && since < 6 && dist > 7 && dist < 28 && b.lobT <= 0 &&
-			(self.Launcher.Ammo > 0 || self.Launcher.Reloading > 0) {
-			want = WeaponLauncher
+		if since > 0.6 && since < 6 && dist > 7 && dist < 28 && b.lobT <= 0 {
 			muzzle := eye.Add(self.Forward().Scale(0.7))
-			look = eye.Add(lobDirection(target.Sub(muzzle)).Scale(10))
-			cone, fire = 0.04, true
-			move = mathx.Vec3{}
+			switch {
+			case self.Holds(WeaponLauncher) && (self.Launcher.Ammo > 0 || self.Launcher.Reloading > 0):
+				want = WeaponLauncher
+				look = eye.Add(lobDirection(target.Sub(muzzle), grenadeSpeed).Scale(10))
+				cone, fire = 0.04, true
+				move = mathx.Vec3{}
+			case self.Grenades[Frag] > 0 && dist < 22:
+				// A frag over whatever they're behind.
+				look = eye.Add(lobDirection(target.Sub(muzzle), throwSpeed).Scale(10))
+				cone, throw = 0.05, true
+				move = mathx.Vec3{}
+			}
 		}
 		if dist < 1.5 {
 			b.known = false // not here any more
 		}
 
 	default:
-		// Roam the site looking for them.
+		// Roam the site looking for them, picking up anything worth having
+		// on the way.
+		if p := b.wanted(a, self); p != nil {
+			b.goal, b.goalT = p.At, 3
+			b.takePickup(a, self, p, &want, &in)
+		}
 		if b.goalT <= 0 || flat(b.goal.Sub(feet)).Len() < 2 {
 			for range 8 { // somewhere with floor left under it
 				b.goal = mathx.Vec3{(b.rng.Float32()*2 - 1) * (a.Bounds[0] - 4), 0, (b.rng.Float32()*2 - 1) * (a.Bounds[1] - 4)}
@@ -170,7 +197,7 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 
 	// Anything in the way: hop the low stuff, hammer through structures,
 	// sidestep the boundary.
-	if move != (mathx.Vec3{}) && want != WeaponLauncher && !(b.sees && want == WeaponHammer) {
+	if move != (mathx.Vec3{}) && want != WeaponLauncher && !melee && !throw {
 		if b.avoidT > 0 {
 			move = mathx.Vec3{-move[2], 0, move[0]}.Scale(b.avoid).Add(move.Scale(0.3)).Normalize()
 		}
@@ -198,7 +225,7 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 			}
 			b.smash = nil
 		} else {
-			want, fire, cone = WeaponHammer, true, 0.25
+			melee, fire, cone = true, false, 0.25
 			look = b.smash.Centre
 			for k := range 3 { // the face nearest the eye
 				look[k] = clamp(eye[k], b.smash.Centre[k]-b.smash.Half[k]*0.8, b.smash.Centre[k]+b.smash.Half[k]*0.8)
@@ -239,9 +266,13 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 	}
 
 	if self.Current != want {
-		in.Select = int(want) + 1
+		for i, k := range self.Slots {
+			if k == want {
+				in.Select = i + 1
+			}
+		}
 	}
-	if !b.sees && self.Current == WeaponRifle && self.Rifle.Ammo < MagSize/2 && self.Rifle.Reloading == 0 {
+	if g, s := self.Gun(); !b.sees && g != nil && s.Ammo < g.Mag/2 && s.Reloading == 0 {
 		in.Reload = true
 	}
 	var onTarget bool
@@ -260,8 +291,16 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 		}
 	}
 	b.prevAim, b.tracking = want2, b.sees
-	if fire && onTarget && !b.Passive && self.Current == want {
-		in.Fire, in.FirePressed = true, true
+	if onTarget && !b.Passive {
+		switch {
+		case melee:
+			in.Melee = true
+		case throw:
+			in.Throw = true
+			b.lobT = 3 + b.rng.Float32()*3
+		case fire && self.Current == want:
+			in.Fire, in.FirePressed = true, true
+		}
 	}
 
 	fwd := camera.Direction(self.Yaw, 0)
@@ -272,6 +311,91 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 	in.Move = [2]float32{move.Dot(right), move.Dot(fwd)}
 	in.Sprint = sprint && in.Move[1] > 0.5
 	return in
+}
+
+// gunForRange is which of its two guns the bot fights with at dist: the
+// shotgun close, the rifle in the middle, the pistol at range and the
+// sniper far off, as it has them; skipping one that's empty and reloading.
+func gunForRange(self *Player, dist float32) WeaponKind {
+	var order []WeaponKind
+	switch {
+	case dist < 9:
+		order = []WeaponKind{WeaponShotgun, WeaponRifle, WeaponPistol, WeaponLauncher, WeaponSniper}
+	case dist < 26:
+		order = []WeaponKind{WeaponRifle, WeaponPistol, WeaponShotgun, WeaponSniper, WeaponLauncher}
+	case dist < 50:
+		order = []WeaponKind{WeaponPistol, WeaponSniper, WeaponRifle, WeaponLauncher, WeaponShotgun}
+	default:
+		order = []WeaponKind{WeaponSniper, WeaponPistol, WeaponRifle, WeaponLauncher, WeaponShotgun}
+	}
+	for _, k := range order {
+		if !self.Holds(k) {
+			continue
+		}
+		if k == WeaponLauncher {
+			if self.Launcher.Ammo > 0 {
+				return k
+			}
+			continue
+		}
+		if s := self.States[k]; s.Ammo > 0 || s.Reloading == 0 {
+			return k
+		}
+	}
+	return self.Current
+}
+
+// takePickup takes p once it's in reach: first bringing up the lesser of its
+// two guns, which is the one that gets swapped out.
+func (b *Bot) takePickup(a *Arena, self *Player, p *Pickup, want *WeaponKind, in *Input) {
+	if !a.within(self, p) || p.Weapon == NoWeapon {
+		return
+	}
+	if worth(self.Current) > worth(self.Other()) && self.Other() != NoWeapon {
+		*want = self.Other()
+	} else if self.Switching == 0 {
+		in.Interact = true
+	}
+}
+
+// worth ranks weapons for the bot: which it would rather carry.
+func worth(k WeaponKind) int {
+	switch k {
+	case WeaponLauncher:
+		return 5
+	case WeaponSniper:
+		return 4
+	case WeaponShotgun:
+		return 3
+	case WeaponRifle:
+		return 2
+	case WeaponPistol:
+		return 1
+	}
+	return 0
+}
+
+// wanted is a pickup worth going for: a weapon better than one of its two,
+// or grenades when it's short, within 25 m.
+func (b *Bot) wanted(a *Arena, self *Player) *Pickup {
+	var best *Pickup
+	bestDist := float32(25)
+	for _, p := range a.Pickups {
+		good := false
+		switch {
+		case p.Weapon == NoWeapon:
+			good = self.Grenades[p.Grenade] < 2
+		case !self.Holds(p.Weapon):
+			good = worth(p.Weapon) > min(worth(self.Slots[0]), worth(self.Slots[1]))
+		}
+		if !good || !groundBelow(a, p.At.Add(mathx.Vec3{0, 0.5, 0}), 1) {
+			continue
+		}
+		if d := p.At.Sub(self.Body.Position).Len(); d < bestDist {
+			best, bestDist = p, d
+		}
+	}
+	return best
 }
 
 // perceive updates what the bot knows: whether it can see the enemy (in its
@@ -352,21 +476,21 @@ func nearestEnemy(a *Arena, self *Player) *Player {
 	return best
 }
 
-// lobDirection is the direction to launch a grenade so it lands at offset
-// (from the muzzle), using the flatter of the two ballistic solutions. Out of
-// range it aims at 45 degrees.
-func lobDirection(offset mathx.Vec3) mathx.Vec3 {
+// lobDirection is the direction to launch a grenade at speed v so it lands
+// at offset (from the muzzle), using the flatter of the two ballistic
+// solutions. Out of range it aims at 45 degrees.
+func lobDirection(offset mathx.Vec3, v float64) mathx.Vec3 {
 	f := flat(offset)
 	x := f.Len()
 	if x < 1e-3 {
 		return offset.Normalize()
 	}
-	const v, g = grenadeSpeed, gravity
-	y := offset[1]
-	disc := v*v*v*v - g*(g*x*x+2*y*v*v)
+	const g = gravity
+	xf, y := float64(x), float64(offset[1])
+	disc := v*v*v*v - g*(g*xf*xf+2*y*v*v)
 	angle := float32(math.Pi / 4)
 	if disc >= 0 {
-		angle = float32(math.Atan((v*v - math.Sqrt(float64(disc))) / (g * float64(x))))
+		angle = float32(math.Atan((v*v - math.Sqrt(disc)) / (g * xf)))
 	}
 	h := f.Scale(1 / x)
 	c, s := math.Cos(float64(angle)), math.Sin(float64(angle))

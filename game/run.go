@@ -77,13 +77,7 @@ func newRun(sc *scenery, mixer *audio.Mixer, seed uint64, settings *Settings) *R
 		fixedSeed: seed,
 		chunks:    map[int]*runChunk{},
 		sun:       1,
-		sfx: runSounds{
-			jump:  audio.Blip(120*time.Millisecond, 420, 820, 0.5),
-			land:  audio.Blip(80*time.Millisecond, 170, 90, 0.9),
-			crash: audio.Blip(500*time.Millisecond, 320, 40, 1),
-			move:  audio.Blip(40*time.Millisecond, 700, 700, 0.25),
-			pick:  audio.Blip(120*time.Millisecond, 520, 1040, 0.5),
-		},
+		sfx:       newRunSounds(),
 	}
 }
 

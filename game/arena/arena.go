@@ -32,7 +32,15 @@ const (
 	jumpBuffer = 0.15 // s: jump pressed this soon before landing jumps on landing
 	gravity    = 15.0 // snappier than 9.81 for a shooter
 
-	MaxHealth  = 150
+	// Armour takes the hits first. Once it's gone you're popped: exposed,
+	// and a headshot from a precision gun kills. It recharges after a few
+	// seconds without taking damage. Gun paint doesn't bleed through it;
+	// blasts, blows, rubble and falls do.
+	MaxShield   = 100
+	MaxHealth   = 60
+	shieldDelay = 4  // s after the last hit before armour recharges
+	shieldRate  = 50 // per s
+
 	selfDamage = 0.5 // your own grenades hurt you this much less
 	fallDeath  = -22 // below this height you've gone into the pit: you're out
 	pitDepth   = -40 // rubble falling past this is gone
@@ -48,16 +56,22 @@ type Input struct {
 	Jump        bool       // pressed this step
 	Sprint      bool
 	Fire        bool // trigger held
+	Aim         bool // held: aim down the sights
 	FirePressed bool // trigger went down this step (for the empty click)
 	Reload      bool // pressed this step
-	Select      int  // 1..3 picks a weapon slot this step, 0 none
-	Cycle       int  // -1 / +1 steps through the weapons
+	Select      int  // 1 or 2 picks a slot this step, 0 none
+	Cycle       int  // non-zero: swap to the other slot
+
+	Melee         bool // pressed: swing the hammer
+	Throw         bool // pressed: throw a grenade
+	SwitchGrenade bool // pressed: frags / stickies
+	Interact      bool // pressed: take the weapon at your feet
 }
 
 // LookOnly keeps just the aiming and weapon choice: players can look around
 // (and pick a weapon) but not move or fire, as during the countdown.
 func (in Input) LookOnly() Input {
-	return Input{Look: in.Look, Select: in.Select, Cycle: in.Cycle}
+	return Input{Look: in.Look, Select: in.Select, Cycle: in.Cycle, Aim: in.Aim, SwitchGrenade: in.SwitchGrenade}
 }
 
 // Stats are a player's numbers for the round.
@@ -77,13 +91,16 @@ type Player struct {
 	Body       *physics.Body
 	Yaw, Pitch float32
 	Weapons
+	Shield float32 // armour, 0..MaxShield: 0 is popped
 	Health float32
 	Dead   bool
 	DiedAt float32 // arena time of death
 	Flash  float32 // 0..1 hurt flash, decays fast
 	Stats
 
-	recoil    float32 // pitch added by recoil, recovering over time
+	recoil    float32    // pitch added by recoil, recovering over time
+	sway      [2]float32 // yaw and pitch drifting while scoped in
+	Breath    float32    // s of held breath left (steadying a scope), up to maxBreath
 	onGround  bool
 	sinceJump float32
 	sincePad  float32 // since a launch pad threw them
@@ -96,7 +113,14 @@ type Player struct {
 
 	lastHitBy *Player // who hurt them last, and when (for knocking them into the pit)
 	lastHitAt float32
+	sinceHurt float32 // s since they last took damage, for armour recharge
 }
+
+// Popped reports whether the player's armour is gone.
+func (p *Player) Popped() bool { return p.Shield <= 0 }
+
+// Durability is what it would take to kill them now: armour plus health.
+func (p *Player) Durability() float32 { return p.Shield + p.Health }
 
 // Eye is the camera position. alpha interpolates between physics steps.
 func (p *Player) Eye(alpha float32) mathx.Vec3 {
@@ -106,11 +130,14 @@ func (p *Player) Eye(alpha float32) mathx.Vec3 {
 
 // ViewPitch includes the recoil kick.
 func (p *Player) ViewPitch() float32 {
-	return clamp(p.Pitch+p.recoil, -camera.MaxPitch, camera.MaxPitch)
+	return clamp(p.Pitch+p.recoil+p.sway[1], -camera.MaxPitch, camera.MaxPitch)
 }
 
+// ViewYaw includes the scope's sway.
+func (p *Player) ViewYaw() float32 { return p.Yaw + p.sway[0] }
+
 // Forward is the view direction.
-func (p *Player) Forward() mathx.Vec3 { return camera.Direction(p.Yaw, p.ViewPitch()) }
+func (p *Player) Forward() mathx.Vec3 { return camera.Direction(p.ViewYaw(), p.ViewPitch()) }
 
 // OnGround reports whether the player is standing on something.
 func (p *Player) OnGround() bool { return p.onGround }
@@ -145,6 +172,7 @@ type Shot struct {
 	Victim   *Player    // the player it hit, if any
 	Head     bool       // ... in the head
 	Chunk    *Chunk     // the structure piece it hit, if any
+	Weapon   WeaponKind // what fired it
 }
 
 // Break is a chunk destroyed (by damage or by collapsing).
@@ -164,8 +192,15 @@ type Smash struct {
 
 // Explosion is a grenade going off.
 type Explosion struct {
-	At mathx.Vec3
-	By *Player
+	At   mathx.Vec3
+	By   *Player
+	Kind GrenadeKind
+}
+
+// Stick is a sticky grenade sticking: to a player (On), or where it is.
+type Stick struct {
+	Grenade *Grenade
+	On      *Player
 }
 
 // Hurt is a player taking damage.
@@ -173,6 +208,8 @@ type Hurt struct {
 	Victim, By *Player // By is nil for the world
 	Damage     float32
 	Head       bool
+	Popped     bool       // this hit broke their armour
+	Armour     bool       // the armour took it (none reached their health)
 	From       mathx.Vec3 // where the damage came from
 }
 
@@ -193,8 +230,10 @@ const (
 	ActLaunch
 	ActSwitch
 	ActReload
-	ActEmpty // the trigger was pulled on an empty magazine
-	ActBoost // a launch pad threw them
+	ActEmpty  // the trigger was pulled on an empty magazine
+	ActBoost  // a launch pad threw them
+	ActThrow  // a grenade (Value: its kind)
+	ActPickup // took a weapon (Value: its kind)
 )
 
 // Action is one player action; Value is the impact speed for ActLand.
@@ -212,6 +251,7 @@ type Events struct {
 	Breaks     []Break
 	Smashes    []Smash
 	Explosions []Explosion
+	Stuck      []Stick
 	Actions    []Action
 }
 
@@ -247,6 +287,7 @@ func (ev *Events) Merge(o Events) {
 	ev.Breaks = append(ev.Breaks, o.Breaks...)
 	ev.Smashes = append(ev.Smashes, o.Smashes...)
 	ev.Explosions = append(ev.Explosions, o.Explosions...)
+	ev.Stuck = append(ev.Stuck, o.Stuck...)
 	ev.Actions = append(ev.Actions, o.Actions...)
 }
 
@@ -264,9 +305,13 @@ type Arena struct {
 	Debris     []*Debris
 	Grenades   []*Grenade
 
+	Pickups []*Pickup    // weapons and grenades lying about
+	Spots   []PickupSpot // where they spawn
+
 	Time         float32
 	Live         bool // the round has started: the launch bays' pads fire
-	InfiniteAmmo bool // debug
+	InfiniteAmmo bool // debug: magazines never run down
+	FreeAmmo     bool // reloads don't use up reserves (the firing range)
 
 	rng         *rand.Rand
 	chunks      []*Chunk // every structure's, linked together
@@ -297,6 +342,7 @@ func newArena(seed uint64, site *Site) *Arena {
 	a.Phys.Gravity = mathx.Vec3{0, -gravity, 0}
 	addLevel(a.Phys, a.Level)
 	a.chunks = linkAll(a.Structures, a.Level)
+	a.addSpots(site.Spots)
 	for _, s := range a.Structures {
 		for _, c := range s.Chunks {
 			c.Body = physics.NewBox(c.Half, physics.Static)
@@ -320,7 +366,8 @@ func (a *Arena) AddPlayer(sp Spawn) *Player {
 	b.Friction = 0 // movement steers the speed on the ground: contacts mustn't scrub it off (landing at speed, hopping)
 	b.Restitution = 0
 	b.Position = sp.At
-	p := &Player{ID: len(a.Players), Body: b, Yaw: sp.Yaw, Health: MaxHealth, Weapons: newWeapons(), sincePad: padCooldown}
+	p := &Player{ID: len(a.Players), Body: b, Yaw: sp.Yaw, Shield: MaxShield, Health: MaxHealth, Weapons: newWeapons(), sincePad: padCooldown,
+		Breath: maxBreath}
 	p.Current = WeaponRifle
 	b.UserData = p
 	if err := a.Phys.Add(b); err != nil {
@@ -348,7 +395,12 @@ func (a *Arena) Step(dt float32, inputs []Input) Events {
 		p.Yaw = wrap(p.Yaw + in.Look[0])
 		p.Pitch = clamp(p.Pitch+in.Look[1], -camera.MaxPitch, camera.MaxPitch)
 		p.recoil *= float32(math.Exp(-recoilReturn * float64(dt)))
+		a.breathe(p, dt, in)
 		p.Flash *= float32(math.Exp(-8 * float64(dt)))
+		p.sinceHurt += dt
+		if p.sinceHurt > shieldDelay {
+			p.Shield = min(p.Shield+shieldRate*dt, MaxShield)
+		}
 		a.movePlayer(p, dt, in, &ev)
 		a.stepUp(p, dt)
 		a.updateWeapons(p, dt, in, &ev)
@@ -387,11 +439,12 @@ func (a *Arena) Step(dt float32, inputs []Input) Events {
 			if p.lastHitBy != nil && a.Time-p.lastHitAt < creditTime {
 				by = p.lastHitBy // they knocked you in
 			}
-			a.hurtPlayer(p, by, p.Health, false, WeaponDrop, p.Body.Position, mathx.Vec3{}, &ev)
+			a.hurtPlayer(p, by, p.Durability(), false, WeaponDrop, p.Body.Position, mathx.Vec3{}, &ev)
 		}
 		a.usePads(p, &ev)
 	}
 	a.updateGrenades(dt, &ev)
+	a.updatePickups(dt)
 	a.settle(&ev)
 	a.ageDebris(dt)
 	return ev
@@ -405,8 +458,11 @@ func (a *Arena) movePlayer(p *Player, dt float32, in Input, ev *Events) {
 		wish = wish.Scale(1 / l)
 	}
 	speed := float32(walkSpeed)
-	if in.Sprint && in.Move[1] > 0.3 {
+	if sprinting(in) && p.ADS == 0 {
 		speed = sprintSpeed
+	}
+	if g, _ := p.Gun(); g != nil {
+		speed *= 1 + (g.ADSMove-1)*smoothstep(p.ADS) // slower with the sights up
 	}
 	v := p.Body.Velocity
 	flat := mathx.Vec3{v[0], 0, v[2]}
@@ -502,6 +558,39 @@ func (a *Arena) groundNormal(p *Player) (mathx.Vec3, bool) {
 	return hit.Normal, true
 }
 
+// Scope sway: zoomed in far, the aim drifts in a slow figure of eight.
+// Holding sprint holds your breath and steadies it, for a while; run out
+// and it shakes harder until you've got your breath back.
+const (
+	swayAmount = 0.0045 // radians
+	maxBreath  = 3.0    // s
+)
+
+func (a *Arena) breathe(p *Player, dt float32, in Input) {
+	g, _ := p.Gun()
+	scoped := g != nil && g.Zoom >= 4 && p.ADS > 0.8
+	holding := scoped && in.Sprint && p.Breath > 0
+	switch {
+	case holding:
+		p.Breath = max(p.Breath-dt, 0)
+	case !in.Sprint || !scoped:
+		p.Breath = min(p.Breath+dt*0.6, maxBreath)
+	}
+	var target [2]float32
+	if scoped && !holding {
+		t := float64(a.Time)
+		amount := float32(swayAmount)
+		if p.Breath < 0.5 {
+			amount *= 2.5 // out of breath
+		}
+		target = [2]float32{amount * float32(math.Sin(t*0.9+float64(p.ID))), amount * 0.7 * float32(math.Sin(t*1.8+float64(p.ID)))}
+	}
+	k := 1 - float32(math.Exp(-6*float64(dt)))
+	for i := range p.sway {
+		p.sway[i] += (target[i] - p.sway[i]) * k
+	}
+}
+
 // stepUp lifts a walking player onto a step in their way: a stair, a kerb
 // of broken floor. A sphere can't roll up an edge it meets this high.
 func (a *Arena) stepUp(p *Player, dt float32) {
@@ -544,7 +633,10 @@ func (a *Arena) stepUp(p *Player, dt float32) {
 }
 
 // hurtPlayer applies damage (halved if it's your own) and a shove, and kills
-// the player at zero health. by is nil for the world.
+// the player at zero health. by is nil for the world. Armour takes it
+// first: gun paint stops there (the hit that pops it does no more), while
+// blasts, blows, rubble and falls carry on into health. A headshot from a
+// precision gun kills a popped player outright; the sniper's kills anyone.
 func (a *Arena) hurtPlayer(p, by *Player, damage float32, head bool, weapon WeaponKind, from, push mathx.Vec3, ev *Events) {
 	if p.Dead || damage <= 0 {
 		return
@@ -552,15 +644,41 @@ func (a *Arena) hurtPlayer(p, by *Player, damage float32, head bool, weapon Weap
 	if by == p {
 		damage *= selfDamage
 	}
-	damage = min(damage, p.Health)
-	p.Health -= damage
+	gun := gunFor(weapon)
+	hurt := Hurt{Victim: p, By: by, Head: head, From: from}
+	if gun != nil && head && gun.Precision && (p.Popped() || gun.HeadKills) {
+		hurt.Damage = p.Durability() // one to the head
+		p.Shield, p.Health = 0, 0
+	} else {
+		if gun != nil && head {
+			damage *= gun.HeadMult
+		}
+		if p.Shield > 0 {
+			took := min(damage, p.Shield)
+			p.Shield -= took
+			hurt.Damage += took
+			damage -= took
+			hurt.Popped = p.Shield <= 0
+			if gun != nil {
+				damage = 0 // paint doesn't bleed through armour
+			}
+		}
+		hurt.Armour = damage <= 0
+		took := min(damage, p.Health)
+		p.Health -= took
+		hurt.Damage += took
+	}
+	p.sinceHurt = 0
 	p.Flash = 1
 	p.Body.Velocity = p.Body.Velocity.Add(push)
+	if g, _ := p.Gun(); g != nil && g.Zoom >= 2 && p.ADS > 0.3 {
+		p.descope, p.ADS = descopeTime, 0 // knocked out of the scope
+	}
 	if by != nil && by != p {
-		by.Damage += damage
+		by.Damage += hurt.Damage
 		p.lastHitBy, p.lastHitAt = by, a.Time
 	}
-	ev.Hurts = append(ev.Hurts, Hurt{Victim: p, By: by, Damage: damage, Head: head, From: from})
+	ev.Hurts = append(ev.Hurts, hurt)
 	if p.Health > 0 {
 		return
 	}
