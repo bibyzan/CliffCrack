@@ -1,6 +1,6 @@
 # fly.io config for the online coordinator. Deploy with:  fly launch --no-deploy (once), then fly deploy
 app = "cliffcrack-coordinator"
-primary_region = "sea"
+primary_region = "sjc"
 
 [build]
   dockerfile = "Dockerfile"

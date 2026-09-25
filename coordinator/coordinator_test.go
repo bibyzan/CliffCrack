@@ -30,7 +30,11 @@ func dial(t *testing.T, srv *httptest.Server, name string) *testClient {
 	}
 	c := &testClient{t: t, conn: conn}
 	c.send(Message{Type: "hello", Name: name})
-	c.id = c.expect("welcome").ID
+	w := c.expect("welcome")
+	c.id = w.ID
+	if len(w.ICE) == 0 || !strings.HasPrefix(w.ICE[0].URLs[0], "stun:") {
+		t.Errorf("welcome ICE %+v: want STUN servers", w.ICE)
+	}
 	return c
 }
 
@@ -147,5 +151,20 @@ func TestGuestLeavingUpdatesTheRoom(t *testing.T) {
 	guest.send(Message{Type: "leave"})
 	if r := host.expect("room").Room; len(r.Members) != 1 {
 		t.Errorf("after the guest left: %+v", r)
+	}
+}
+
+func TestTURNCredentials(t *testing.T) {
+	s := New()
+	s.Log = log.New(io.Discard, "", 0)
+	s.TURN = SharedSecretTURN([]string{"turn:turn.example:3478"}, "sekrit", time.Hour)
+	ice := s.iceServers(context.Background())
+	if len(ice) != 2 || ice[1].URLs[0] != "turn:turn.example:3478" || ice[1].Username == "" || ice[1].Credential == "" {
+		t.Fatalf("ice %+v: want STUN then TURN with credentials", ice)
+	}
+	// A TURN provider that fails still leaves STUN.
+	s.TURN = func(context.Context) ([]ICEServer, error) { return nil, io.EOF }
+	if ice := s.iceServers(context.Background()); len(ice) != 1 {
+		t.Errorf("with TURN failing: %+v, want STUN alone", ice)
 	}
 }

@@ -62,7 +62,8 @@ func ListRooms(ctx context.Context, s Server) ([]coordinator.RoomInfo, error) {
 
 // Lobby is a connection to the coordinator.
 type Lobby struct {
-	ID   string // our peer id
+	ID   string                  // our peer id
+	ICE  []coordinator.ICEServer // the STUN/TURN servers the coordinator gave us
 	conn *websocket.Conn
 	in   chan coordinator.Message
 	mu   sync.Mutex
@@ -92,7 +93,7 @@ func DialLobby(ctx context.Context, s Server, name string) (*Lobby, error) {
 			l.Close()
 			return nil, fmt.Errorf("unexpected %s from the coordinator", m.Type)
 		}
-		l.ID = m.ID
+		l.ID, l.ICE = m.ID, m.ICE
 	case <-ctx.Done():
 		l.Close()
 		return nil, ctx.Err()

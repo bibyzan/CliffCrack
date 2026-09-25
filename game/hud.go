@@ -160,7 +160,10 @@ func (m *menu) ui(b *ui.Builder, best float32, in *input.State) (Mode, bool) {
 
 	chosen, clicked := Mode(0), false
 	b.Panel("##menu", 0.5, 0.76, card, 1.5)
-	for i, item := range menuItems {
+	if m.page != pageMain {
+		b.ColorText(uiMuted, "%s", [...]string{pageArena: "ARENA", pageMore: "MORE"}[m.page])
+	}
+	for i, item := range m.items() {
 		if b.MenuButton(item.label, 320, 50, i == m.choice) {
 			chosen, clicked = item.mode, true
 		}
@@ -173,8 +176,8 @@ func (m *menu) ui(b *ui.Builder, best float32, in *input.State) (Mode, bool) {
 
 	b.Panel("##keys", 0.5, 0.975, hudText, 1.05)
 	b.ColorText(uiMuted, "%s", prompt(in,
-		"W / S  choose      Enter  select      Esc  quit",
-		"D-pad  choose      A  select"))
+		[...]string{"W / S  choose      Enter  select      Esc  quit", "W / S  choose      Enter  select      Esc  back"}[min(int(m.page), 1)],
+		[...]string{"D-pad  choose      A  select", "D-pad  choose      A  select      B  back"}[min(int(m.page), 1)]))
 	b.End()
 	return chosen, clicked
 }

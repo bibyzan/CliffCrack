@@ -13,7 +13,7 @@
 //	GET /healthz   200 "ok"
 //	GET /rooms     the open rooms, as JSON ([]RoomInfo)
 //	GET /ws        a WebSocket of JSON Messages:
-//	  client: hello {name}          server: welcome {id}
+//	  client: hello {name}          server: welcome {id, ice}
 //	  client: create {room: {name, max}}
 //	  client: join {roomId}         server: room {room} (to everyone in it, whenever it changes)
 //	  client: leave                 server: closed (the host left) / error {error}
@@ -48,6 +48,7 @@ type Message struct {
 	From   string          `json:"from,omitempty"`   // signal
 	Data   json.RawMessage `json:"data,omitempty"`   // signal: opaque to the coordinator
 	Error  string          `json:"error,omitempty"`
+	ICE    []ICEServer     `json:"ice,omitempty"` // welcome: the STUN/TURN servers to connect with
 }
 
 // Member is a player in a room.
@@ -99,6 +100,9 @@ type Server struct {
 	rng     *rand.Rand
 	nextID  int
 	Log     *log.Logger // nil: log.Default()
+	// TURN gives relay servers for players who can't connect directly
+	// (see ICEFromEnv); nil for STUN only.
+	TURN ICEProvider
 }
 
 // New makes a coordinator.
@@ -178,6 +182,9 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 			s.deliver(c, Message{Type: "error", Error: "bad message"})
 			continue
 		}
+		if m.Type == "hello" { // (the TURN lookup may take a moment: not under the lock)
+			m.ICE = s.iceServers(ctx)
+		}
 		s.handle(c, m)
 	}
 }
@@ -225,7 +232,7 @@ func (s *Server) handle(c *client, m Message) {
 	switch m.Type {
 	case "hello":
 		c.name = cleanName(m.Name)
-		s.deliver(c, Message{Type: "welcome", ID: c.id})
+		s.deliver(c, Message{Type: "welcome", ID: c.id, ICE: m.ICE})
 	case "create":
 		if err := s.create(c, m.Room); err != nil {
 			s.deliver(c, Message{Type: "error", Error: err.Error()})

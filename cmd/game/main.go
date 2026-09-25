@@ -157,12 +157,16 @@ func run() error {
 		if *aim {
 			in.ButtonEvent(input.MouseRight, true)
 		}
+		taps := map[rune]bool{} // each key down on any of its frames, up otherwise
 		for _, t := range strings.Split(*tap, ",") {
 			var k rune
 			var at int
 			if n, _ := fmt.Sscanf(strings.ToUpper(t), "%c@%d", &k, &at); n == 2 {
-				in.KeyEvent(input.Key(k), rendered == at) // down on its frame, up after
+				taps[k] = taps[k] || rendered == at
 			}
+		}
+		for k, down := range taps {
+			in.KeyEvent(input.Key(k), down)
 		}
 		if in.Pressed(input.KeyF12) && capturePath == "" {
 			capturePath = time.Now().Format("screenshot-20060102-150405.png")

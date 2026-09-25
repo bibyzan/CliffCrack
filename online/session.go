@@ -35,6 +35,7 @@ func Connect(server Server, name string, cfg RTCConfig) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.ICEServers = append(cfg.ICEServers, l.ICE...) // the coordinator's STUN and TURN
 	s := &Session{Name: name, Server: server, cfg: cfg, lobby: l, links: map[string]*rtcLink{}}
 	go s.run()
 	return s, nil

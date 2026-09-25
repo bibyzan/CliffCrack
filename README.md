@@ -2,7 +2,8 @@
 
 A game built on its own engine: a **Go host** driving a **native C++ Vulkan 1.3 renderer**.
 
-The main menu offers three modes:
+The main menu has Run, Arena (versus the bot, or Online), More (the Firing Range and
+the Engine Demo), Settings and Quit:
 
 - **Run**, the arcade mode. You're dropped off a cliff and ride a ball down an endless,
   procedurally generated mountain. Steer around rocks and pines, jump the cracks, and go
@@ -378,7 +379,7 @@ rematch on a new site.
   off on impact, on reaching a player, or after 2.5 s. The 4.2 m blast does up to 120 to
   players and destroys chunks. Your own grenades hurt you at half damage, so a rocket
   jump costs some health.
-- **The firing range** (the main menu's Firing Range, or `-mode range`): a platform over
+- **The firing range** (More → Firing Range on the main menu, or `-mode range`): a platform over
   the chasm with a firing line, a board 12 m out to read your grouping and bloom off
   the paint, distance posts every 10 m, and dummies from 10 to 85 m (two of them
   strafing) with armour like a player's. Downed dummies get back up after 1.5 s. Walls
@@ -518,7 +519,7 @@ sweep, so hundreds of pieces of rubble can fall at once.
 
 ### Online multiplayer
 
-Up to four players, one of them hosting. Pick **Online** on the main menu: the lobby
+Up to four players, one of them hosting. Pick **Arena → Online** on the main menu: the lobby
 browser lists the rooms on the server; **Create a room**, or pick one to join. In a
 room you see who's in it and whether each player's connected; the host starts the match
 once everyone is. A room drops out of the list once it's playing.
@@ -550,8 +551,16 @@ once everyone is. A room drops out of the list once it's playing.
   `./build-android.ps1 -Run -Server 192.168.1.20:8080` (the APK now asks for network
   access, and links with `-checklinkname=0` for pion's Android interface lookup).
   The server and your name can also go in `settings.json` (`"server"`, `"name"`); by
-  default the server is `localhost:8080` and your name is your account's. An address
+  default the server is the public one on fly.io and your name is your account's. An address
   on a private network or `localhost` uses plain `ws://`; a public name uses `wss://`.
+- **The public coordinator** runs on fly.io at `cliffcrack-coordinator.fly.dev`, the
+  games' default server (one machine: rooms live in its memory; deploy with
+  `fly deploy --ha=false`). When a player connects it hands them the ICE servers to use:
+  STUN (Cloudflare's and Google's, free) so players on ordinary home networks connect
+  directly, and TURN relays for the rest (phone networks, strict routers) if configured
+  with fly secrets: `CF_TURN_KEY_ID` and `CF_TURN_API_TOKEN` for Cloudflare's TURN, or
+  `TURN_URLS` with `TURN_SECRET` (coturn) or `TURN_USERNAME`/`TURN_CREDENTIAL`. TURN
+  credentials are fetched per player and short-lived; none are built into the game.
 - **Links** (`online`) are WebRTC data channels (pion, pure Go) from the host to each
   guest: an unordered, unreliable channel for the stream of inputs and snapshots, and a
   reliable, ordered one for events and control. On a LAN the players' own addresses are

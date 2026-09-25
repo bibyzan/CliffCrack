@@ -24,8 +24,11 @@ func main() {
 	if port := os.Getenv("PORT"); port != "" {
 		*addr = ":" + port
 	}
-	srv := &http.Server{Addr: *addr, Handler: coordinator.New().Handler(), ReadHeaderTimeout: 10 * time.Second}
-	log.Printf("coordinator: listening on %s", *addr)
+	c := coordinator.New()
+	turn, how := coordinator.ICEFromEnv()
+	c.TURN = turn
+	srv := &http.Server{Addr: *addr, Handler: c.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	log.Printf("coordinator: listening on %s; ICE: %s", *addr, how)
 	for _, a := range lanAddrs() {
 		log.Printf("coordinator: on this network, point games at  -server ws://%s%s", a, portOf(*addr))
 	}

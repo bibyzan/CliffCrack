@@ -240,9 +240,15 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 		}
 		a.run.Update(dt, in, false) // the menu's ride carries on behind
 	case ModeMenu:
-		if in.Pressed(input.KeyEscape) {
-			a.quit = true
-			return
+		if in.Pressed(input.KeyEscape) || in.PadPressed(input.PadB) {
+			if a.menu.page != pageMain {
+				a.menu.open(pageMain) // up a page
+				return
+			}
+			if in.Pressed(input.KeyEscape) {
+				a.quit = true
+				return
+			}
 		}
 		a.run.Update(dt, in, mouseFree)
 		if item, ok := a.menu.update(in, a.run); ok {
@@ -343,6 +349,15 @@ func (a *App) choose(m Mode) {
 	case menuSettings:
 		a.openSettings(overlayNone)
 		return
+	case menuArenaPage:
+		a.menu.open(pageArena)
+		return
+	case menuMorePage:
+		a.menu.open(pageMore)
+		return
+	case menuBack:
+		a.menu.open(pageMain)
+		return
 	}
 	if err := a.enter(m); err != nil {
 		logf("can't open %v: %v", m, err)
@@ -417,27 +432,58 @@ func (a *App) UI(b *ui.Builder, s Stats) {
 const (
 	menuSettings Mode = ModeOnline + 1 + iota
 	menuQuit
+	menuArenaPage // open the Arena page: against the bot, or online
+	menuMorePage  // open the More page: the firing range, the engine demo
+	menuBack      // back to the main page
 )
 
-// menu is the title screen over the self-playing run.
+// menu is the title screen over the self-playing run: a main page, and
+// pages under Arena and More.
 type menu struct {
+	page   menuPage
 	choice int
 	move   *audio.Sound
 	pick   *audio.Sound
 }
 
-var menuItems = []struct {
+type menuPage int
+
+const (
+	pageMain menuPage = iota
+	pageArena
+	pageMore
+)
+
+type menuItem struct {
 	label string
 	mode  Mode
-}{
-	{"Run", ModeRun},
-	{"Arena", ModeArena},
-	{"Firing Range", ModeRange},
-	{"Online", ModeOnline},
-	{"Engine Demo", ModeDemo},
-	{"Settings", menuSettings},
-	{"Quit", menuQuit},
 }
+
+var menuPages = [...][]menuItem{
+	pageMain: {
+		{"Run", ModeRun},
+		{"Arena", menuArenaPage},
+		{"More", menuMorePage},
+		{"Settings", menuSettings},
+		{"Quit", menuQuit},
+	},
+	pageArena: {
+		{"Versus bot", ModeArena},
+		{"Online", ModeOnline},
+		{"Back", menuBack},
+	},
+	pageMore: {
+		{"Firing Range", ModeRange},
+		{"Engine Demo", ModeDemo},
+		{"Back", menuBack},
+	},
+}
+
+// items are the current page's items.
+func (m *menu) items() []menuItem { return menuPages[m.page] }
+
+// open goes to a page, its first item picked.
+func (m *menu) open(p menuPage) { m.page, m.choice = p, 0 }
 
 func newMenu() menu {
 	return menu{
@@ -453,12 +499,13 @@ func (m *menu) update(in *input.State, r *Run) (Mode, bool) {
 		step = 1
 	}
 	if step != 0 {
-		m.choice = (m.choice + step + len(menuItems)) % len(menuItems)
+		n := len(m.items())
+		m.choice = (m.choice + step + n) % n
 		r.play(m.move, 1)
 	}
 	if confirmPressed(in) {
 		r.play(m.pick, 1)
-		return menuItems[m.choice].mode, true
+		return m.items()[m.choice].mode, true
 	}
 	return 0, false
 }

@@ -25,12 +25,13 @@ type Settings struct {
 	Server string `json:"server,omitempty"`
 }
 
-// DefaultServer is the coordinator used when none is set: one running on
-// this machine (go run ./cmd/coordinator). A build can bake in another,
-// e.g. a LAN address for a phone (build-android.ps1 -Server):
+// DefaultServer is the coordinator used when none is set: the public one on
+// fly.io. For play on your own network, run one (go run ./cmd/coordinator)
+// and point games at it with -server, the "server" setting, or bake it into
+// a build (build-android.ps1 -Server):
 //
 //	-ldflags "-X CliffCrack/game.DefaultServer=192.168.1.20:8080"
-var DefaultServer = "localhost:8080"
+var DefaultServer = "cliffcrack-coordinator.fly.dev"
 
 // Setting ranges.
 const (

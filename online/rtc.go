@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"CliffCrack/coordinator"
+
 	"github.com/pion/webrtc/v4"
 )
 
@@ -17,11 +19,12 @@ type Signal struct {
 }
 
 // RTCConfig is how links find each other. On a local network nothing is
-// needed (the players' own addresses work); across the internet, add a
-// STUN server (e.g. stun:stun.l.google.com:19302), and TURN for players
-// behind strict NATs.
+// needed (the players' own addresses work); across the internet, STUN finds
+// each player's public address, and TURN relays for players behind strict
+// NATs (phone networks, some routers). The coordinator hands these out when
+// you connect (see Connect).
 type RTCConfig struct {
-	ICEServers []string
+	ICEServers []coordinator.ICEServer
 	// Loopback lets links use 127.0.0.1 (two games on one machine, tests).
 	Loopback bool
 }
@@ -31,8 +34,8 @@ func (c RTCConfig) api() (*webrtc.API, webrtc.Configuration) {
 	se.SetIncludeLoopbackCandidate(c.Loopback)
 	api := webrtc.NewAPI(webrtc.WithSettingEngine(se))
 	var cfg webrtc.Configuration
-	if len(c.ICEServers) > 0 {
-		cfg.ICEServers = []webrtc.ICEServer{{URLs: c.ICEServers}}
+	for _, s := range c.ICEServers {
+		cfg.ICEServers = append(cfg.ICEServers, webrtc.ICEServer{URLs: s.URLs, Username: s.Username, Credential: s.Credential})
 	}
 	return api, cfg
 }
