@@ -352,8 +352,10 @@ standing takes it. First to two rounds wins the match; Enter, A or a click start
 rematch on a new site.
 
 - **Rounds**: you start in a launch bay jutting from the chasm wall beyond your end,
-  looking out over the arena. During the 3 s countdown you can look around and pick a
-  weapon, but not move or fire. At FIGHT the bay's pad fires you across the 12 m gap
+  looking out over the arena. The first round opens with a 5 s countdown (3, 2, 1 called
+  aloud) to pick your gadget; after each round the result shows for 3 s and the next
+  starts after 2, 1: 5 s between rounds. In a countdown you can look around but not move
+  or fire. At FIGHT the bay's pad fires you across the 12 m gap
   into the arena, with a whoosh, a jolt and a widening of the view. The round has a 2:30 clock: when time runs out the
   healthier player takes it, and level health is a draw. Every round starts on a fresh
   copy of the same site, with the players swapping ends.
@@ -467,6 +469,10 @@ rematch on a new site.
 - **Rifle**: 36 rounds (and 108 in reserve) at 800 rpm, 7 a ball (×1.25 to the head):
   24 to the body or 19 to the head, most of a magazine as you really hit. Wild from
   the hip and blooms fast; its climb has to be pulled down. A mini reflex sight.
+- **SMG** (a pickup): 40 rounds (160) at ~1090 rpm, 5 a ball: as quick to kill as the
+  rifle up close (32 to the body, 1.7 s) but its paint falls away past 12 m. Tighter
+  from the hip than the rifle, quick to raise, aiming barely helps. A lime blaster with
+  a small reflex sight.
 - **Pistol**: 12 rounds (48), one per click every 0.28 s, 34 a ball. Three to the body
   pop armour, then one to the head kills (0.84 s); five to the body. 2× zoom.
 - **Shotgun** (a pickup), after the SPAS-12: perforated heat shield, tube magazine, a
@@ -550,6 +556,17 @@ rematch on a new site.
   widens the view. Other players bounce with each step, stride wider as they speed up
   and lean into a sprint.
 - **Being hit** tints the view red behind the HUD and the crosshair, never over them.
+  It doesn't knock your sights down: with them up, the view flinches instead.
+- **Paint on the body**, after THE FINALS' coins: every ball that hits a player leaves a
+  splat on their suit where it hit (on the helmet, the torso or a leg, moving with it)
+  for the round, and bursts off them in droplets that fly, bounce once and splat where
+  they land: a big ricochet off armour, a smaller spray into a popped player.
+- **The kill feed** shows who, how and who: the names in their colours and an icon for
+  the weapon, grenade or blow, rubble, a fall (nobody's credited) or a knock off the
+  edge (whoever hit you last, within 6 s), with a headshot's icon after it.
+- **Controls** (Settings → Controls..., with a keyboard): every keyboard action can be
+  rebound; pick one and press its key (a key another action had swaps over), or reset
+  them all. They're saved in `settings.json` and the hints show them.
 - **The helmet HUD** is drawn in the world a hand's width from your eye, framed by
   faint visor brackets: your **armour bar** across the top (segments that drain, flash
   when hit, sweep back as it recharges, amber when low and red once it's gone, with

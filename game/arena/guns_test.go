@@ -146,18 +146,18 @@ func TestArmourRecharges(t *testing.T) {
 	}
 }
 
-func TestGettingHitKnocksYouOutOfTheScope(t *testing.T) {
-	a, _, target := armedDuel(WeaponRifle, 10)
-	arm(target, WeaponSniper)
+func TestGettingHitKeepsYouScoped(t *testing.T) {
+	a, shooter, target := duel(20)
+	target.Slots[0], target.Current = WeaponSniper, WeaponSniper
 	run(a, 0.5, Input{}, Input{Aim: true})
-	if target.ADS != 1 {
+	if target.ADS < 0.9 {
 		t.Fatalf("target's scope not up: %v", target.ADS)
 	}
 	var ev Events
-	a.hurtPlayer(target, nil, 5, false, WeaponRifle, mathx.Vec3{}, mathx.Vec3{}, &ev)
-	run(a, 0.2, Input{}, Input{Aim: true})
-	if target.ADS > 0.2 {
-		t.Errorf("still scoped (%v) just after being hit", target.ADS)
+	a.hurtPlayer(target, shooter, 5, false, WeaponRifle, mathx.Vec3{}, mathx.Vec3{}, &ev)
+	run(a, frame, Input{}, Input{Aim: true})
+	if target.ADS < 0.9 {
+		t.Errorf("knocked out of the scope (ADS %v) by a hit; want to stay scoped", target.ADS)
 	}
 }
 

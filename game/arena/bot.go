@@ -333,13 +333,15 @@ func gunForRange(self *Player, dist float32) WeaponKind {
 	var order []WeaponKind
 	switch {
 	case dist < 9:
-		order = []WeaponKind{WeaponShotgun, WeaponRifle, WeaponPistol, WeaponLauncher, WeaponSniper}
+		order = []WeaponKind{WeaponShotgun, WeaponSMG, WeaponRifle, WeaponPistol, WeaponLauncher, WeaponSniper}
+	case dist < 14:
+		order = []WeaponKind{WeaponSMG, WeaponRifle, WeaponPistol, WeaponShotgun, WeaponSniper, WeaponLauncher}
 	case dist < 26:
-		order = []WeaponKind{WeaponRifle, WeaponPistol, WeaponShotgun, WeaponSniper, WeaponLauncher}
+		order = []WeaponKind{WeaponRifle, WeaponSMG, WeaponPistol, WeaponShotgun, WeaponSniper, WeaponLauncher}
 	case dist < 50:
-		order = []WeaponKind{WeaponPistol, WeaponSniper, WeaponRifle, WeaponLauncher, WeaponShotgun}
+		order = []WeaponKind{WeaponPistol, WeaponSniper, WeaponRifle, WeaponSMG, WeaponLauncher, WeaponShotgun}
 	default:
-		order = []WeaponKind{WeaponSniper, WeaponPistol, WeaponRifle, WeaponLauncher, WeaponShotgun}
+		order = []WeaponKind{WeaponSniper, WeaponPistol, WeaponRifle, WeaponSMG, WeaponLauncher, WeaponShotgun}
 	}
 	for _, k := range order {
 		if !self.Holds(k) {
@@ -375,10 +377,12 @@ func (b *Bot) takePickup(a *Arena, self *Player, p *Pickup, want *WeaponKind, in
 func worth(k WeaponKind) int {
 	switch k {
 	case WeaponLauncher:
-		return 5
+		return 6
 	case WeaponSniper:
-		return 4
+		return 5
 	case WeaponShotgun:
+		return 4
+	case WeaponSMG:
 		return 3
 	case WeaponRifle:
 		return 2

@@ -87,6 +87,7 @@ const (
 	rowVolume
 	rowHUD
 	rowView
+	rowControls // keyboards only: the Controls page
 	rowBack
 	rowCount
 )
@@ -106,10 +107,29 @@ type settingsScreen struct {
 	held    int     // direction held on the last frame (-1, 0, 1)
 	heldFor float32 // seconds it has been held
 	back    bool    // "Back" was clicked
+
+	// The Controls page: rebinding keys.
+	controls    bool
+	openControl bool   // "Controls" was clicked
+	keyChoice   int    // the row: an Action, then reset, then back
+	waiting     Action // the action waiting for its new key, or -1
+	clicked     int    // a row clicked last frame, or -1
 }
 
+// Controls page rows after the actions.
+const (
+	keyRowReset = int(actionCount) + iota
+	keyRowBack
+	keyRows
+)
+
 // open resets the selection to the first row.
-func (m *settingsScreen) open() { *m = settingsScreen{touch: m.touch} }
+func (m *settingsScreen) open() { *m = settingsScreen{touch: m.touch, waiting: -1, clicked: -1} }
+
+// skip reports whether a row isn't shown on this device.
+func (m *settingsScreen) skip(r settingRow) bool {
+	return (r == rowStick && !m.touch) || (r == rowControls && m.touch)
+}
 
 // update applies this frame's input to s and reports when the player leaves.
 func (m *settingsScreen) update(in *input.State, s *Settings, dt float32) (done bool) {
@@ -117,12 +137,20 @@ func (m *settingsScreen) update(in *input.State, s *Settings, dt float32) (done 
 		m.back = false
 		return true
 	}
+	if m.openControl {
+		m.openControl, m.controls, m.keyChoice, m.waiting, m.clicked = false, true, 0, -1, -1
+		return false
+	}
+	if m.controls {
+		m.updateControls(in, s)
+		return false
+	}
 	if pausePressed(in) || in.PadPressed(input.PadB) {
 		return true
 	}
 	if d := navY(in); d != 0 {
 		m.choice = (m.choice + settingRow(d) + rowCount) % rowCount
-		if m.choice == rowStick && !m.touch {
+		for m.skip(m.choice) {
 			m.choice = (m.choice + settingRow(d) + rowCount) % rowCount
 		}
 	}
@@ -179,6 +207,10 @@ func (m *settingsScreen) update(in *input.State, s *Settings, dt float32) (done 
 		case confirmPressed(in):
 			s.ViewDistance = (s.ViewDistance + 1) % n
 		}
+	case rowControls:
+		if confirmPressed(in) {
+			m.openControl = true
+		}
 	case rowBack:
 		if confirmPressed(in) {
 			return true
@@ -187,7 +219,88 @@ func (m *settingsScreen) update(in *input.State, s *Settings, dt float32) (done 
 	return false
 }
 
+// updateControls runs the Controls page: pick an action (keys, pad or a
+// click), then press its new key (Esc cancels); a key another action had
+// swaps over. Esc or Back leaves.
+func (m *settingsScreen) updateControls(in *input.State, s *Settings) {
+	if m.waiting >= 0 {
+		if in.Pressed(input.KeyEscape) || in.PadPressed(input.PadB) {
+			m.waiting = -1
+		} else if k, ok := in.PressedKey(); ok {
+			s.bind(m.waiting, k)
+			m.waiting = -1
+		}
+		return
+	}
+	row := m.clicked
+	m.clicked = -1
+	if row < 0 {
+		if pausePressed(in) || in.PadPressed(input.PadB) {
+			m.controls = false
+			return
+		}
+		if d := navY(in); d != 0 {
+			m.keyChoice = (m.keyChoice + d + keyRows) % keyRows
+		}
+		if !confirmPressed(in) {
+			return
+		}
+		row = m.keyChoice
+	}
+	m.keyChoice = row
+	switch {
+	case row < int(actionCount):
+		m.waiting = Action(row)
+	case row == keyRowReset:
+		s.resetKeys()
+	default:
+		m.controls = false
+	}
+}
+
+// controlsUI is the Controls page: every action and its key in two
+// columns, then reset and back.
+func (m *settingsScreen) controlsUI(b *ui.Builder, s *Settings) {
+	b.Panel("##controlstitle", 0.5, 0.12, hudText, 3.2)
+	b.Text("CONTROLS")
+	b.End()
+	b.Panel("##controls", 0.5, 0.56, card&^gfx.UICentered, 1.15) // (centring each button would push the pairs off)
+	const width = 330
+	for a := range actionCount {
+		key := keyName(s.key(a))
+		if m.waiting == a {
+			key = "press a key..."
+		}
+		if a%2 == 1 {
+			b.SameLine(14)
+		}
+		if b.MenuButton(fmt.Sprintf("%s:  %s##bind%d", actionInfo[a].label, key, a), width, 0, m.keyChoice == int(a)) {
+			m.clicked = int(a)
+		}
+	}
+	b.Separator()
+	if b.MenuButton("Reset to defaults", width, 0, m.keyChoice == keyRowReset) {
+		m.clicked = keyRowReset
+	}
+	b.SameLine(14)
+	if b.MenuButton("Back##controls", width, 0, m.keyChoice == keyRowBack) {
+		m.clicked = keyRowBack
+	}
+	b.End()
+	b.Panel("##controlskeys", 0.5, 0.975, hudText, 1.05)
+	hint := "Click an action (or W / S and Enter), then press its key      Esc  back"
+	if m.waiting >= 0 {
+		hint = "Press the new key for " + actionInfo[m.waiting].label + "      Esc  cancel"
+	}
+	b.ColorText(uiMuted, "%s", hint)
+	b.End()
+}
+
 func (m *settingsScreen) ui(b *ui.Builder, s *Settings, in *input.State) {
+	if m.controls {
+		m.controlsUI(b, s)
+		return
+	}
 	b.Panel("##settingstitle", 0.5, 0.18, hudText, 4)
 	b.Text("SETTINGS")
 	b.End()
@@ -220,6 +333,9 @@ func (m *settingsScreen) ui(b *ui.Builder, s *Settings, in *input.State) {
 	b.StyledSlider("HUD width (ultrawide)", &s.HUDWidth, minHUDWidth, maxHUDWidth, style(rowHUD, "%.0f%%"))
 	if b.MenuButton(fmt.Sprintf("View distance:  %s##view", s.view().name), width, 0, m.choice == rowView) {
 		s.ViewDistance = (s.ViewDistance + 1) % len(viewProfiles)
+	}
+	if !m.touch && b.MenuButton("Controls...##controls", width, 0, m.choice == rowControls) {
+		m.openControl = true
 	}
 	b.Separator()
 	if b.MenuButton("Back", width, 46, m.choice == rowBack) {

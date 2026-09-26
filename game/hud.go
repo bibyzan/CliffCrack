@@ -147,7 +147,9 @@ func (r *Run) UI(b *ui.Builder, in *input.State) {
 	} else if r.ride.time < hintTime && !r.ride.crashed {
 		b.Panel("##hint", 0.5, 0.975, hudText, 1.1)
 		b.ColorText(uiMuted, "%s", prompt(in,
-			"A / D  steer      W  tuck      S  brake      Space  jump      Mouse  look      Esc  pause",
+			fmt.Sprintf("%s / %s  steer      %s  tuck      %s  brake      %s  jump      Mouse  look      Esc  pause",
+				keyName(r.settings.key(ActLeft)), keyName(r.settings.key(ActRight)), keyName(r.settings.key(ActForward)),
+				keyName(r.settings.key(ActBack)), keyName(r.settings.key(ActJump))),
 			"L-stick  steer      RT  tuck      LT  brake      A  jump      R-stick  look      Start  pause"))
 		b.End()
 	}

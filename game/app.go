@@ -125,6 +125,7 @@ func NewApp(opts Options) (*App, error) {
 	a.run.startAt = opts.StartAt
 	a.run.touchScreen = opts.Touch
 	a.settingsUI.touch = opts.Touch
+	a.settingsUI.waiting, a.settingsUI.clicked = -1, -1
 	a.opts.Demo.Settings = &a.settings
 	if err := a.enter(opts.Start); err != nil {
 		return nil, err

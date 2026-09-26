@@ -390,7 +390,7 @@ func (m *Arena) playerLeft(i int) {
 		return
 	}
 	np.left[i] = true
-	m.feed = append(m.feed, feedLine{text: np.names[i] + " left"})
+	m.feed = append(m.feed, feedLine{note: np.names[i] + " left"})
 }
 
 // rematch (host) starts a new match with everyone still here.

@@ -108,6 +108,9 @@ enum {
     R_UI_IMAGE,         // a texture behind every window, over earlier circles (e.g. an icon on a touch
                         //   button): x/y = centre, min/value = width/height in pixels, max = the RTexture,
                         //   result (in) = tint as packed sRGB 0xAABBGGRR
+    R_UI_ICON,          // an RTexture inline in the window, like a word of text: min/value = width/height
+                        //   in unscaled pixels (the UI scale applies), max = the RTexture, result (in) =
+                        //   tint as packed sRGB 0xAABBGGRR
 };
 
 // Window options, passed in the R_UI_WINDOW command's value.

@@ -53,6 +53,7 @@ func run() error {
 	joinRoom := flag.Bool("join", false, "online: join the first open room")
 	tap := flag.String("tap", "", `keys to press on given frames, e.g. "R@60,G@90" (for scripted tests)`)
 	aim := flag.Bool("aim", false, "hold the right mouse button every frame: aim down the sights (for scripted tests)")
+	touch := flag.Bool("touch", platform.TouchScreen(), "show the touch screen's controls and settings (-touch=false: a keyboard's, e.g. to test them on a phone)")
 	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
 	flag.Parse()
 	startMode, ok := game.ParseMode(*mode)
@@ -124,7 +125,7 @@ func run() error {
 		DebugUI:   *ui,
 		Audio:     mixer,
 		DataDir:   dataDir,
-		Touch:     platform.TouchScreen(),
+		Touch:     *touch,
 		Demo: game.DemoOptions{
 			Model:      *model,
 			ScriptsDir: scriptsDir(*scripts, exeDir),

@@ -12,11 +12,16 @@ const (
 
 // Match rules.
 const (
-	RoundsToWin   = 2   // best of three
-	CountdownTime = 8.0 // choosing a gadget, the last CountdownCall of it counted down aloud
-	CountdownCall = 3.0
-	RoundTime     = 150.0 // s; when it runs out the healthier player takes the round
-	RoundOverTime = 4.0
+	RoundsToWin = 2 // best of three
+	// The first round opens with FirstCountdown to choose a gadget, its last
+	// CountdownCall counted down aloud (3, 2, 1). After each round the result
+	// shows for RoundOverTime, then the next starts after a short
+	// RoundCountdown (2, 1): 5 s from one round to the next.
+	FirstCountdown = 5.0
+	RoundCountdown = 2.0
+	CountdownCall  = 3.0
+	RoundTime      = 150.0 // s; when it runs out the healthier player takes the round
+	RoundOverTime  = 3.0
 )
 
 // Match is a series of single-life rounds on one site. Every round starts
@@ -59,7 +64,10 @@ func (m *Match) startRound() {
 			p.Gadget = m.Gadgets[i]
 		}
 	}
-	m.Phase, m.Timer = PhaseCountdown, CountdownTime
+	m.Phase, m.Timer = PhaseCountdown, RoundCountdown
+	if m.Round == 1 {
+		m.Timer = FirstCountdown
+	}
 }
 
 // Step advances the match by dt with one input per player. During the

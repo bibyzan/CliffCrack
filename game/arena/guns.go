@@ -47,6 +47,15 @@ var Guns = [weaponCount]*GunSpec{
 		HipSpread: 0.012, ADSSpread: 0.004, MoveSpread: 0.012, Bloom: 0.008, MaxBloom: 0.055, BloomDecay: 3.5, Recoil: 0.009,
 		Zoom: 1.35, ADSTime: 0.16, ADSMove: 0.7, BallSpeed: 140,
 	},
+	// The SMG: faster than the rifle and weaker per ball, as quick to kill
+	// up close (32 to the body in 1.7 s), but its paint falls away past
+	// 12 m. Steady from the hip and quick to raise; aiming barely helps.
+	WeaponSMG: {
+		Mag: 40, Reserve: 160, Interval: 0.055, Auto: true, Reload: 1.6, Pellets: 1,
+		Damage: 5, HeadMult: 1.2, ChunkDamage: 6, Range: 70, Falloff: 12, Push: 0.2,
+		HipSpread: 0.008, ADSSpread: 0.006, MoveSpread: 0.005, Bloom: 0.005, MaxBloom: 0.035, BloomDecay: 5, Recoil: 0.006,
+		Zoom: 1.2, ADSTime: 0.12, ADSMove: 0.85, BallSpeed: 120,
+	},
 	// The pistol: three body shots pop armour, then a headshot kills (five to
 	// the body). Measured, not spammed: quicker than the rifle for a steady
 	// hand, and the thing to draw when the rifle's empty.

@@ -138,7 +138,8 @@ var pickupSpotsSouth = []mathx.Vec3{
 func (s *Site) pickupSpots(rng *rand.Rand) {
 	pool := []Pickup{
 		weaponPickup(WeaponSniper, mathx.Vec3{}), weaponPickup(WeaponLauncher, mathx.Vec3{}),
-		weaponPickup(WeaponShotgun, mathx.Vec3{}), weaponPickup(WeaponShotgun, mathx.Vec3{}),
+		weaponPickup(WeaponShotgun, mathx.Vec3{}), weaponPickup(WeaponSMG, mathx.Vec3{}),
+		weaponPickup(WeaponSMG, mathx.Vec3{}),
 		grenadePickup(Frag, 2, mathx.Vec3{}), grenadePickup(Sticky, 2, mathx.Vec3{}),
 	}
 	spots := rng.Perm(len(pickupSpotsSouth))

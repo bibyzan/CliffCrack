@@ -126,7 +126,8 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 	}
 	hipAt := float32(hipHeight) - drop
 	shorten := mathx.Scale(1, hipAt/hipHeight, 1) // crouched: the legs fold to keep the feet down
-	for _, side := range []float32{1, -1} {
+	var legFrames [2]mathx.Mat4                   // right, left: for the paint on them
+	for li, side := range []float32{1, -1} {
 		hip := base.Mul(mathx.Translate(0.12*side, hipAt, 0))
 		switch {
 		case p.Sliding && !p.Dead:
@@ -137,11 +138,14 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 			hip = hip.Mul(mathx.RotateX(swing * side))
 		}
 		draw(hip.Mul(shorten), charLeg)
+		legFrames[li] = hip.Mul(shorten)
 	}
 	draw(upper, charTorso)
 
 	pitch := p.ViewPitch()
-	draw(upper.Mul(mathx.Translate(0, neckHeight, 0)).Mul(mathx.RotateX(pitch*0.6)), charHead)
+	headFrame := upper.Mul(mathx.Translate(0, neckHeight, 0)).Mul(mathx.RotateX(pitch * 0.6))
+	draw(headFrame, charHead)
+	out = m.appendBodyPaint(out, p, upper, headFrame, legFrames[0], legFrames[1])
 
 	// Arms and weapon follow the aim.
 	aim := upper.Mul(mathx.Translate(0, shoulderHeight, 0)).Mul(mathx.RotateX(pitch))

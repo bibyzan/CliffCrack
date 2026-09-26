@@ -314,18 +314,39 @@ static void draw_circle(const RUICmd& c, uint32_t packed, const std::string& lab
                 label.c_str());
 }
 
-// Draws an RTexture (e.g. an icon), tinted, behind every window.
-static void draw_image(const RUICmd& c, uint32_t packed) {
-    const uint32_t texture = static_cast<uint32_t>(c.max);
-    auto           it = g_images.find(texture);
+// The ImGui descriptor set for an RTexture, made the first time it's drawn
+// (VK_NULL_HANDLE if there's no such texture).
+static VkDescriptorSet image_set(uint32_t texture) {
+    auto it = g_images.find(texture);
     if (it == g_images.end()) {
         const VkImageView view = g_texture_view ? g_texture_view(texture) : VK_NULL_HANDLE;
-        if (!view || g_images.size() >= 128) return;
+        if (!view || g_images.size() >= 128) return VK_NULL_HANDLE;
         it = g_images.emplace(texture, ImGui_ImplVulkan_AddTexture(view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)).first;
     }
+    return it->second;
+}
+
+// Draws an RTexture inline in the current window, like a word of text,
+// centred on the line's height.
+static void draw_icon(const RUICmd& c, uint32_t packed) {
+    const VkDescriptorSet set = image_set(static_cast<uint32_t>(c.max));
+    if (!set) return;
+    auto         channel = [&](int shift) { return static_cast<float>((packed >> shift) & 0xffu) / 255.0f; };
+    const ImVec4 tint(srgb_to_linear(channel(0)), srgb_to_linear(channel(8)), srgb_to_linear(channel(16)), channel(24));
+    const ImVec2 size(c.min * g_scale, c.value * g_scale);
+    const float  line = ImGui::GetTextLineHeight();
+    if (size.y < line) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + (line - size.y) * 0.5f);
+    ImGui::ImageWithBg(ImTextureRef(reinterpret_cast<ImTextureID>(set)), size, ImVec2(0, 0), ImVec2(1, 1),
+                       ImVec4(0, 0, 0, 0), tint);
+}
+
+// Draws an RTexture (e.g. an icon), tinted, behind every window.
+static void draw_image(const RUICmd& c, uint32_t packed) {
+    const VkDescriptorSet set = image_set(static_cast<uint32_t>(c.max));
+    if (!set) return;
     auto        channel = [&](int shift) { return static_cast<float>((packed >> shift) & 0xffu) / 255.0f; };
     const float hw = c.min * 0.5f, hh = c.value * 0.5f;
-    ImGui::GetBackgroundDrawList()->AddImage(ImTextureRef(reinterpret_cast<ImTextureID>(it->second)),
+    ImGui::GetBackgroundDrawList()->AddImage(ImTextureRef(reinterpret_cast<ImTextureID>(set)),
                                              ImVec2(c.x - hw, c.y - hh), ImVec2(c.x + hw, c.y + hh), ImVec2(0, 0),
                                              ImVec2(1, 1), srgb(channel(0), channel(8), channel(16), channel(24)));
 }
@@ -557,6 +578,9 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBit
             break;
         case R_UI_GAUGE:
             draw_gauge(c, label);
+            break;
+        case R_UI_ICON:
+            draw_icon(c, packed);
             break;
         default:
             break;

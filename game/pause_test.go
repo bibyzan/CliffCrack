@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"CliffCrack/engine/input"
@@ -13,7 +14,7 @@ import (
 func TestSettingsSaveAndLoad(t *testing.T) {
 	dir := t.TempDir()
 	s, err := LoadSettings(dir)
-	if err != nil || s != DefaultSettings() {
+	if err != nil || !reflect.DeepEqual(s, DefaultSettings()) {
 		t.Fatalf("no file should give the defaults, got %+v, %v", s, err)
 	}
 	s.FOV, s.LookSensitivity, s.InvertLook, s.Volume = 72, 1.5, true, 40
@@ -21,7 +22,7 @@ func TestSettingsSaveAndLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	back, err := LoadSettings(dir)
-	if err != nil || back != s {
+	if err != nil || !reflect.DeepEqual(back, s) {
 		t.Errorf("round trip gave %+v, %v; want %+v", back, err, s)
 	}
 }
@@ -38,7 +39,7 @@ func TestSettingsAreClampedAndDefaulted(t *testing.T) {
 		t.Errorf("got %+v", s)
 	}
 	os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`not json`), 0o644)
-	if s, err := LoadSettings(dir); err == nil || s != DefaultSettings() {
+	if s, err := LoadSettings(dir); err == nil || !reflect.DeepEqual(s, DefaultSettings()) {
 		t.Errorf("a broken file should report an error and fall back to the defaults, got %+v, %v", s, err)
 	}
 }

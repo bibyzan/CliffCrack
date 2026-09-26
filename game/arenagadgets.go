@@ -13,11 +13,12 @@ import (
 
 // Gadgets: the hammer and the grapple, chosen before each round.
 
-// choosingGadget reports whether the countdown's gadget choice is up: its
-// first seconds, before the last CountdownCall are counted down.
+// choosingGadget reports whether the countdown's gadget choice is up: the
+// first round's countdown (the choice is kept after that, and later rounds
+// start straight away).
 func (m *Arena) choosingGadget() bool {
 	mt := m.match
-	return !mt.Practice && mt.Phase == arena.PhaseCountdown && mt.Timer > arena.CountdownCall
+	return !mt.Practice && mt.Phase == arena.PhaseCountdown && mt.Round == 1
 }
 
 // noteGadgetChoice keeps a gadget chosen in the countdown (c, this frame's

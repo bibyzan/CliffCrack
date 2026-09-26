@@ -138,6 +138,15 @@ func (b *Builder) Image(tex gfx.Texture, x, y, w, h float32, srgb [4]float32) {
 	c.Result = packSRGB(srgb)
 }
 
+// Icon draws texture tex inline in the current window, like a word of text:
+// w x h pixels (the UI scale applies), tinted with an sRGB colour, centred
+// on the line. Put it between words with SameLine.
+func (b *Builder) Icon(tex gfx.Texture, w, h float32, srgb [4]float32) {
+	c := b.add(gfx.UIIcon, "")
+	c.Min, c.Value, c.Max = w, h, float32(tex)
+	c.Result = packSRGB(srgb)
+}
+
 // SameLine keeps the next widget on the current line, spacing pixels after
 // this one (0 = default).
 func (b *Builder) SameLine(spacing float32) {

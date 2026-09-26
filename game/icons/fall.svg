@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+  <!-- Fell to their death (kill feed): an arrow down into the gap between two ledges. -->
+  <rect x="0" y="14" width="9" height="26"/>
+  <rect x="31" y="14" width="9" height="26"/>
+  <rect x="18" y="0" width="4" height="24"/>
+  <polygon points="13,22 27,22 20,36"/>
+</svg>

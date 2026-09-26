@@ -124,7 +124,7 @@ func TestGrappleLetsGoOnJumpAndMissesTheSky(t *testing.T) {
 
 func TestGadgetIsChosenInTheCountdown(t *testing.T) {
 	m := NewMatch(3, 2)
-	if m.Phase != PhaseCountdown || m.Timer != CountdownTime {
+	if m.Phase != PhaseCountdown || m.Timer != FirstCountdown {
 		t.Fatalf("a round opens with the countdown: %v %v", m.Phase, m.Timer)
 	}
 	m.Step(frame, []Input{{Select: 2}, {}})

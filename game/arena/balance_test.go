@@ -45,6 +45,18 @@ func TestTimeToKill(t *testing.T) {
 			t.Errorf("%v: %d headshots to kill, want %d", WeaponNames[c.k], got, c.head)
 		}
 	}
+	// The SMG: as quick as the rifle to kill up close, faster firing, and
+	// steadier from the hip; weaker past 12 m.
+	smg := Guns[WeaponSMG]
+	if got := hitsToKill(t, WeaponSMG, false); got != 32 {
+		t.Errorf("SMG: %d body hits to kill, want 32", got)
+	}
+	if smgTTK, rifleTTK := float32(31)*smg.Interval, float32(23)*Guns[WeaponRifle].Interval; smgTTK > rifleTTK*1.05 {
+		t.Errorf("SMG kills in %.2f s up close, rifle %.2f: want about as quick", smgTTK, rifleTTK)
+	}
+	if smg.Interval >= Guns[WeaponRifle].Interval || smg.HipSpread >= Guns[WeaponRifle].HipSpread || smg.Range >= Guns[WeaponRifle].Range {
+		t.Error("the SMG should fire faster, spread less from the hip and reach less far than the rifle")
+	}
 	rifle := Guns[WeaponRifle]
 	if frac := float32(24) / float32(rifle.Mag); frac < 0.6 || frac > 0.8 {
 		t.Errorf("the rifle kills in %.0f%% of a magazine of perfect hits; want most of one, with room to miss", frac*100)

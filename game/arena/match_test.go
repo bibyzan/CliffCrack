@@ -138,3 +138,36 @@ func TestBothDownIsADraw(t *testing.T) {
 		t.Errorf("both down: phase %v round winner %d, want a draw", m.Phase, m.RoundWinner)
 	}
 }
+
+// The first round opens after a 5 s countdown; between rounds there's 3 s
+// of the result and a 2 s countdown: 5 s from one round to the next.
+func TestRoundTiming(t *testing.T) {
+	m := NewMatch(3, 2)
+	if m.Timer != FirstCountdown || FirstCountdown != 5 {
+		t.Fatalf("round 1 opens with a %v s countdown, want 5", m.Timer)
+	}
+	for m.Phase == PhaseCountdown {
+		m.Step(frame, nil)
+	}
+	var ev Events
+	m.Arena.hurtPlayer(m.Arena.Players[1], m.Arena.Players[0], 1e6, false, WeaponLauncher, V3{}, V3{}, &ev)
+	m.Step(frame, nil)
+	if m.Phase != PhaseRoundOver {
+		t.Fatalf("after a kill: phase %v, want the round over", m.Phase)
+	}
+	between := float32(0)
+	for m.Round == 1 {
+		m.Step(frame, nil)
+		between += frame
+	}
+	if m.Phase != PhaseCountdown || m.Timer > RoundCountdown {
+		t.Fatalf("round 2 opens with phase %v, timer %v; want a %v s countdown", m.Phase, m.Timer, float32(RoundCountdown))
+	}
+	for m.Phase == PhaseCountdown {
+		m.Step(frame, nil)
+		between += frame
+	}
+	if between < 4.9 || between > 5.1 {
+		t.Errorf("%.2f s from one round's end to the next's fight, want 5", between)
+	}
+}

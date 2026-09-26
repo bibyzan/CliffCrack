@@ -54,6 +54,7 @@ const (
 	UIGauge
 	UICircle
 	UIImage
+	UIIcon
 )
 
 // UIWindowFlags are window options (values match R_UI_WINDOW_* in renderer.h).

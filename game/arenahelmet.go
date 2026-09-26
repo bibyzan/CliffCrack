@@ -35,6 +35,8 @@ type hudIcons struct {
 	chevron                    icon
 	gadgets                    [arena.GadgetKinds]icon
 	elbow                      icon
+	// The kill feed's: a headshot, a fall, a knock off the edge, rubble.
+	headshot, fall, knockoff, rubble icon
 }
 
 // loadIcon rasterizes icons/<name>.svg, height pixels tall, into a texture.
@@ -57,7 +59,7 @@ func loadIcons() (hudIcons, error) {
 	load := loadIcon
 	var h hudIcons
 	var err error
-	for k, name := range []string{"hammer", "rifle", "pistol", "shotgun", "sniper", "launcher"} {
+	for k, name := range []string{"hammer", "rifle", "pistol", "shotgun", "sniper", "launcher", "smg"} {
 		if h.weapons[k], err = load(name, 96); err != nil {
 			return h, err
 		}
@@ -70,6 +72,7 @@ func loadIcons() (hudIcons, error) {
 		{&h.frag, "frag", 96}, {&h.sticky, "sticky", 96}, {&h.ball, "ball", 32}, {&h.shell, "shell", 48},
 		{&h.round, "round", 64}, {&h.bullet, "grenade", 40}, {&h.chevron, "chevron", 64},
 		{&h.gadgets[arena.GadgetGrapple], "grapple", 96}, {&h.elbow, "elbow", 96},
+		{&h.headshot, "headshot", 64}, {&h.fall, "fall", 64}, {&h.knockoff, "knockoff", 64}, {&h.rubble, "rubble", 64},
 	} {
 		if *x.dst, err = load(x.name, x.height); err != nil {
 			return h, err
@@ -394,6 +397,8 @@ func (h *helmet) loadout(me *arena.Player) {
 		round, rh, perRow = ic.ball, 0.011, 24
 	case arena.WeaponPistol:
 		round, rh, perRow = ic.ball, 0.016, 12
+	case arena.WeaponSMG:
+		round, rh, perRow = ic.ball, 0.009, 20
 	case arena.WeaponShotgun:
 		round, rh, perRow = ic.shell, 0.028, 8
 	case arena.WeaponSniper:

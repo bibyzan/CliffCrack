@@ -743,9 +743,8 @@ func (a *Arena) hurtPlayer(p, by *Player, damage float32, head bool, weapon Weap
 	p.sinceHurt = 0
 	p.Flash = 1
 	p.Body.Velocity = p.Body.Velocity.Add(push)
-	if g, _ := p.Gun(); g != nil && g.Zoom >= 2 && p.ADS > 0.3 {
-		p.descope, p.ADS = descopeTime, 0 // knocked out of the scope
-	}
+	// (Taking a hit doesn't knock the sights down: the view shakes instead,
+	// see the game's hurt reaction.)
 	if by != nil && by != p {
 		by.Damage += hurt.Damage
 		p.lastHitBy, p.lastHitAt = by, a.Time

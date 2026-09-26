@@ -55,11 +55,7 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 	for i, f := range m.feed {
 		fade := clampf((feedLife-f.age)*3, 0, 1)
 		b.Panel("##feed"+string(rune('0'+i%10)), m.hudX(0.985), 0.03+0.04*float32(i), anchored, 1.15)
-		c := uiMuted
-		if f.good {
-			c = uiAccent
-		}
-		b.ColorText(withAlpha(c, fade), "%s", f.text)
+		m.feedLineUI(b, f, fade)
 		b.End()
 	}
 
@@ -76,7 +72,7 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 		}
 		b.Panel("##arenahint", 0.5, hintY, hudText, 1.05)
 		b.ColorText(withAlpha(uiMuted, fade), "%s", prompt(in,
-			"LMB  fire    RMB  aim    1 2 / wheel  swap    R  reload    E  pick up    F  elbow    Q  gadget    G  grenade    C  frag / sticky    Ctrl  crouch (sprinting: slide)    Space  jump, vault, climb",
+			m.settings.keysHint(),
 			"RT  fire    LT  aim    Y  swap    X  reload (hold: pick up)    R3  elbow    RB  gadget    LB  grenade    D-pad down  frag / sticky    B  crouch (sprinting: slide)",
 			"Stick  move (push all the way to sprint)  ·  drag right side  look  ·  CROUCH while sprinting to slide  ·  JUMP at a ledge to climb"))
 		b.End()
@@ -112,7 +108,7 @@ func (m *Arena) weaponHUD(b *ui.Builder, in *input.State, me *arena.Player) {
 		case me.Other() != arena.NoWeapon:
 			verb = "swap " + arena.WeaponNames[me.Current] + " for"
 		}
-		b.ColorText(uiWhite, "%s", prompt(in, "E  "+verb+" "+p.Name(), "hold X  "+verb+" "+p.Name(),
+		b.ColorText(uiWhite, "%s", prompt(in, keyName(m.settings.key(ActPickUp))+"  "+verb+" "+p.Name(), "hold X  "+verb+" "+p.Name(),
 			"PICK UP  "+verb+" "+p.Name()))
 		b.End()
 	}
@@ -311,4 +307,64 @@ func (m *Arena) leftX() float32 {
 		return max(m.hudX(0.035), 0.13)
 	}
 	return m.hudX(0.035)
+}
+
+// feedLineUI is a kill feed line: who, how (an icon: the weapon, grenade or
+// blow, rubble, a fall, or a knock off the edge; and a headshot's), and who
+// went down, the names in their colours.
+func (m *Arena) feedLineUI(b *ui.Builder, f feedLine, fade float32) {
+	if f.note != "" {
+		b.ColorText(withAlpha(uiMuted, fade), "%s", f.note)
+		return
+	}
+	ic := &m.as.icons
+	how := icon{}
+	switch k := f.cause; {
+	case k == arena.WeaponDrop && f.knocked:
+		how = ic.knockoff
+	case k == arena.WeaponDrop:
+		how = ic.fall
+	case k == arena.WeaponRubble:
+		how = ic.rubble
+	case k == arena.WeaponFrag:
+		how = ic.frag
+	case k == arena.WeaponSticky:
+		how = ic.sticky
+	case k == arena.WeaponElbow:
+		how = ic.elbow
+	case k >= 0 && int(k) < len(ic.weapons):
+		how = ic.weapons[k]
+	}
+	tint := withAlpha(uiWhite, 0.95*fade)
+	if f.good {
+		tint = withAlpha(uiAccent, fade)
+	}
+	const h = 20 // px, before the UI scale
+	if f.by != "" {
+		b.ColorText(withAlpha(f.byColour, fade), "%s", f.by)
+		b.SameLine(10)
+	}
+	if how.tex != 0 {
+		b.Icon(how.tex, h*how.aspect, h, iconTint(tint))
+	} else {
+		b.ColorText(tint, "[%s]", f.cause.Cause())
+	}
+	if f.head {
+		b.SameLine(6)
+		b.Icon(ic.headshot.tex, h, h, iconTint(withAlpha(hurtColor, fade)))
+	}
+	b.SameLine(10)
+	b.ColorText(withAlpha(f.victimColor, fade), "%s", f.victim)
+}
+
+// iconTint converts a linear UI colour (as text takes) to the sRGB an icon
+// or circle takes.
+func iconTint(c [4]float32) [4]float32 {
+	enc := func(v float32) float32 {
+		if v <= 0.0031308 {
+			return v * 12.92
+		}
+		return 1.055*float32(math.Pow(float64(v), 1/2.4)) - 0.055
+	}
+	return [4]float32{enc(c[0]), enc(c[1]), enc(c[2]), c[3]}
 }

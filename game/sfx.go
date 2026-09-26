@@ -139,6 +139,17 @@ func newArenaSounds() arenaSounds {
 			audio.Layer{Wave: audio.Noise, Length: ms(65), Attack: ms(3), Decay: 50, Volume: 0.4, LowPass: 4200, HighPass: 900}, // gas
 			click(28, 0.22)) // the bolt
 	})
+	// The SMG: lighter and snappier than the rifle, a higher pop, faster
+	// (and choked like it).
+	s.guns[arena.WeaponSMG] = audio.Variants(4, func(i int) *audio.Sound {
+		k := float32([]float64{1, 1.06, 0.95, 1.03}[i])
+		return audio.SynthTake(i+10, 0.36,
+			hiss(0, 6, 320, 0.5, 0, 4000),
+			tone(audio.Sine, 720*k, 260*k, 0, 30, 85, 1),
+			tone(audio.Sine, 190*k, 100*k, 0, 42, 60, 0.4),
+			audio.Layer{Wave: audio.Noise, Length: ms(48), Attack: ms(2), Decay: 65, Volume: 0.35, LowPass: 5000, HighPass: 1100},
+			click(20, 0.18))
+	})
 	s.guns[arena.WeaponPistol] = audio.Synth(0.5, hiss(0, 80, 42, 1, 7500, 700), tone(audio.Sine, 190, 85, 0, 80, 32, 0.8), click(0, 0.6))
 	s.guns[arena.WeaponShotgun] = audio.Synth(0.9, hiss(0, 260, 16, 1, 3200, 0), tone(audio.Sine, 95, 42, 0, 220, 12, 1),
 		hiss(0, 60, 50, 0.5, 0, 2000), click(360, 0.7), hiss(380, 70, 45, 0.4, 3000, 800), click(470, 0.8))

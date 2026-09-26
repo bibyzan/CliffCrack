@@ -192,11 +192,11 @@ func (r *Run) Update(dt float32, in *input.State, mouseFree bool) {
 	default:
 		// Analog on a pad: the left stick steers, the triggers tuck and brake.
 		ctl = rideInput{
-			steer: in.Axis(input.KeyA, input.KeyD) + in.Axis(input.KeyLeft, input.KeyRight) +
+			steer: r.settings.axis(in, ActLeft, ActRight) + in.Axis(input.KeyLeft, input.KeyRight) +
 				in.PadAxis(input.PadLeftX) + padDirX(in),
-			throttle: in.Axis(input.KeyS, input.KeyW) + in.Axis(input.KeyDown, input.KeyUp) +
+			throttle: r.settings.axis(in, ActBack, ActForward) + in.Axis(input.KeyDown, input.KeyUp) +
 				in.PadAxis(input.PadRightTrigger) - in.PadAxis(input.PadLeftTrigger),
-			jump: in.Pressed(input.KeySpace) || in.PadPressed(input.PadA),
+			jump: r.settings.pressed(in, ActJump) || in.PadPressed(input.PadA),
 		}
 		ctl.steer += touchRide.steer
 		ctl.throttle += touchRide.throttle

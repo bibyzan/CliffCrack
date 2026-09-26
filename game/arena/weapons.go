@@ -18,6 +18,7 @@ const (
 	WeaponShotgun
 	WeaponSniper
 	WeaponLauncher
+	WeaponSMG // the submachine gun
 	weaponCount
 
 	// Not carried, but what else can take a player down.
@@ -31,7 +32,7 @@ const (
 )
 
 // WeaponNames are the HUD labels.
-var WeaponNames = [weaponCount]string{"HAMMER", "RIFLE", "PISTOL", "SHOTGUN", "SNIPER", "LAUNCHER"}
+var WeaponNames = [weaponCount]string{"HAMMER", "RIFLE", "PISTOL", "SHOTGUN", "SNIPER", "LAUNCHER", "SMG"}
 
 // Cause is how the kill feed names what took a player down.
 func (k WeaponKind) Cause() string {
@@ -78,7 +79,6 @@ const (
 	blastPush         = 13  // m/s at the centre
 
 	recoilReturn = 4.0 // 1/s: how quickly recoil's climb settles
-	descopeTime  = 0.5 // s: hit while zoomed in, your sights are knocked down this long
 )
 
 // GunState is one gun's magazine, reserve, timers, bloom and kick.

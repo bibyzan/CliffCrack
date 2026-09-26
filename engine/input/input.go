@@ -162,6 +162,17 @@ func (s *State) ReleaseAll() {
 	}
 }
 
+// PressedKey is a key that went down this frame, if any (the lowest-numbered
+// if several did): for rebinding controls.
+func (s *State) PressedKey() (Key, bool) {
+	for k := range Key(keyCount) {
+		if s.keys[k] && !s.prevKeys[k] {
+			return k, true
+		}
+	}
+	return 0, false
+}
+
 func (s *State) Down(k Key) bool     { return valid(k) && s.keys[k] }
 func (s *State) Pressed(k Key) bool  { return valid(k) && s.keys[k] && !s.prevKeys[k] }
 func (s *State) Released(k Key) bool { return valid(k) && !s.keys[k] && s.prevKeys[k] }

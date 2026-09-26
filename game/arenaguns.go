@@ -104,10 +104,11 @@ type paintball struct {
 	size     float32
 	colour   [4]float32
 	age      float32
-	player   bool // it hits a player
-	atMe     bool // it hits the local player (their hit sounds cover it)
-	mine     bool // the local player fired it
-	near     bool // its near-miss splat has played (see nearMiss)
+	player   bool          // it hits a player
+	atMe     bool          // it hits the local player (their hit sounds cover it)
+	victim   *arena.Player // the player it hits, if any
+	mine     bool          // the local player fired it
+	near     bool          // its near-miss splat has played (see nearMiss)
 }
 
 // A paintball landing within nearMissRange of your head is heard close up:
@@ -158,6 +159,8 @@ func ballSize(k arena.WeaponKind) float32 {
 		return 0.035
 	case arena.WeaponShotgun:
 		return 0.022
+	case arena.WeaponSMG:
+		return 0.024
 	}
 	return 0.028
 }
@@ -171,6 +174,8 @@ func splatSize(k arena.WeaponKind) float32 {
 		return 0.09
 	case arena.WeaponPistol:
 		return 0.17
+	case arena.WeaponSMG:
+		return 0.11
 	}
 	return 0.13
 }
@@ -208,7 +213,12 @@ func (m *Arena) updatePaint(dt float32) {
 				heard++
 			}
 		}
-		if b.normal != (mathx.Vec3{}) || b.player {
+		if b.victim != nil && !b.atMe {
+			// Into a player: it sticks to their suit where it hit, and
+			// bursts off them.
+			at, n := m.paintOn(b.victim, b.to, b.size*5, b.colour)
+			m.splash(at, n, b.to.Sub(b.from).Normalize(), b.colour, b.victim.Shield > 0)
+		} else if b.normal != (mathx.Vec3{}) || b.player {
 			for range 3 { // droplets spraying off it
 				off := mathx.Vec3{m.rng.Float32() - 0.5, m.rng.Float32() - 0.2, m.rng.Float32() - 0.5}.Scale(b.size * 6)
 				m.addBurst(burst{at: b.to.Add(b.normal.Scale(0.05)).Add(off), size: b.size * 0.8, life: 0.25, colour: b.colour})

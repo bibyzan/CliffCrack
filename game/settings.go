@@ -29,6 +29,9 @@ type Settings struct {
 	// FloatingStick makes the on-screen move stick (touch screens) appear
 	// wherever the left thumb lands, rather than stay in its corner.
 	FloatingStick bool `json:"floating_stick,omitempty"`
+	// Keys are the keyboard controls rebound from their defaults, by
+	// action id (see keybinds.go): GLFW key codes.
+	Keys map[string]int `json:"keys,omitempty"`
 	// Online: the name to go by (empty: the computer's account name) and
 	// the coordinator to find rooms on.
 	Name   string `json:"name,omitempty"`

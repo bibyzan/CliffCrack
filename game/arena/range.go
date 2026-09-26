@@ -98,6 +98,7 @@ func GenerateRange() *Site {
 	items := []Pickup{
 		weaponPickup(WeaponRifle, mathx.Vec3{}), weaponPickup(WeaponPistol, mathx.Vec3{}),
 		weaponPickup(WeaponShotgun, mathx.Vec3{}), weaponPickup(WeaponSniper, mathx.Vec3{}),
+		weaponPickup(WeaponSMG, mathx.Vec3{}),
 		weaponPickup(WeaponLauncher, mathx.Vec3{}),
 		grenadePickup(Frag, MaxGrenades, mathx.Vec3{}), grenadePickup(Sticky, MaxGrenades, mathx.Vec3{}),
 		gadgetPickup(GadgetHammer), gadgetPickup(GadgetGrapple),

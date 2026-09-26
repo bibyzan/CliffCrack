@@ -69,9 +69,15 @@ type burst struct {
 }
 
 type feedLine struct {
-	text string
-	good bool // you did it
-	age  float32
+	note        string // a line that isn't a kill (someone left): just this
+	by, victim  string // by is "" when nobody's credited (a fall, their own grenade)
+	byColour    [4]float32
+	victimColor [4]float32
+	cause       arena.WeaponKind
+	head        bool // a headshot
+	knocked     bool // (a fall) someone knocked them off the edge
+	good        bool // you did it
+	age         float32
 }
 
 type arenaSounds struct {
@@ -173,6 +179,9 @@ type Arena struct {
 	lastPump   float32          // the shotgun's time since its last shot, last frame
 	lastBolt   float32          // ... and the sniper's
 	lastNear   float32          // when (elapsed) the last near-miss splat played
+	bodyPaint  [][]bodyPaint    // the paint on each player (by ID), this round
+	droplets   []droplet        // paint bursting off hits
+	wasDown    []bool           // each player was down last frame (their paint goes when they get up)
 }
 
 func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64, practice bool) (*Arena, error) {
@@ -263,6 +272,7 @@ func (m *Arena) newRound() {
 	m.ends = [2][4]float32{south, north}
 	m.fovKick = 0
 	m.balls, m.splats, m.bursts = m.balls[:0], m.splats[:0], m.bursts[:0]
+	m.droplets, m.bodyPaint, m.wasDown = m.droplets[:0], m.bodyPaint[:0], m.wasDown[:0]
 	m.popped, m.charging, m.killMark, m.hitDirs = 0, false, 0, m.hitDirs[:0]
 	m.flash, m.hitMark, m.hurt, m.shake, m.elapsed = 0, 0, 0, 0, 0
 	m.lastTick = 0
@@ -372,8 +382,9 @@ func (m *Arena) announce() {
 // input maps keyboard, mouse and gamepad to the local player's intent.
 func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 	var c arena.Input
-	c.Move[0] = in.Axis(input.KeyA, input.KeyD) + in.PadAxis(input.PadLeftX)
-	c.Move[1] = in.Axis(input.KeyS, input.KeyW) - in.PadAxis(input.PadLeftY)
+	k := m.settings
+	c.Move[0] = k.axis(in, ActLeft, ActRight) + in.PadAxis(input.PadLeftX)
+	c.Move[1] = k.axis(in, ActBack, ActForward) - in.PadAxis(input.PadLeftY)
 	if l := float32(math.Hypot(float64(c.Move[0]), float64(c.Move[1]))); l > 1 {
 		c.Move[0], c.Move[1] = c.Move[0]/l, c.Move[1]/l
 	}
@@ -423,15 +434,15 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 	c.FirePressed = (m.locked && in.MousePressed(input.MouseLeft)) || (pull && !m.prevPull)
 	m.prevPull = pull
 
-	c.Jump = in.Pressed(input.KeySpace) || in.PadPressed(input.PadA)
-	c.Sprint = in.Down(input.KeyLeftShift) || in.PadDown(input.PadLStick)
+	c.Jump = k.pressed(in, ActJump) || in.PadPressed(input.PadA)
+	c.Sprint = k.down(in, ActSprint) || in.PadDown(input.PadLStick)
 	// Crouch (held; running fast, a slide): Left Ctrl, or B as in most
 	// shooters.
-	c.Crouch = in.Down(input.KeyLeftControl) || in.PadDown(input.PadB)
-	c.Melee = in.Pressed(input.KeyF) || in.PadPressed(input.PadRStick)
-	c.Gadget = in.Pressed(input.KeyQ) || in.PadPressed(input.PadRB)
-	c.Throw = in.Pressed(input.KeyG) || in.PadPressed(input.PadLB)
-	c.SwitchGrenade = in.Pressed(input.KeyC) || in.PadPressed(input.PadDown)
+	c.Crouch = k.down(in, ActCrouch) || in.PadDown(input.PadB)
+	c.Melee = k.pressed(in, ActMelee) || in.PadPressed(input.PadRStick)
+	c.Gadget = k.pressed(in, ActGadget) || in.PadPressed(input.PadRB)
+	c.Throw = k.pressed(in, ActGrenade) || in.PadPressed(input.PadLB)
+	c.SwitchGrenade = k.pressed(in, ActGrenadeKind) || in.PadPressed(input.PadDown)
 	m.gadgetHover = -1
 	auto := false
 	if m.wantGadget > 0 && m.match.Phase == arena.PhaseCountdown {
@@ -451,8 +462,8 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 
 	// R reloads, E picks up. On a pad, X does both, as in Halo: tap to
 	// reload, hold to pick up.
-	c.Reload = in.Pressed(input.KeyR)
-	c.Interact = in.Pressed(input.KeyE)
+	c.Reload = k.pressed(in, ActReload)
+	c.Interact = k.pressed(in, ActPickUp)
 	switch {
 	case in.PadDown(input.PadX):
 		m.padHold += dt
@@ -465,8 +476,8 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 	}
 
 	// The two weapons: 1 and 2, the mouse wheel, or the pad's Y.
-	for i, k := range []input.Key{input.Key1, input.Key2} {
-		if in.Pressed(k) {
+	for i, a := range []Action{ActWeapon1, ActWeapon2} {
+		if k.pressed(in, a) {
 			c.Select = i + 1
 		}
 	}
@@ -527,6 +538,8 @@ func (m *Arena) playerName(p *arena.Player) string {
 func (m *Arena) effects(dt float32, ev arena.Events) {
 	me := m.me()
 	m.updatePaint(dt)
+	m.updateDroplets(dt)
+	m.clearRevived()
 	for i := range m.bursts {
 		m.bursts[i].age += dt
 	}
@@ -611,7 +624,7 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		if g := arena.Guns[s.Weapon]; g != nil && len(m.balls) < maxBalls {
 			m.balls = append(m.balls, paintball{from: from, to: s.To, normal: s.Normal, chunk: s.Chunk, speed: g.BallSpeed,
 				size: ballSize(s.Weapon), colour: paintColor[team(s.By)], player: s.Victim != nil,
-				mine: s.By == me, atMe: s.Victim == me})
+				mine: s.By == me, atMe: s.Victim == me, victim: s.Victim})
 			if s.Victim != nil {
 				m.balls[len(m.balls)-1].normal = mathx.Vec3{}
 			}
@@ -636,6 +649,11 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 				m.play(m.sfx.hurt, 0.9)
 			}
 			m.shake = max(m.shake, 0.2+h.Damage/150)
+			if me.ADS > 0.3 {
+				// Hit with the sights up: you stay aimed in, but the view
+				// flinches hard (for a moment; the aim itself isn't moved).
+				m.shake = max(m.shake, 0.7+h.Damage/60)
+			}
 			if h.By != nil && h.By != me {
 				m.hitDirs = append(m.hitDirs, hitDir{from: h.By.Chest()})
 			} else if h.From != (mathx.Vec3{}) {
@@ -660,16 +678,14 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		at := k.Victim.Body.Position.Add(mathx.Vec3{0, 0.8, 0})
 		m.addBurst(burst{at: at, size: 1.1, life: 0.3, grow: true, colour: paintColor[1-team(k.Victim)]})
 		m.addBurst(burst{at: at, size: 0.6, life: 0.18, grow: true, colour: suitColor[team(k.Victim)]})
-		how := k.Weapon.Cause()
-		if k.Head {
-			how += " · HEADSHOT"
-		}
 		if k.By == me && k.Victim != me {
 			m.killMark = killMarkLen
 		}
-		line := feedLine{text: m.playerName(k.By) + "  [" + how + "]  " + m.playerName(k.Victim), good: k.By == me && k.Victim != me}
-		if k.By == nil || k.By == k.Victim {
-			line.text = m.playerName(k.Victim) + "  [" + how + "]  SELF"
+		line := feedLine{victim: m.playerName(k.Victim), victimColor: teamGlow[team(k.Victim)], cause: k.Weapon,
+			head: k.Head, good: k.By == me && k.Victim != me}
+		if k.By != nil && k.By != k.Victim {
+			line.by, line.byColour = m.playerName(k.By), teamGlow[team(k.By)]
+			line.knocked = k.Weapon == arena.WeaponDrop
 		}
 		m.feed = append(m.feed, line)
 		m.playAt(m.sfx.kill, at, 1)
@@ -1122,6 +1138,7 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 	out = m.appendGrapples(out)
 	out = m.appendPickups(out)
 	out = m.appendPaint(out)
+	out = m.appendDroplets(out)
 	out = append(out, m.glass...) // translucent: after every solid
 	out = m.appendEffects(out)
 	scoped := false

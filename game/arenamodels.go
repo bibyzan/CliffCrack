@@ -348,4 +348,47 @@ var markers = [...]marker{
 		grip: mathx.Vec3{0, -0.085, 0.05}, fore: mathx.Vec3{0, -0.09, -0.22},
 		muzzle: mathx.Vec3{0, 0, -0.39}, sight: mathx.Vec3{0, 0.086, 0.02}, size: 0.45, relief: 0.2,
 	},
+	arena.WeaponSMG: {
+		// A compact blaster in lime and black: a short, deep receiver, a
+		// stubby shrouded barrel, a vertical fore grip, a long straight
+		// magazine ahead of the pistol grip, a wire stock folded along
+		// the side, and a small rounded reflex sight.
+		parts: join(
+			[]gunPart{
+				soft(b(0, 0.012, -0.01, 0.024, 0.032, 0.105, markerLime)), // receiver
+				b(0, 0.046, -0.02, 0.011, 0.003, 0.08, gunBlack),          // top rail
+				b(0.0245, 0.02, -0.05, 0.0006, 0.009, 0.03, gunBlack),     // ejection port
+				soft(b(0, 0.012, -0.15, 0.019, 0.019, 0.05, gunBlack)),    // barrel shroud
+				b(0, 0.012, -0.215, 0.009, 0.009, 0.02, gunMetal),         // barrel
+				r(0, 0.012, -0.236, 0.011, 0.011, 0.003, gunBlack),        // muzzle
+				b(0, -0.035, -0.035, 0.018, 0.008, 0.07, gunBlack),        // lower
+				b(0, -0.058, -0.15, 0.011, 0.03, 0.012, rubber),           // fore grip
+				b(0, -0.09, -0.15, 0.013, 0.004, 0.014, gunMetal),
+				// The folded wire stock, along the left side.
+				b(-0.029, 0.018, 0.035, 0.003, 0.003, 0.085, gunMetal),
+				b(-0.029, -0.012, 0.035, 0.003, 0.003, 0.085, gunMetal),
+				b(-0.029, 0.003, -0.05, 0.003, 0.018, 0.004, gunMetal),
+				b(0, 0.012, 0.1, 0.015, 0.022, 0.006, gunBlack), // end cap
+				// A small reflex sight.
+				soft(b(0, 0.056, -0.01, 0.012, 0.006, 0.025, opticBlack)),
+				soft(b(-0.011, 0.073, -0.022, 0.0025, 0.011, 0.008, opticBlack)),
+				soft(b(0.011, 0.073, -0.022, 0.0025, 0.011, 0.008, opticBlack)),
+				soft(b(0, 0.084, -0.022, 0.013, 0.002, 0.008, opticBlack)),
+				glow(b(0, 0.071, -0.024, 0.0086, 0.0086, 0.0004, withAlpha(lensAmber, 0.22))),
+				glow(r(0, 0.071, -0.022, 0.001, 0.001, 0.0004, sightRed)),
+			},
+			row(b(0.0245, 0.0, -0.13, 0.0006, 0.007, 0.004, gunBlack), 3, mathx.Vec3{0, 0, 0.012}), // shroud vents
+			row(b(-0.0245, 0.0, -0.13, 0.0006, 0.007, 0.004, gunBlack), 3, mathx.Vec3{0, 0, 0.012}),
+			grip(-0.04, 0.06),
+		),
+		mag: []gunPart{
+			b(0, -0.085, -0.025, 0.012, 0.055, 0.014, gunBlack),
+			b(0, -0.142, -0.025, 0.015, 0.004, 0.017, markerLime), // base plate
+			glow(b(0.0125, -0.085, -0.025, 0.0006, 0.04, 0.007, paintBalls)),
+		},
+		magHold: mathx.Vec3{0, -0.145, -0.025}, magDrop: mathx.Vec3{0, -1, 0.1},
+		charge: mathx.Vec3{0.028, 0.03, 0.02},
+		grip:   mathx.Vec3{0, -0.08, 0.06}, fore: mathx.Vec3{0, -0.07, -0.15},
+		muzzle: mathx.Vec3{0, 0.012, -0.24}, sight: mathx.Vec3{0, 0.071, 0.04}, size: 0.55, relief: 0.12,
+	},
 }

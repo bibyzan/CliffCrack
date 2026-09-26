@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 40">
+  <!-- Knocked off the edge (kill feed): a ledge, and an arrow pushed off it and down. -->
+  <rect x="0" y="16" width="20" height="24"/>
+  <polygon points="2,6 26,6 34,14 34,28 28,28 28,16 24,12 2,12"/>
+  <polygon points="23,26 39,26 31,38"/>
+</svg>
