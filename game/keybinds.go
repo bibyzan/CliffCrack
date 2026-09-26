@@ -6,15 +6,17 @@ import (
 	"CliffCrack/engine/input"
 )
 
-// Rebindable keyboard controls: each action's key is in Settings.Keys (by
-// the action's id), and Controls in Settings edits them. The mouse buttons,
-// the arrows, Esc and Enter stay as they are.
+// Rebindable controls: each action's key or mouse button is in Settings.Keys
+// (by the action's id), and Controls in Settings edits them. The wheel, the
+// arrows, Esc and Enter stay as they are.
 
 // Action is something a key does.
 type Action int
 
 const (
-	ActForward Action = iota
+	ActFire Action = iota
+	ActAim
+	ActForward
 	ActBack
 	ActLeft
 	ActRight
@@ -37,6 +39,8 @@ var actionInfo = [actionCount]struct {
 	id, label string
 	key       input.Key
 }{
+	ActFire:        {"fire", "Fire", input.KeyMouseLeft},
+	ActAim:         {"aim", "Aim", input.KeyMouseRight},
 	ActForward:     {"forward", "Move forward", input.KeyW},
 	ActBack:        {"back", "Move back", input.KeyS},
 	ActLeft:        {"left", "Move left", input.KeyA},
@@ -102,6 +106,8 @@ func keyName(k input.Key) string {
 		return string(rune(k))
 	case k >= input.KeyF1 && k <= input.KeyF12:
 		return fmt.Sprintf("F%d", k-input.KeyF1+1)
+	case k.IsMouse() && k > input.KeyMouseMiddle:
+		return fmt.Sprintf("Mouse %d", k-input.KeyMouse+1)
 	}
 	if n, ok := keyNames[k]; ok {
 		return n
@@ -117,13 +123,14 @@ var keyNames = map[input.Key]string{
 	input.KeyBackspace: "Backspace", input.KeyLeft: "Left", input.KeyRight: "Right", input.KeyUp: "Up",
 	input.KeyDown: "Down", input.KeyLeftShift: "Shift", input.KeyRightShift: "Right Shift",
 	input.KeyLeftControl: "Ctrl", input.KeyRightControl: "Right Ctrl", input.KeyLeftAlt: "Alt",
-	input.KeyRightAlt: "Right Alt",
+	input.KeyRightAlt: "Right Alt", input.KeyMouseLeft: "LMB", input.KeyMouseRight: "RMB",
+	input.KeyMouseMiddle: "MMB",
 }
 
 // keysHint is the Arena's keyboard controls, as bound, for its hint line.
 func (s *Settings) keysHint() string {
 	k := func(a Action) string { return keyName(s.key(a)) }
-	return fmt.Sprintf("LMB  fire    RMB  aim    %s %s / wheel  swap    %s  reload    %s  pick up    %s  elbow    %s  gadget    %s  grenade    %s  frag / sticky    %s  crouch (sprinting: slide)    %s  jump, vault, climb",
-		k(ActWeapon1), k(ActWeapon2), k(ActReload), k(ActPickUp), k(ActMelee), k(ActGadget), k(ActGrenade),
+	return fmt.Sprintf("%s  fire    %s  aim    %s %s / wheel  swap    %s  reload    %s  pick up    %s  elbow    %s  gadget    %s  grenade    %s  frag / sticky    %s  crouch (sprinting: slide)    %s  jump, vault, climb",
+		k(ActFire), k(ActAim), k(ActWeapon1), k(ActWeapon2), k(ActReload), k(ActPickUp), k(ActMelee), k(ActGadget), k(ActGrenade),
 		k(ActGrenadeKind), k(ActCrouch), k(ActJump))
 }

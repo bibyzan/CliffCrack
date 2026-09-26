@@ -9,8 +9,9 @@ import (
 // The markers' models, in weapon space: metres, barrel down -Z, +Y up, the
 // hand at the grip. Each is built from boxes, balls (hoppers, tanks, bells)
 // and rings (sight reticles), with lit plastics and glowing sights: a mini
-// reflex sight on the rifle, tritium irons on the pistol, a ghost ring and a fibre
-// bead on the shotgun, a scope on the sniper, a ladder on the launcher.
+// reflex sight on the rifle, tritium irons on the pistol and the SMG, a ghost
+// ring and a fibre bead on the shotgun, a scope on the sniper, a ladder on the
+// launcher.
 var (
 	sightRed   = mathx.SRGB(1.00, 0.16, 0.10, 1)
 	tritium    = mathx.SRGB(0.35, 1.00, 0.35, 1)
@@ -23,6 +24,7 @@ var (
 	lensSheen  = mathx.SRGB(0.95, 0.45, 0.95, 1) // ... and the magenta at its edge
 	chrome     = mathx.SRGB(0.72, 0.74, 0.78, 1) // polished steel
 	walnut     = mathx.SRGB(0.42, 0.24, 0.13, 1) // a wooden grip
+	uziSteel   = mathx.SRGB(0.17, 0.18, 0.19, 1) // parkerised stamped steel
 )
 
 // b, r and o are shorthands for a box, a ball and a ring part.
@@ -351,47 +353,65 @@ var markers = [...]marker{
 		muzzle: mathx.Vec3{0, 0, -0.39}, sight: mathx.Vec3{0, 0.086, 0.02}, size: 0.45, relief: 0.2,
 	},
 	arena.WeaponSMG: {
-		// A compact blaster in lime and black: a short, deep receiver, a
-		// stubby shrouded barrel, a vertical fore grip, a long straight
-		// magazine ahead of the pistol grip, a wire stock folded along
-		// the side, and a small rounded reflex sight.
+		// After the Uzi: a short, boxy stamped-steel receiver with pressed
+		// ribs down its sides, a cocking knob on top, a stubby barrel behind
+		// a big nut, ribbed handguards under the front, the metal stock
+		// folded underneath, and the magazine up through the pistol grip.
+		// Plain irons: a flip rear sight and a front post between guard ears,
+		// tritium dots on both. Lime grip panels and base plate.
 		parts: join(
 			[]gunPart{
-				soft(b(0, 0.012, -0.01, 0.024, 0.032, 0.105, markerLime)), // receiver
-				b(0, 0.046, -0.02, 0.011, 0.003, 0.08, gunBlack),          // top rail
-				b(0.0245, 0.02, -0.05, 0.0006, 0.009, 0.03, gunBlack),     // ejection port
-				soft(b(0, 0.012, -0.15, 0.019, 0.019, 0.05, gunBlack)),    // barrel shroud
-				b(0, 0.012, -0.215, 0.009, 0.009, 0.02, gunMetal),         // barrel
-				r(0, 0.012, -0.236, 0.011, 0.011, 0.003, gunBlack),        // muzzle
-				b(0, -0.035, -0.035, 0.018, 0.008, 0.07, gunBlack),        // lower
-				b(0, -0.058, -0.15, 0.011, 0.03, 0.012, rubber),           // fore grip
-				b(0, -0.09, -0.15, 0.013, 0.004, 0.014, gunMetal),
-				// The folded wire stock, along the left side.
-				b(-0.029, 0.018, 0.035, 0.003, 0.003, 0.085, gunMetal),
-				b(-0.029, -0.012, 0.035, 0.003, 0.003, 0.085, gunMetal),
-				b(-0.029, 0.003, -0.05, 0.003, 0.018, 0.004, gunMetal),
-				b(0, 0.012, 0.1, 0.015, 0.022, 0.006, gunBlack), // end cap
-				// A small reflex sight.
-				soft(b(0, 0.056, -0.01, 0.012, 0.006, 0.025, opticBlack)),
-				soft(b(-0.011, 0.073, -0.022, 0.0025, 0.011, 0.008, opticBlack)),
-				soft(b(0.011, 0.073, -0.022, 0.0025, 0.011, 0.008, opticBlack)),
-				soft(b(0, 0.084, -0.022, 0.013, 0.002, 0.008, opticBlack)),
-				glow(b(0, 0.071, -0.024, 0.0086, 0.0086, 0.0004, withAlpha(lensAmber, 0.22))),
-				glow(r(0, 0.071, -0.022, 0.001, 0.001, 0.0004, sightRed)),
+				soft(b(0, 0.015, -0.01, 0.022, 0.032, 0.12, uziSteel)),   // receiver
+				b(0, 0.048, 0.0, 0.019, 0.003, 0.11, gunBlack),           // top cover
+				b(0, 0.0512, -0.03, 0.0018, 0.0008, 0.06, rubber),        // the knob's slot
+				soft(b(0, 0.056, -0.075, 0.007, 0.005, 0.008, gunBlack)), // cocking knob
+				b(0.0225, 0.004, -0.08, 0.0006, 0.009, 0.004, gunBlack),  // ejection port
+				soft(b(0, 0.012, -0.137, 0.014, 0.014, 0.008, gunBlack)), // barrel nut
+				b(0, 0.012, -0.165, 0.0075, 0.0075, 0.025, gunMetal),     // barrel
+				r(0, 0.012, -0.19, 0.0085, 0.0085, 0.003, gunBlack),      // muzzle
+				soft(b(0, -0.026, -0.075, 0.021, 0.012, 0.045, rubber)),  // handguards
+				b(0, -0.024, 0.03, 0.017, 0.013, 0.07, gunBlack),         // trigger housing
+				soft(b(0, 0.012, 0.113, 0.02, 0.028, 0.006, gunMetal)),   // back plate
+				b(0, -0.04, 0.105, 0.012, 0.008, 0.01, gunMetal),         // stock hinge
+				// The stock, folded forwards under the receiver: two arms and
+				// the butt plate hanging below the handguards.
+				b(0.019, -0.042, 0.0, 0.0022, 0.003, 0.105, gunMetal),
+				b(-0.019, -0.042, 0.0, 0.0022, 0.003, 0.105, gunMetal),
+				b(0, -0.05, -0.108, 0.021, 0.011, 0.004, gunMetal),
+				// The grip, the magazine running up through it, with its
+				// grip safety at the back and a trigger and guard ahead.
+				soft(b(0, -0.078, 0.03, 0.017, 0.05, 0.02, rubber)),
+				b(0.0172, -0.078, 0.03, 0.0008, 0.036, 0.013, markerLime), // grip panels
+				b(-0.0172, -0.078, 0.03, 0.0008, 0.036, 0.013, markerLime),
+				b(0, -0.07, 0.052, 0.009, 0.03, 0.003, gunMetal),    // grip safety
+				b(0, -0.043, -0.012, 0.003, 0.004, 0.028, gunBlack), // guard
+				b(0, -0.03, -0.038, 0.003, 0.013, 0.003, gunBlack),
+				b(0, -0.034, -0.004, 0.003, 0.01, 0.003, gunMetal), // trigger
+				// Irons: the rear notch...
+				b(-0.0075, 0.062, 0.085, 0.0045, 0.012, 0.003, gunBlack),
+				b(0.0075, 0.062, 0.085, 0.0045, 0.012, 0.003, gunBlack),
+				glow(b(-0.0075, 0.071, 0.0882, 0.0022, 0.0022, 0.0004, tritium)),
+				glow(b(0.0075, 0.071, 0.0882, 0.0022, 0.0022, 0.0004, tritium)),
+				// ... and the front post between its ears.
+				b(0, 0.061, -0.112, 0.0026, 0.011, 0.003, gunBlack),
+				glow(b(0, 0.071, -0.1088, 0.0032, 0.0032, 0.0004, tritium)),
+				b(-0.011, 0.061, -0.112, 0.0015, 0.013, 0.007, gunBlack),
+				b(0.011, 0.061, -0.112, 0.0015, 0.013, 0.007, gunBlack),
 			},
-			row(b(0.0245, 0.0, -0.13, 0.0006, 0.007, 0.004, gunBlack), 3, mathx.Vec3{0, 0, 0.012}), // shroud vents
-			row(b(-0.0245, 0.0, -0.13, 0.0006, 0.007, 0.004, gunBlack), 3, mathx.Vec3{0, 0, 0.012}),
-			grip(-0.04, 0.06),
+			// The pressed ribs down each side.
+			row(b(0.0222, 0.03, -0.01, 0.0006, 0.0025, 0.1, gunBlack), 2, mathx.Vec3{0, -0.022, 0}),
+			row(b(-0.0222, 0.03, -0.01, 0.0006, 0.0025, 0.1, gunBlack), 2, mathx.Vec3{0, -0.022, 0}),
+			row(b(0, -0.039, -0.1, 0.0215, 0.0012, 0.003, gunBlack), 4, mathx.Vec3{0, 0, 0.016}), // handguard ribs
 		),
 		mag: []gunPart{
-			b(0, -0.085, -0.025, 0.012, 0.055, 0.014, gunBlack),
-			b(0, -0.142, -0.025, 0.015, 0.004, 0.017, markerLime), // base plate
-			glow(b(0.0125, -0.085, -0.025, 0.0006, 0.04, 0.007, paintBalls)),
+			b(0, -0.14, 0.03, 0.011, 0.03, 0.014, gunBlack),
+			b(0, -0.171, 0.03, 0.014, 0.004, 0.017, markerLime), // base plate
+			glow(b(0.0115, -0.14, 0.03, 0.0006, 0.018, 0.006, paintBalls)),
 		},
-		magHold: mathx.Vec3{0, -0.145, -0.025}, magDrop: mathx.Vec3{0, -1, 0.1},
-		charge: mathx.Vec3{0.028, 0.03, 0.02},
-		grip:   mathx.Vec3{0, -0.08, 0.06}, fore: mathx.Vec3{0, -0.07, -0.15},
-		muzzle: mathx.Vec3{0, 0.012, -0.24}, sight: mathx.Vec3{0, 0.071, 0.04}, size: 0.55, relief: 0.12,
+		magHold: mathx.Vec3{0, -0.175, 0.03}, magDrop: mathx.Vec3{0, -1, 0},
+		charge: mathx.Vec3{0, 0.056, -0.075}, // the knob on top
+		grip:   mathx.Vec3{0, -0.075, 0.03}, fore: mathx.Vec3{0, -0.04, -0.075}, foreFlat: true,
+		muzzle: mathx.Vec3{0, 0.012, -0.195}, sight: mathx.Vec3{0, 0.071, 0.12}, size: 0.55, relief: 0.16,
 	},
 	arena.WeaponRevolver: {
 		// A big polished hand cannon: a long barrel over a full underlug, a

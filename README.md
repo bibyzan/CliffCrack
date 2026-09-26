@@ -472,8 +472,9 @@ rematch on a new site.
   the hip and blooms fast; its climb has to be pulled down. A mini reflex sight.
 - **SMG** (a pickup): 40 rounds (160) at ~1090 rpm, 5 a ball: as quick to kill as the
   rifle up close (32 to the body, 1.7 s) but its paint falls away past 12 m. Tighter
-  from the hip than the rifle, quick to raise, aiming barely helps. A lime blaster with
-  a small reflex sight.
+  from the hip than the rifle, quick to raise, aiming barely helps. After the Uzi: a
+  boxy stamped receiver, the magazine up through the grip, a cocking knob on top, the
+  stock folded underneath, and plain iron sights with tritium dots.
 - **Pistol**: 12 rounds (48), one per click every 0.28 s, 34 a ball. Three to the body
   pop armour, then one to the head kills (0.84 s); five to the body. 2× zoom.
 - **Shotgun** (a pickup), after the SPAS-12: perforated heat shield, tube magazine, a

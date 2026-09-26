@@ -74,7 +74,18 @@ const (
 	KeyRightAlt     Key = 346
 
 	keyCount = 349 // GLFW_KEY_LAST + 1
+
+	// Mouse buttons can stand in for keys, so a control can be bound to one:
+	// KeyMouse + the button (GLFW numbering: 0 left, 1 right, 2 middle, 3
+	// and 4 the side buttons). Down, Pressed and PressedKey know them.
+	KeyMouse       Key = 400
+	KeyMouseLeft   Key = KeyMouse + Key(MouseLeft)
+	KeyMouseRight  Key = KeyMouse + Key(MouseRight)
+	KeyMouseMiddle Key = KeyMouse + Key(MouseMiddle)
 )
+
+// IsMouse reports whether k is a mouse button (see KeyMouse).
+func (k Key) IsMouse() bool { return k >= KeyMouse && k < KeyMouse+buttonCount }
 
 // MouseButton identifies a mouse button (GLFW numbering).
 type MouseButton int
@@ -162,20 +173,48 @@ func (s *State) ReleaseAll() {
 	}
 }
 
-// PressedKey is a key that went down this frame, if any (the lowest-numbered
-// if several did): for rebinding controls.
+// PressedKey is a key or mouse button (as KeyMouse + the button) that went
+// down this frame, if any (the lowest-numbered if several did): for
+// rebinding controls.
 func (s *State) PressedKey() (Key, bool) {
 	for k := range Key(keyCount) {
 		if s.keys[k] && !s.prevKeys[k] {
 			return k, true
 		}
 	}
+	for b := range MouseButton(buttonCount) {
+		if s.MousePressed(b) {
+			return KeyMouse + Key(b), true
+		}
+	}
 	return 0, false
 }
 
-func (s *State) Down(k Key) bool     { return valid(k) && s.keys[k] }
-func (s *State) Pressed(k Key) bool  { return valid(k) && s.keys[k] && !s.prevKeys[k] }
-func (s *State) Released(k Key) bool { return valid(k) && !s.keys[k] && s.prevKeys[k] }
+// Down, Pressed and Released take a key or a mouse button (KeyMouse + the button).
+func (s *State) Down(k Key) bool {
+	if k.IsMouse() {
+		return s.MouseDown(MouseButton(k - KeyMouse))
+	}
+	return valid(k) && s.keys[k]
+}
+
+func (s *State) Pressed(k Key) bool {
+	if k.IsMouse() {
+		return s.MousePressed(MouseButton(k - KeyMouse))
+	}
+	return valid(k) && s.keys[k] && !s.prevKeys[k]
+}
+
+func (s *State) Released(k Key) bool {
+	if k.IsMouse() {
+		b := k - KeyMouse
+		return !s.buttons[b] && s.prevButtons[b]
+	}
+	return valid(k) && !s.keys[k] && s.prevKeys[k]
+}
+
+// AnyMouseDown reports whether any mouse button is held.
+func (s *State) AnyMouseDown() bool { return s.buttons != [buttonCount]bool{} }
 
 func (s *State) MouseDown(b MouseButton) bool {
 	return b >= 0 && b < buttonCount && s.buttons[b]

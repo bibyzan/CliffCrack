@@ -45,3 +45,29 @@ func TestKeyNames(t *testing.T) {
 		}
 	}
 }
+
+func TestMouseButtonsBind(t *testing.T) {
+	s := DefaultSettings()
+	if s.key(ActFire) != input.KeyMouseLeft || s.key(ActAim) != input.KeyMouseRight {
+		t.Fatal("defaults: fire on the left button, aim on the right")
+	}
+	var in input.State
+	in.NewFrame()
+	in.ButtonEvent(4, true) // a side button
+	k, ok := in.PressedKey()
+	if !ok || k != input.KeyMouse+4 {
+		t.Fatalf("a side button's press reads as %v %v, want Mouse 5", k, ok)
+	}
+	s.bind(ActMelee, k)
+	if !s.pressed(&in, ActMelee) || !s.down(&in, ActMelee) || keyName(s.key(ActMelee)) != "Mouse 5" {
+		t.Errorf("melee on Mouse 5: pressed %v, down %v, named %q", s.pressed(&in, ActMelee), s.down(&in, ActMelee), keyName(s.key(ActMelee)))
+	}
+	s.bind(ActMelee, input.KeyMouseRight) // aim takes melee's old key
+	if s.key(ActAim) != input.KeyMouse+4 {
+		t.Errorf("after binding melee to RMB, aim is on %v, want Mouse 5", keyName(s.key(ActAim)))
+	}
+	in.NewFrame()
+	if s.pressed(&in, ActAim) || !s.down(&in, ActAim) {
+		t.Error("held into the next frame: down, not pressed")
+	}
+}

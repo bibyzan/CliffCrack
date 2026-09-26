@@ -114,6 +114,10 @@ type settingsScreen struct {
 	keyChoice   int    // the row: an Action, then reset, then back
 	waiting     Action // the action waiting for its new key, or -1
 	clicked     int    // a row clicked last frame, or -1
+	// After binding a mouse button, the click that did it isn't also a
+	// click on the row under the cursor: clicks are ignored until the
+	// buttons are up and the UI has reported its release.
+	clickSettle int
 }
 
 // Controls page rows after the actions.
@@ -223,17 +227,31 @@ func (m *settingsScreen) update(in *input.State, s *Settings, dt float32) (done 
 // click), then press its new key (Esc cancels); a key another action had
 // swaps over. Esc or Back leaves.
 func (m *settingsScreen) updateControls(in *input.State, s *Settings) {
+	if in.AnyMouseDown() {
+		if m.clickSettle > 0 {
+			m.clickSettle = 2
+		}
+	} else if m.clickSettle > 0 {
+		m.clickSettle--
+	}
 	if m.waiting >= 0 {
+		m.clicked = -1 // (a click now is the binding, not a row)
 		if in.Pressed(input.KeyEscape) || in.PadPressed(input.PadB) {
 			m.waiting = -1
 		} else if k, ok := in.PressedKey(); ok {
 			s.bind(m.waiting, k)
 			m.waiting = -1
+			if k.IsMouse() {
+				m.clickSettle = 2
+			}
 		}
 		return
 	}
 	row := m.clicked
 	m.clicked = -1
+	if m.clickSettle > 0 {
+		row = -1
+	}
 	if row < 0 {
 		if pausePressed(in) || in.PadPressed(input.PadB) {
 			m.controls = false
@@ -269,7 +287,7 @@ func (m *settingsScreen) controlsUI(b *ui.Builder, s *Settings) {
 	for a := range actionCount {
 		key := keyName(s.key(a))
 		if m.waiting == a {
-			key = "press a key..."
+			key = "press a key or button..."
 		}
 		if a%2 == 1 {
 			b.SameLine(14)
@@ -288,9 +306,9 @@ func (m *settingsScreen) controlsUI(b *ui.Builder, s *Settings) {
 	}
 	b.End()
 	b.Panel("##controlskeys", 0.5, 0.975, hudText, 1.05)
-	hint := "Click an action (or W / S and Enter), then press its key      Esc  back"
+	hint := "Click an action (or W / S and Enter), then press its key or mouse button      Esc  back"
 	if m.waiting >= 0 {
-		hint = "Press the new key for " + actionInfo[m.waiting].label + "      Esc  cancel"
+		hint = "Press the new key or mouse button for " + actionInfo[m.waiting].label + "      Esc  cancel"
 	}
 	b.ColorText(uiMuted, "%s", hint)
 	b.End()

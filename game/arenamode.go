@@ -303,7 +303,7 @@ func (m *Arena) me() *arena.Player { return m.match.Arena.Players[local] }
 func (m *Arena) Update(dt float32, in *input.State, mouseFree bool) {
 	m.elapsed += dt
 	m.lastIn = in
-	held := in.MouseDown(input.MouseRight) && (mouseFree || m.locked)
+	held := in.MouseDown(input.MouseRight) && (mouseFree || m.locked) // (the F1 window's look, not a binding)
 	// On a touch screen the first finger is also the mouse: it mustn't fire
 	// and look as well, so the mouse is left free for the menus.
 	// Choosing a gadget, the mouse is let go, to click one.
@@ -432,13 +432,15 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 	}
 	s := m.settings.LookSensitivity / m.me().Zoom() // finer through a scope
 	c.Look = [2]float32{yaw*s + assist[0], pitch*s*m.settings.lookSign() + assist[1]}
-	// Aim down the sights: the right button (unless it's holding the look
-	// with the F1 window open) or the left trigger.
-	c.Aim = (m.locked && !m.debugOpen && in.MouseDown(input.MouseRight)) || in.PadAxis(input.PadLeftTrigger) > 0.4
+	// Aim down the sights: its binding (the right button by default, unless
+	// that's holding the look with the F1 window open) or the left trigger.
+	aimKey := k.key(ActAim)
+	c.Aim = (m.locked && !(m.debugOpen && aimKey == input.KeyMouseRight) && in.Down(aimKey)) ||
+		in.PadAxis(input.PadLeftTrigger) > 0.4
 
 	pull := in.PadAxis(input.PadRightTrigger) > 0.5
-	c.Fire = (m.locked && in.MouseDown(input.MouseLeft)) || pull
-	c.FirePressed = (m.locked && in.MousePressed(input.MouseLeft)) || (pull && !m.prevPull)
+	c.Fire = (m.locked && k.down(in, ActFire)) || pull
+	c.FirePressed = (m.locked && k.pressed(in, ActFire)) || (pull && !m.prevPull)
 	m.prevPull = pull
 
 	c.Jump = k.pressed(in, ActJump) || in.PadPressed(input.PadA)
