@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Cliff Crack's app icon: the ball leaping a crack in a low-poly snow
+       slope, at sunset. Rendered to AppIcon.png by build-ios.sh's icon step
+       (see README); iOS rounds the corners itself. -->
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffcfa0"/>
+      <stop offset="0.45" stop-color="#f59a6e"/>
+      <stop offset="0.75" stop-color="#b86f82"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="0.74" cy="0.3" r="0.34">
+      <stop offset="0" stop-color="#fff4d6" stop-opacity="0.95"/>
+      <stop offset="0.35" stop-color="#ffe0b0" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#ffd0a0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="chasm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1c2246"/>
+      <stop offset="1" stop-color="#0a0d1f"/>
+    </linearGradient>
+    <radialGradient id="ballShade" cx="0.36" cy="0.3" r="0.8">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0.35"/>
+      <stop offset="0.55" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#1a1030" stop-opacity="0.45"/>
+    </radialGradient>
+    <clipPath id="ballClip"><circle cx="0" cy="0" r="150"/></clipPath>
+  </defs>
+
+  <!-- Sky and sun -->
+  <rect width="1024" height="1024" fill="url(#sky)"/>
+  <rect width="1024" height="1024" fill="url(#sun)"/>
+
+  <!-- Far peaks, with snow on their tops -->
+  <polygon fill="#9a87b4" points="0,520 90,400 150,450 250,330 340,430 420,380 520,470 610,360 700,440 790,340 900,430 1024,370 1024,640 0,640"/>
+  <polygon fill="#e9e2f2" points="250,330 290,380 262,372 240,398 222,368"/>
+  <polygon fill="#e9e2f2" points="610,360 645,405 618,398 598,420 585,392"/>
+  <polygon fill="#e9e2f2" points="790,340 828,388 800,380 780,404 768,372"/>
+  <polygon fill="#e9e2f2" points="90,400 118,437 96,432 80,452 70,428"/>
+  <polygon fill="#7f6fa0" points="0,600 120,520 230,575 360,500 470,570 560,520 700,590 820,520 930,580 1024,540 1024,820 0,820"/>
+  <!-- A nearer shoulder, in shade -->
+  <polygon fill="#6c5d92" points="560,700 700,640 820,665 1024,610 1024,800 600,720"/>
+  <polygon fill="#cfc6e4" points="700,640 740,655 720,668 690,650"/>
+
+  <!-- The ground under the facets, so no sky shows between them -->
+  <polygon fill="#e4e7f5" points="0,560 180,585 330,640 450,700 600,700 760,735 1024,780 1024,1024 0,1024"/>
+
+  <!-- The slope: low-poly snow, left of the crack -->
+  <polygon fill="#f6f3fa" points="0,560 180,585 330,640 450,700 0,1024"/>
+  <polygon fill="#dfe3f3" points="0,560 0,1024 170,760"/>
+  <polygon fill="#e9ebf7" points="170,760 450,700 330,1024 0,1024"/>
+  <polygon fill="#cdd3ec" points="330,1024 450,700 470,1024"/>
+  <!-- ... and right of it, further down -->
+  <polygon fill="#f3f0f9" points="600,700 760,735 1024,780 1024,1024 720,1024"/>
+  <polygon fill="#dce1f2" points="760,735 1024,780 1024,880"/>
+  <polygon fill="#c6cde8" points="600,700 720,1024 640,1024"/>
+  <polygon fill="#e6e8f5" points="760,735 1024,880 1024,1024 860,1024"/>
+
+  <!-- The crack: a jagged chasm across the slope. Rock walls down into the
+       dark, the far one catching the light; a band of snow thickness on
+       the near lip. -->
+  <polygon fill="url(#chasm)" points="430,700 470,748 448,800 500,856 478,918 530,972 508,1024 742,1024 684,962 716,900 664,842 694,780 648,738 612,698 560,684 500,694"/>
+  <polygon fill="#4d578f" points="612,698 648,738 694,780 664,842 716,900 684,962 742,1024 780,1024 712,955 746,894 692,838 724,774 670,728 628,694"/>
+  <polygon fill="#6f79ad" points="628,694 670,728 724,774 700,786 656,744 618,712"/>
+  <polygon fill="#2c3464" points="430,700 470,748 448,800 500,856 478,918 530,972 508,1024 480,1024 502,968 450,912 472,852 420,796 442,746 406,704"/>
+  <polygon fill="#ffffff" points="406,704 430,700 500,694 560,684 612,698 628,694 600,680 556,668 496,680 430,688"/>
+  <polygon fill="#aab3da" points="406,704 442,746 420,796 404,760 392,718"/>
+
+  <!-- Fractures branching off it into the snow -->
+  <g fill="#1c2246">
+    <polygon points="452,806 380,826 322,818 262,850 196,846 262,838 318,806 376,812 444,790"/>
+    <polygon points="480,918 420,940 380,988 330,1004 374,976 410,928 474,904"/>
+    <polygon points="700,892 770,904 820,940 900,944 960,980 896,956 814,952 764,916 704,908"/>
+    <polygon points="686,782 750,772 800,790 760,782 692,796"/>
+  </g>
+
+  <!-- Snow chunks thrown up from the lip -->
+  <polygon fill="#ffffff" points="428,640 452,628 460,652 438,660"/>
+  <polygon fill="#ffffff" points="392,600 408,594 412,610 398,614"/>
+  <polygon fill="#f0eef8" points="470,610 484,606 486,620 474,622"/>
+
+  <!-- The ball's shadow, far below on the other side -->
+  <ellipse cx="850" cy="830" rx="110" ry="24" fill="#2a2450" opacity="0.28"/>
+
+  <!-- Speed lines behind it -->
+  <g stroke="#ffffff" stroke-linecap="round" opacity="0.75">
+    <line x1="150" y1="250" x2="360" y2="330" stroke-width="22"/>
+    <line x1="210" y1="360" x2="380" y2="420" stroke-width="16" opacity="0.7"/>
+    <line x1="250" y1="170" x2="410" y2="240" stroke-width="12" opacity="0.6"/>
+  </g>
+
+  <!-- The ball: white with orange quarters, tumbling -->
+  <g transform="translate(560 330) rotate(-28)">
+    <g clip-path="url(#ballClip)">
+      <rect x="-160" y="-160" width="320" height="320" fill="#ffffff"/>
+      <rect x="-160" y="-160" width="160" height="160" fill="#f5842a"/>
+      <rect x="0" y="0" width="160" height="160" fill="#f5842a"/>
+      <circle cx="0" cy="0" r="150" fill="url(#ballShade)"/>
+    </g>
+    <circle cx="0" cy="0" r="150" fill="none" stroke="#2b2148" stroke-opacity="0.35" stroke-width="6"/>
+  </g>
+</svg>

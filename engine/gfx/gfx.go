@@ -53,6 +53,7 @@ const (
 	UISameLine
 	UIGauge
 	UICircle
+	UIImage
 )
 
 // UIWindowFlags are window options (values match R_UI_WINDOW_* in renderer.h).

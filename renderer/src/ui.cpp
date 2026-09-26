@@ -13,10 +13,13 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <unordered_map>
 
 namespace {
 
 bool     g_ready = false;
+VkImageView (*g_texture_view)(uint32_t) = nullptr;
+std::unordered_map<uint32_t, VkDescriptorSet> g_images; // RTexture -> ImGui's descriptor set for it
 float    g_scale = 1.0f; // UI size multiplier
 VkFormat g_color_format = VK_FORMAT_UNDEFINED; // the backend keeps a pointer to these
 VkFormat g_depth_format = VK_FORMAT_UNDEFINED;
@@ -186,7 +189,9 @@ bool ui_init(const UiInitInfo& info, std::string* error) {
     init.Device = info.device;
     init.QueueFamily = info.queue_family;
     init.Queue = info.queue;
-    init.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE; // backend-owned pool
+    // Backend-owned pool: the font atlas, and the game's textures used as images.
+    init.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + 128;
+    g_texture_view = info.texture_view;
     init.MinImageCount = 2;
     init.ImageCount = info.image_count < 2 ? 2 : info.image_count;
     init.UseDynamicRendering = true;
@@ -306,6 +311,29 @@ static void draw_circle(const RUICmd& c, uint32_t packed, const std::string& lab
     const ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0.0f, label.c_str());
     dl->AddText(font, size, ImVec2(centre.x - ts.x * 0.5f, centre.y - ts.y * 0.5f), srgb(1.0f, 1.0f, 1.0f, 0.9f),
                 label.c_str());
+}
+
+// Draws an RTexture (e.g. an icon), tinted, behind every window.
+static void draw_image(const RUICmd& c, uint32_t packed) {
+    const uint32_t texture = static_cast<uint32_t>(c.max);
+    auto           it = g_images.find(texture);
+    if (it == g_images.end()) {
+        const VkImageView view = g_texture_view ? g_texture_view(texture) : VK_NULL_HANDLE;
+        if (!view || g_images.size() >= 128) return;
+        it = g_images.emplace(texture, ImGui_ImplVulkan_AddTexture(view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)).first;
+    }
+    auto        channel = [&](int shift) { return static_cast<float>((packed >> shift) & 0xffu) / 255.0f; };
+    const float hw = c.min * 0.5f, hh = c.value * 0.5f;
+    ImGui::GetBackgroundDrawList()->AddImage(ImTextureRef(reinterpret_cast<ImTextureID>(it->second)),
+                                             ImVec2(c.x - hw, c.y - hh), ImVec2(c.x + hw, c.y + hh), ImVec2(0, 0),
+                                             ImVec2(1, 1), srgb(channel(0), channel(8), channel(16), channel(24)));
+}
+
+void ui_forget_texture(uint32_t texture) {
+    if (auto it = g_images.find(texture); it != g_images.end()) {
+        ImGui_ImplVulkan_RemoveTexture(it->second);
+        g_images.erase(it);
+    }
 }
 
 void ui_set_formats(VkFormat color_format, VkFormat depth_format) {
@@ -448,6 +476,10 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBit
             draw_circle(c, packed, label);
             continue;
         }
+        if (c.kind == R_UI_IMAGE) {
+            draw_image(c, packed);
+            continue;
+        }
         if (collapsed) continue;
 
         switch (c.kind) {
@@ -546,6 +578,8 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBit
 
 void ui_shutdown() {
     if (!g_ready) return;
+    for (auto& [texture, set] : g_images) ImGui_ImplVulkan_RemoveTexture(set);
+    g_images.clear();
     ImGui_ImplVulkan_Shutdown();
     ImGui::DestroyContext();
     g_ready = false;

@@ -135,6 +135,12 @@ xcrun --sdk $sdk clang -target "$triple" -isysroot "$sysroot" $opt -fobjc-arc \
     -o "$app/CliffCrack"
 sed -e "s/\$(BUNDLE_ID)/$bundle_id/" -e "s/\$(PLATFORM)/$platform/" "$root/ios/Info.plist" >"$app/Info.plist"
 cp "$build/renderer/bin/shaders/"*.spv "$app/shaders/"
+# The icon: actool turns the asset catalog into Assets.car and the icon
+# files, and says what Info.plist needs to point at them.
+xcrun actool "$root/ios/Assets.xcassets" --compile "$app" --platform $sdk \
+    --minimum-deployment-target $min_ios --app-icon AppIcon --target-device iphone --target-device ipad \
+    --output-partial-info-plist "$build/assets.plist" --output-format human-readable-text >/dev/null
+/usr/libexec/PlistBuddy -c "Merge $build/assets.plist" "$app/Info.plist" >/dev/null
 cp -R "$mvk" "$app/Frameworks/"
 
 # ---- signing ------------------------------------------------------------------

@@ -30,6 +30,11 @@ type Window struct {
 	width    int
 	height   int
 	primary  uint64 // the finger acting as the mouse (0 = none)
+	// A finger lands as the mouse moving there, and presses a frame later
+	// (the UI takes a press only on what the pointer was already over);
+	// lifting it releases a frame after that at the earliest, since a quick
+	// tap can land and lift between two frames.
+	pressNext, releaseNext bool
 }
 
 var (
@@ -114,6 +119,14 @@ func poll() {
 	if w == nil {
 		return
 	}
+	switch {
+	case w.pressNext:
+		w.input.ButtonEvent(input.MouseLeft, true)
+		w.pressNext = false
+	case w.releaseNext:
+		w.input.ButtonEvent(input.MouseLeft, false)
+		w.releaseNext = false
+	}
 	var events [C.CC_MAX_EVENTS]C.CCEvent
 	n := int(C.cc_take_events(&events[0], C.CC_MAX_EVENTS))
 	for _, e := range events[:n] {
@@ -131,11 +144,15 @@ func (w *Window) handle(e C.CCEvent) {
 		if phase == input.TouchBegan && w.primary == 0 {
 			w.primary = id
 			w.input.MoveEvent(x, y)
-			w.input.ButtonEvent(input.MouseLeft, true)
+			w.pressNext = true
 		} else if id == w.primary {
 			w.input.MoveEvent(x, y)
 			if phase == input.TouchEnded {
-				w.input.ButtonEvent(input.MouseLeft, false)
+				if w.pressNext || w.input.MousePressed(input.MouseLeft) {
+					w.releaseNext = true // not pressed yet, or only just
+				} else {
+					w.input.ButtonEvent(input.MouseLeft, false)
+				}
 				w.primary = 0
 			}
 		}

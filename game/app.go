@@ -124,6 +124,7 @@ func NewApp(opts Options) (*App, error) {
 	a.run.Autopilot = opts.Autopilot
 	a.run.startAt = opts.StartAt
 	a.run.touchScreen = opts.Touch
+	a.settingsUI.touch = opts.Touch
 	a.opts.Demo.Settings = &a.settings
 	if err := a.enter(opts.Start); err != nil {
 		return nil, err

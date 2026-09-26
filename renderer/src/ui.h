@@ -17,6 +17,7 @@ struct UiInitInfo {
     VkFormat         color_format;
     VkFormat         depth_format;
     float            scale; // UI size multiplier (1 = desktop)
+    VkImageView (*texture_view)(uint32_t texture); // an RTexture's view (VK_NULL_HANDLE if none), for R_UI_IMAGE
 };
 
 // Returns false (with a message in *error) if the UI can't be created; the
@@ -34,6 +35,10 @@ void ui_set_formats(VkFormat color_format, VkFormat depth_format);
 void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBitsKHR transform,
               const RUIInput& input, RUICmd* cmds, uint32_t count, const char* text, uint32_t text_length,
               RUIOutput* out);
+
+// Drops the UI's hold on an RTexture that's about to be destroyed. The device
+// must be idle.
+void ui_forget_texture(uint32_t texture);
 
 // The device must be idle.
 void ui_shutdown();

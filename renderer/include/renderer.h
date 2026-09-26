@@ -104,6 +104,9 @@ enum {
     R_UI_CIRCLE,        // disc behind every window (e.g. touch controls): x/y = centre and value =
                         //   radius in pixels, min = ring width (0 = filled), result (in) = colour as
                         //   packed sRGB 0xAABBGGRR; label centred in it, max = text size (0 = default)
+    R_UI_IMAGE,         // a texture behind every window, over earlier circles (e.g. an icon on a touch
+                        //   button): x/y = centre, min/value = width/height in pixels, max = the RTexture,
+                        //   result (in) = tint as packed sRGB 0xAABBGGRR
 };
 
 // Window options, passed in the R_UI_WINDOW command's value.

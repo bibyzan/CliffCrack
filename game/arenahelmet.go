@@ -35,21 +35,24 @@ type hudIcons struct {
 	chevron                    icon
 }
 
+// loadIcon rasterizes icons/<name>.svg, height pixels tall, into a texture.
+func loadIcon(name string, height int) (icon, error) {
+	f, err := iconFiles.Open("icons/" + name + ".svg")
+	if err != nil {
+		return icon{}, err
+	}
+	defer f.Close()
+	ic, err := svgicon.Parse(f)
+	if err != nil {
+		return icon{}, fmt.Errorf("%s: %w", name, err)
+	}
+	tex, err := render.CreateTexture(ic.Rasterize(height), true)
+	return icon{tex: tex, aspect: float32(ic.Aspect())}, err
+}
+
 // loadIcons rasterizes the embedded SVGs.
 func loadIcons() (hudIcons, error) {
-	load := func(name string, height int) (icon, error) {
-		f, err := iconFiles.Open("icons/" + name + ".svg")
-		if err != nil {
-			return icon{}, err
-		}
-		defer f.Close()
-		ic, err := svgicon.Parse(f)
-		if err != nil {
-			return icon{}, fmt.Errorf("%s: %w", name, err)
-		}
-		tex, err := render.CreateTexture(ic.Rasterize(height), true)
-		return icon{tex: tex, aspect: float32(ic.Aspect())}, err
-	}
+	load := loadIcon
 	var h hudIcons
 	var err error
 	for k, name := range []string{"hammer", "rifle", "pistol", "shotgun", "sniper", "launcher"} {

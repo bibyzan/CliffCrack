@@ -19,6 +19,9 @@ type Settings struct {
 	// HUDWidth is how much of the screen's width the HUD spans, in percent,
 	// centred: on an ultrawide, bring it in to where you're looking.
 	HUDWidth float32 `json:"hud_width"`
+	// FloatingStick makes the on-screen move stick (touch screens) appear
+	// wherever the left thumb lands, rather than stay in its corner.
+	FloatingStick bool `json:"floating_stick,omitempty"`
 	// Online: the name to go by (empty: the computer's account name) and
 	// the coordinator to find rooms on.
 	Name   string `json:"name,omitempty"`

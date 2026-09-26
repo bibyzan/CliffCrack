@@ -378,7 +378,9 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 	if m.touchOn {
 		w, h := render.DisplaySize()
 		me := m.me()
-		tyaw, tpitch, pause := m.touch.read(in, float32(w), float32(h), me, m.sim().NearestPickup(me) != nil, &touch)
+		m.touch.floating = m.settings.FloatingStick
+		m.touch.show(me, m.sim().NearestPickup(me), &m.as.icons)
+		tyaw, tpitch, pause := m.touch.read(in, float32(w), float32(h), me, &touch)
 		m.wantsPause = m.wantsPause || pause
 		// A thumb can't track like a mouse: the pad's aim assist helps it too.
 		if tyaw != 0 || tpitch != 0 || touch.Move != [2]float32{} {

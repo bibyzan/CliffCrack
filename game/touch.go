@@ -7,9 +7,9 @@ import (
 	"CliffCrack/engine/ui"
 )
 
-// On-screen controls for a touch screen (a phone): a floating analog stick
-// that appears where the left thumb lands, round buttons, and dragging
-// anywhere else on the right half to look around. Run and Arena each lay out
+// On-screen controls for a touch screen (a phone): an analog stick in the
+// bottom-left corner (or, with the FloatingStick setting, wherever the left
+// thumb lands), round buttons, and dragging anywhere else to look around. Run and Arena each lay out
 // their own buttons (see runTouch and arenaTouch).
 //
 // Sizes and positions are in screen heights, so the controls are the same
@@ -18,22 +18,56 @@ const (
 	touchMargin   = 0.09 // gap to the screen's edges (clears the rounded corners)
 	touchStickR   = 0.13 // how far the stick's knob travels
 	touchKnobR    = 0.055
+	touchStickRim = 2.0 // a fixed stick is taken by a thumb landing this many radii from its centre
 	touchHitSlop  = 1.35 // buttons take touches this much further out than they're drawn
 	touchLookSens = 3.0  // radians of camera turn per screen height of drag
 )
 
-// Touch control colours (sRGB, for ui.Builder.Circle).
+// Touch control colours (sRGB, for ui.Builder.Circle and Image).
 var (
-	touchBack   = [4]float32{0.07, 0.09, 0.16, 0.35}
-	touchRing   = [4]float32{1, 1, 1, 0.45}
+	touchBack   = [4]float32{0.07, 0.09, 0.16, 0.4}
+	touchRing   = [4]float32{1, 1, 1, 0.4}
 	touchKnob   = [4]float32{1, 1, 1, 0.8}
+	touchIcon   = [4]float32{1, 1, 1, 0.92}
 	touchOrange = [4]float32{0.96, 0.52, 0.16, 0.6}
 	touchRed    = [4]float32{0.9, 0.22, 0.18, 0.55}
 )
 
-// touchButton is a round on-screen button.
+// touchIcons are the controls' own icons (the Arena's also show weapons and
+// grenades, from its HUD icons). Loaded once, the first time they're needed.
+type touchIcons struct {
+	jump, aim, reload, pause icon
+}
+
+var loadedTouchIcons *touchIcons
+
+// getTouchIcons loads the icons, or returns them loaded. A missing icon is
+// left zero and its button shows its label instead.
+func getTouchIcons() *touchIcons {
+	if loadedTouchIcons != nil {
+		return loadedTouchIcons
+	}
+	t := &touchIcons{}
+	for _, x := range []struct {
+		dst  *icon
+		name string
+	}{{&t.jump, "jump"}, {&t.aim, "aim"}, {&t.reload, "reload"}, {&t.pause, "pause"}} {
+		ic, err := loadIcon(x.name, 128)
+		if err != nil {
+			logf("touch controls: %v", err)
+			continue
+		}
+		*x.dst = ic
+	}
+	loadedTouchIcons = t
+	return t
+}
+
+// touchButton is a round on-screen button, showing an icon (or, without
+// one, its label).
 type touchButton struct {
 	label string
+	icon  icon
 	x, y  float32 // centre, in screen heights from the left and top edges; negative: from the right and bottom
 	r     float32 // radius, in screen heights
 	color [4]float32
@@ -49,8 +83,9 @@ type touchButton struct {
 
 // touchControls reads the fingers each frame and draws the controls.
 type touchControls struct {
-	w, h    float32 // the screen, in pixels
-	buttons []*touchButton
+	w, h     float32 // the screen, in pixels
+	buttons  []*touchButton
+	floating bool // the stick appears where the thumb lands (set before update, from the settings)
 
 	stickOn      bool
 	stickID      uint64
@@ -174,7 +209,7 @@ func (t *touchControls) claim(id uint64, x, y float32) {
 	switch {
 	case best != nil:
 		best.down, best.pressed, best.id = true, true, id
-	case x < t.w*0.5 && !t.stickOn:
+	case t.floating && x < t.w*0.5 && !t.stickOn:
 		// The stick centres on the thumb, kept far enough from the edges that
 		// it can be pushed all the way in every direction.
 		r := touchStickR * t.h
@@ -183,20 +218,34 @@ func (t *touchControls) claim(id uint64, x, y float32) {
 		t.baseY = min(max(y, r), t.h-r)
 		t.x, t.y = 0, 0
 		t.moveStick(x, y)
+	case !t.floating && !t.stickOn && t.nearStick(x, y):
+		// The stick stays put; a thumb landing on it (or near: thumbs are
+		// imprecise) pushes it straight away from its centre.
+		t.stickOn, t.stickID = true, id
+		t.baseX, t.baseY = t.restBase()
+		t.moveStick(x, y)
 	default:
 		t.lookIDs = append(t.lookIDs, id)
 	}
 }
 
+// nearStick reports whether x, y is on the fixed stick or close to it.
+func (t *touchControls) nearStick(x, y float32) bool {
+	bx, by := t.restBase()
+	return math.Hypot(float64(x-bx), float64(y-by)) <= float64(touchStickRim*touchStickR*t.h)
+}
+
 // moveStick sets the deflection from the thumb at x, y. Pushed past the
-// stick's reach, the base follows the thumb, so turning back the other way
-// responds at once.
+// stick's reach, a floating stick's base follows the thumb, so turning back
+// the other way responds at once; a fixed one just stays at full tilt.
 func (t *touchControls) moveStick(x, y float32) {
 	r := touchStickR * t.h
 	dx, dy := x-t.baseX, y-t.baseY
 	if l := float32(math.Hypot(float64(dx), float64(dy))); l > r {
-		t.baseX += dx * (1 - r/l)
-		t.baseY += dy * (1 - r/l)
+		if t.floating {
+			t.baseX += dx * (1 - r/l)
+			t.baseY += dy * (1 - r/l)
+		}
 		dx, dy = dx*r/l, dy*r/l
 	}
 	t.x, t.y = dx/r, dy/r
@@ -237,13 +286,32 @@ func (t *touchControls) ui(b *ui.Builder) {
 			continue
 		}
 		x, y := t.centre(btn)
-		c := btn.color
-		if btn.down || btn.lit {
+		r := btn.r * h
+		c, ring := btn.color, touchRing
+		switch {
+		case btn.lit:
+			c, ring = touchOrange, [4]float32{1, 0.75, 0.5, 0.9}
+		case btn.down:
 			c[3] = min(1, c[3]+0.3)
 		}
-		text := min(0.045, btn.r*0.42) * h
-		b.Circle(btn.label, x, y, btn.r*h, 0, c, text)
-		b.Circle("", x, y, btn.r*h, 0.004*h, touchRing, 0)
+		if btn.down {
+			r *= 0.94 // pressed in
+		}
+		if btn.icon.tex == 0 {
+			b.Circle(btn.label, x, y, r, 0, c, min(0.045, btn.r*0.42)*h)
+		} else {
+			b.Circle("", x, y, r, 0, c, 0)
+			// Square icons fill half the button's height; wide ones (the
+			// guns) are fitted to its width instead.
+			ih := r * 0.95
+			iw := ih * btn.icon.aspect
+			if iw > r*1.4 {
+				iw = r * 1.4
+				ih = iw / btn.icon.aspect
+			}
+			b.Image(btn.icon.tex, x, y, iw, ih, touchIcon)
+		}
+		b.Circle("", x, y, r, 0.004*h, ring, 0)
 	}
 }
 
@@ -262,9 +330,10 @@ const (
 )
 
 func newRunTouch() *runTouch {
+	icons := getTouchIcons()
 	t := &runTouch{
-		jump:  touchButton{label: "JUMP", x: -0.216, y: -0.216, r: 0.105, color: touchOrange},
-		pause: touchButton{label: "II", x: 0.14, y: 0.14, r: 0.05, color: touchBack},
+		jump:  touchButton{label: "JUMP", icon: icons.jump, x: -0.216, y: -0.216, r: 0.105, color: touchOrange},
+		pause: touchButton{label: "II", icon: icons.pause, x: 0.14, y: 0.14, r: 0.05, color: touchBack},
 	}
 	t.buttons = []*touchButton{&t.jump, &t.pause}
 	return t

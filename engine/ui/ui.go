@@ -116,9 +116,25 @@ func (b *Builder) Gauge(unit string, value, min, max float32, style GaugeStyle) 
 func (b *Builder) Circle(label string, x, y, r, width float32, srgb [4]float32, textSize float32) {
 	c := b.add(gfx.UICircle, label)
 	c.X, c.Y, c.Value, c.Min, c.Max = x, y, r, width, textSize
+	c.Result = packSRGB(srgb)
+}
+
+// packSRGB packs a colour as 0xAABBGGRR, for the renderer's circle and image commands.
+func packSRGB(srgb [4]float32) uint32 {
+	var p uint32
 	for i, v := range srgb {
-		c.Result |= uint32(max(0, min(1, v))*255+0.5) << (8 * i)
+		p |= uint32(max(0, min(1, v))*255+0.5) << (8 * i)
 	}
+	return p
+}
+
+// Image draws texture tex (e.g. an icon) behind every window, w x h pixels
+// centred at x, y, tinted with an sRGB colour: over the circles drawn before
+// it, for icons on touch buttons.
+func (b *Builder) Image(tex gfx.Texture, x, y, w, h float32, srgb [4]float32) {
+	c := b.add(gfx.UIImage, "")
+	c.X, c.Y, c.Min, c.Value, c.Max = x, y, w, h, float32(tex)
+	c.Result = packSRGB(srgb)
 }
 
 // SameLine keeps the next widget on the current line, spacing pixels after

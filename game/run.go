@@ -181,6 +181,7 @@ func (r *Run) Update(dt float32, in *input.State, mouseFree bool) {
 	)
 	if r.touchOn {
 		w, h := render.DisplaySize()
+		r.touch.floating = r.settings.FloatingStick
 		touchRide, touchLook, r.wantsPause = r.touch.read(in, float32(w), float32(h))
 	} else {
 		r.touch.release()

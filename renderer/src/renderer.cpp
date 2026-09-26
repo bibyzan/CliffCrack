@@ -511,6 +511,11 @@ bool texture_alive(RTexture handle) {
     return handle < g->textures.size() && g->textures[handle].image.image != VK_NULL_HANDLE;
 }
 
+// For the UI's images (R_UI_IMAGE).
+VkImageView texture_view(uint32_t handle) {
+    return texture_alive(handle) ? g->textures[handle].image.view : VK_NULL_HANDLE;
+}
+
 void write_texture_descriptor(uint32_t slot, VkImageView view) {
     VkDescriptorImageInfo image_info{g->sampler, view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
@@ -1053,6 +1058,7 @@ bool init(const RInitDesc& desc) {
     ui.color_format = g->swapchain.image_format;
     ui.depth_format = kDepthFormat;
     ui.scale = g->ui_scale;
+    ui.texture_view = texture_view;
     std::string ui_error;
     g->ui_ready = ui_init(ui, &ui_error);
     if (!g->ui_ready) platform_log(("[renderer] debug UI disabled: " + ui_error).c_str());
@@ -1252,6 +1258,7 @@ RTexture r_create_texture(const uint8_t* rgba, uint32_t width, uint32_t height, 
 void r_destroy_texture(RTexture handle) {
     if (!g || handle == 0 || !texture_alive(handle)) return;
     vkDeviceWaitIdle(g->dev); // it may still be referenced by frames in flight
+    if (g->ui_ready) ui_forget_texture(handle);
     write_texture_descriptor(handle, g->textures[0].image.view); // never leave a dangling view
     destroy_image(g->textures[handle].image);
     g->free_textures.push_back(handle);

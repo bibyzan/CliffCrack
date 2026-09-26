@@ -83,6 +83,7 @@ const (
 	rowFOV settingRow = iota
 	rowSensitivity
 	rowInvert
+	rowStick // touch screens only: a fixed or floating move stick
 	rowVolume
 	rowHUD
 	rowBack
@@ -99,6 +100,7 @@ const (
 // keyboard or a gamepad: up/down picks a row, left/right adjusts it (held,
 // it repeats; the left stick adjusts smoothly), A toggles, B goes back.
 type settingsScreen struct {
+	touch   bool // the device has a touch screen: show its settings
 	choice  settingRow
 	held    int     // direction held on the last frame (-1, 0, 1)
 	heldFor float32 // seconds it has been held
@@ -106,7 +108,7 @@ type settingsScreen struct {
 }
 
 // open resets the selection to the first row.
-func (m *settingsScreen) open() { *m = settingsScreen{} }
+func (m *settingsScreen) open() { *m = settingsScreen{touch: m.touch} }
 
 // update applies this frame's input to s and reports when the player leaves.
 func (m *settingsScreen) update(in *input.State, s *Settings, dt float32) (done bool) {
@@ -119,6 +121,9 @@ func (m *settingsScreen) update(in *input.State, s *Settings, dt float32) (done 
 	}
 	if d := navY(in); d != 0 {
 		m.choice = (m.choice + settingRow(d) + rowCount) % rowCount
+		if m.choice == rowStick && !m.touch {
+			m.choice = (m.choice + settingRow(d) + rowCount) % rowCount
+		}
 	}
 
 	// Left/right: a press steps once, holding repeats.
@@ -161,6 +166,10 @@ func (m *settingsScreen) update(in *input.State, s *Settings, dt float32) (done 
 		if (steps != 0 && m.heldFor == 0) || confirmPressed(in) { // once per press, no repeat
 			s.InvertLook = !s.InvertLook
 		}
+	case rowStick:
+		if (steps != 0 && m.heldFor == 0) || confirmPressed(in) {
+			s.FloatingStick = !s.FloatingStick
+		}
 	case rowBack:
 		if confirmPressed(in) {
 			return true
@@ -188,6 +197,15 @@ func (m *settingsScreen) ui(b *ui.Builder, s *Settings, in *input.State) {
 	}
 	if b.MenuButton(fmt.Sprintf("Invert look up/down:  %s##invert", invert), width, 0, m.choice == rowInvert) {
 		s.InvertLook = !s.InvertLook
+	}
+	if m.touch {
+		stick := "Fixed"
+		if s.FloatingStick {
+			stick = "Floating"
+		}
+		if b.MenuButton(fmt.Sprintf("Move stick:  %s##stick", stick), width, 0, m.choice == rowStick) {
+			s.FloatingStick = !s.FloatingStick
+		}
 	}
 	b.StyledSlider("Volume", &s.Volume, 0, 100, style(rowVolume, "%.0f%%"))
 	b.StyledSlider("HUD width (ultrawide)", &s.HUDWidth, minHUDWidth, maxHUDWidth, style(rowHUD, "%.0f%%"))

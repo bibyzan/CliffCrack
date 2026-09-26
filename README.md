@@ -228,17 +228,30 @@ Specifics:
   entry point to volk. The surface is the game view's `CAMetalLayer`.
 - **Threads**: UIKit keeps the main thread; the game loop runs on its own thread and reads
   touches and lifecycle changes from a queue.
-- **Touch controls** in Run: a floating analog stick on the left half (it appears under
-  your thumb; left/right steers, push up to tuck, pull down to brake), a JUMP button bottom
-  right, drag anywhere else on the right to look around, and pause top left. The first
-  finger also acts as the mouse, so menus work by tapping. The controls hide while a
-  gamepad is in use.
+- **Touch controls** in Run: an analog stick bottom left (left/right steers, push up to
+  tuck, pull down to brake), a JUMP button bottom right, drag anywhere else to look around,
+  and pause top left. The stick stays in its corner; **Settings → Move stick: Floating**
+  (touch screens only) makes it appear wherever your thumb lands instead. The first finger
+  also acts as the mouse, so menus work by tapping: it moves the pointer, and presses a
+  frame later, since the UI only takes a press on what the pointer was already over. The
+  controls hide while a gamepad is in use.
 - **Touch controls** in the Arena (and the Firing Range), after phone shooters: the stick
-  moves (pushed all the way forward, it sprints) and dragging on the right half looks,
-  FIRE included, so you can aim while you shoot. Round the bottom-right corner: FIRE,
-  JUMP, AIM (a toggle), RELOAD, SWAP, NADE, FRAG/STICKY and HAMMER; PICK UP appears when
-  there's a weapon at your feet. Touch aiming gets the pad's aim assist. The helmet's
-  loadout moves to the bottom centre (weapons) and top left (grenades), clear of them.
+  moves (pushed all the way forward, it sprints). The right thumb rests on FIRE, low in the
+  corner, with the other buttons in an arc round it (jump, aim, which toggles, reload,
+  swap, grenade, frag/sticky, hammer), so the rest of the right half is free for looking
+  around, and FIRE looks too as it drags, so you can aim while you shoot. The buttons have
+  icons, and some show your loadout: FIRE the gun in hand, SWAP the other one, the grenade
+  button the kind it'll throw and the small one beside it the kind to switch to. PICK UP
+  appears, showing what's there, when something's at your feet. Touch aiming gets the
+  pad's aim assist. The helmet's loadout moves to the bottom centre (weapons) and top left
+  (grenades), clear of the buttons. Button icons are SVGs in `game/icons`, drawn through the
+  UI's image command.
+- **App icon**: `ios/AppIcon.svg` (the ball leaping a crack in the snow), rendered to
+  `ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png`, which `actool` compiles into the
+  app. After editing the SVG, re-render it (opaque, 1024 px) with
+  `qlmanage -t -s 1024 -o /tmp ios/AppIcon.svg`, then
+  `sips -s format jpeg /tmp/AppIcon.svg.png --out /tmp/icon.jpg` and
+  `sips -s format png /tmp/icon.jpg --out ios/Assets.xcassets/AppIcon.appiconset/AppIcon.png`.
 - **Scenes**: the window comes from a `UIWindowSceneDelegate`; from iOS 26, UIKit stops an
   app built with the new SDK that doesn't use scenes.
 - **Logs**: in the Simulator they're in the terminal. On a phone they go to
