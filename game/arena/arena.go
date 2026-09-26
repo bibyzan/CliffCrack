@@ -55,6 +55,7 @@ type Input struct {
 	Look        [2]float32 // radians this step: yaw right, pitch up
 	Jump        bool       // pressed this step
 	Sprint      bool
+	Crouch      bool // held: crouch (running fast, a slide)
 	Fire        bool // trigger held
 	Aim         bool // held: aim down the sights
 	FirePressed bool // trigger went down this step (for the empty click)
@@ -119,6 +120,15 @@ type Player struct {
 	jumpQueue float32 // s left of a jump pressed in the air, taken on landing
 	onSlope   bool    // walking on a slope last step
 
+	// Traversal (traversal.go).
+	Crouch    float32     // 0..1 how far down (eased): the eye and head drop with it
+	crouched  bool        // crouching this step
+	wasCrouch bool        // crouch held last step (a slide starts on the press)
+	Sliding   bool        // in a slide
+	slideTime float32     // s into it
+	slideCool float32     // s before another can start
+	Mantle    MantleState // a vault or climb under way
+
 	lastHitBy *Player // who hurt them last, and when (for knocking them into the pit)
 	lastHitAt float32
 	sinceHurt float32 // s since they last took damage, for armour recharge
@@ -133,7 +143,7 @@ func (p *Player) Durability() float32 { return p.Shield + p.Health }
 // Eye is the camera position. alpha interpolates between physics steps.
 func (p *Player) Eye(alpha float32) mathx.Vec3 {
 	pos, _ := p.Body.Interpolated(alpha)
-	return pos.Add(mathx.Vec3{0, EyeHeight, 0})
+	return pos.Add(mathx.Vec3{0, p.eyeHeight(), 0})
 }
 
 // ViewPitch includes the recoil kick.
@@ -248,6 +258,9 @@ const (
 	ActElbow   // an elbow strike
 	ActGadget  // the hammer brought out (Value: the gadget kind)
 	ActGrapple // the grapple (Value: 0 fired and missed, 1 caught, 2 let go)
+	ActSlide   // dropped into a slide (Value: its speed)
+	ActVault   // vaulted something (Value: its height)
+	ActClimb   // climbed onto something (Value: its height)
 )
 
 // Action is one player action; Value is the impact speed for ActLand.
@@ -419,9 +432,11 @@ func (a *Arena) Step(dt float32, inputs []Input) Events {
 		if p.sinceHurt > shieldDelay {
 			p.Shield = min(p.Shield+shieldRate*dt, MaxShield)
 		}
-		a.movePlayer(p, dt, in, &ev)
-		a.updateGrapple(p, dt, in, &ev)
-		a.stepUp(p, dt)
+		if !a.traverse(p, dt, &in, &ev) {
+			a.movePlayer(p, dt, in, &ev)
+			a.updateGrapple(p, dt, in, &ev)
+			a.stepUp(p, dt)
+		}
 		undo := a.rewind(p, in.ViewTime)
 		a.updateWeapons(p, dt, in, &ev)
 		undo()
@@ -471,6 +486,9 @@ func (a *Arena) movePlayer(p *Player, dt float32, in Input, ev *Events) {
 	if sprinting(in) && p.ADS == 0 {
 		speed = sprintSpeed
 	}
+	if p.crouched {
+		speed = crouchSpeed
+	}
 	if g, _ := p.Gun(); g != nil {
 		speed *= 1 + (g.ADSMove-1)*smoothstep(p.ADS) // slower with the sights up
 	}
@@ -478,6 +496,31 @@ func (a *Arena) movePlayer(p *Player, dt float32, in Input, ev *Events) {
 	flat := mathx.Vec3{v[0], 0, v[2]}
 	ground, slope := a.groundNormal(p)
 	switch {
+	case p.Sliding:
+		// A slide: carrying on, steering a little, slowing on the level and
+		// speeding up downhill. It ends as it runs out, when you let go, or
+		// off an edge (the speed's kept: see hopGrace).
+		mag := flat.Len()
+		dir := flat.Scale(1 / max(mag, 1e-4))
+		if wish.Len() > 0.1 {
+			// Turn towards where you're steering, a little each step (about
+			// Y: a positive angle turns +X towards -Z, as the cross says).
+			want := wish.Normalize()
+			turn := float32(math.Atan2(float64(dir.Cross(want)[1]), float64(dir.Dot(want))))
+			turn = clamp(turn, -slideTurn*dt, slideTurn*dt)
+			c, s := float32(math.Cos(float64(turn))), float32(math.Sin(float64(turn)))
+			dir = mathx.Vec3{dir[0]*c + dir[2]*s, 0, -dir[0]*s + dir[2]*c}
+		}
+		mag -= slideFriction * dt
+		if slope {
+			downhill := mathx.Vec3{ground[0], 0, ground[2]}.Scale(gravity * ground[1]) // gravity along the slope, level part
+			mag += downhill.Dot(dir) * dt
+		}
+		p.slideTime += dt
+		if mag < crouchSpeed+0.5 || !p.crouched || p.slideTime > slideMax || (!p.onGround && p.airborne > 0.25) {
+			p.Sliding, p.slideCool = false, slideCooldown
+		}
+		flat = dir.Scale(max(mag, 0))
 	case p.onGround && flat.Len() > speed+0.1:
 		// Faster than you can run: keep the speed and steer (see hopGrace).
 		mag := flat.Len()
@@ -538,6 +581,7 @@ func (a *Arena) movePlayer(p *Player, dt float32, in Input, ev *Events) {
 	}
 	if p.jumpQueue > 0 && p.onGround && p.sinceJump >= jumpCooldown {
 		p.jumpQueue = 0
+		p.Sliding = false // a slide jump: the speed's kept
 		p.Body.Velocity[1] = jumpSpeed
 		p.onGround = false
 		p.sinceJump = 0
@@ -549,7 +593,7 @@ func (a *Arena) movePlayer(p *Player, dt float32, in Input, ev *Events) {
 // the feet, so nothing else stops a jump under a low deck lifting the eye
 // (the camera) up through it.
 func (a *Arena) headRoom(p *Player) {
-	const reach = EyeHeight + 0.2
+	reach := p.eyeHeight() + 0.2
 	hit, ok := a.Phys.Raycast(p.Body.Position, mathx.Vec3{0, 1, 0}, reach, a.ignoreForAim)
 	if !ok {
 		return

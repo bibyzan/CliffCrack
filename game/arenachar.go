@@ -90,6 +90,17 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 		t := clampf((m.sim().Time-p.DiedAt)/0.5, 0, 1)
 		base = base.Mul(mathx.RotateX(smooth(t) * math.Pi / 2 * 0.97))
 	}
+	// Crouched the body drops and the legs shorten under it; sliding it
+	// leans back, legs out in front; climbing or vaulting it tips forward
+	// over the ledge.
+	drop := arena.CrouchDrop * p.Crouch
+	if p.Sliding {
+		base = base.Mul(mathx.RotateX(0.5))
+	}
+	if e := mantleReach(p); e > 0 {
+		base = base.Mul(mathx.RotateX(-0.4 * e))
+	}
+	upper := base.Mul(mathx.Translate(0, -drop, 0))
 	i := team(p)
 	// Paint builds up on the suit as the armour goes, in the shooter's colour.
 	cover := 1 - p.Shield/arena.MaxShield
@@ -113,20 +124,27 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 			swing = 0.35 // legs tucked mid-jump
 		}
 	}
+	hipAt := float32(hipHeight) - drop
+	shorten := mathx.Scale(1, hipAt/hipHeight, 1) // crouched: the legs fold to keep the feet down
 	for _, side := range []float32{1, -1} {
-		hip := base.Mul(mathx.Translate(0.12*side, hipHeight, 0)).Mul(mathx.RotateX(swing * side))
-		if !p.OnGround() && !p.Dead {
-			hip = base.Mul(mathx.Translate(0.12*side, hipHeight, 0)).Mul(mathx.RotateX(-swing * (0.5 + 0.5*side)))
+		hip := base.Mul(mathx.Translate(0.12*side, hipAt, 0))
+		switch {
+		case p.Sliding && !p.Dead:
+			hip = hip.Mul(mathx.RotateX(1.0 + 0.15*side)) // out in front
+		case !p.OnGround() && !p.Dead:
+			hip = hip.Mul(mathx.RotateX(-swing * (0.5 + 0.5*side)))
+		default:
+			hip = hip.Mul(mathx.RotateX(swing * side))
 		}
-		draw(hip, charLeg)
+		draw(hip.Mul(shorten), charLeg)
 	}
-	draw(base, charTorso)
+	draw(upper, charTorso)
 
 	pitch := p.ViewPitch()
-	draw(base.Mul(mathx.Translate(0, neckHeight, 0)).Mul(mathx.RotateX(pitch*0.6)), charHead)
+	draw(upper.Mul(mathx.Translate(0, neckHeight, 0)).Mul(mathx.RotateX(pitch*0.6)), charHead)
 
 	// Arms and weapon follow the aim.
-	aim := base.Mul(mathx.Translate(0, shoulderHeight, 0)).Mul(mathx.RotateX(pitch))
+	aim := upper.Mul(mathx.Translate(0, shoulderHeight, 0)).Mul(mathx.RotateX(pitch))
 	draw(aim, charArms)
 	weapon := aim.Mul(mathx.Translate(0.16, -0.12, -0.42))
 	parts := partsFor(heldKind(&p.Weapons))
@@ -157,7 +175,8 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 	// it's popped. It's translucent, so it's drawn with the glass.
 	if !p.Dead && p.Shield > 0 {
 		glow := 0.05 + 0.4*p.Flash
-		shell := base.Mul(mathx.Translate(0, 0.98, 0)).Mul(mathx.Scale(0.36, 0.98, 0.28))
+		tall := 0.98 - drop/2 // lower when crouched
+		shell := base.Mul(mathx.Translate(0, tall, 0)).Mul(mathx.Scale(0.36, tall, 0.28))
 		m.glass = append(m.glass, render.DrawCmd{Model: shell, Color: withAlpha(teamGlow[i], glow), Flags: gfx.DrawUnlit, Mesh: m.as.gem})
 	}
 	return out

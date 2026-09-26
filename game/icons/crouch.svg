@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+  <!-- Crouch (touch button): a chevron pointing down onto a bar. -->
+  <polygon points="4,8 20,24 36,8 30,8 20,18 10,8"/>
+  <rect x="5" y="29" width="30" height="5" rx="1"/>
+</svg>

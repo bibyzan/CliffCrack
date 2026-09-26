@@ -531,6 +531,20 @@ rematch on a new site.
   you're moving, the aim drifts gently onto them (faster with the sights up); up and
   down it only keeps you on their body, chest to head, so it never drags a headshot
   down. It never snaps, and does nothing while you're still.
+- **Movement**, fast, after THE FINALS (`game/arena/traversal.go`):
+  - **Crouch** (Left Ctrl; B on a pad; CROUCH on touch, a toggle): the eye and head
+    drop 0.55 m, a smaller target, and you move at 3.6 m/s. Walking under something low
+    ducks you, and you stay down until there's room to stand.
+  - **Slide**: crouch while running at 7.4 m/s or more and you drop into a slide, a
+    burst to at least 11.5 m/s that carries you for up to 1.3 s, steering a little,
+    faster downhill. Jump out of it and the speed's kept: slide-hop to stay fast.
+  - **Vault**: run into anything up to 1.3 m high, sprinting or with a jump, and you're
+    over it in a quarter of a second at the same pace, a hand planted on the top.
+  - **Climb**: jump at a ledge up to 2.3 m above your feet (reaching one mid-jump
+    catches it too, so a jump climbs about 3.5 m) and you pull yourself up onto it,
+    both hands on the lip. No shooting while vaulting or climbing.
+  - The Firing Range has a course down its right-hand side to practise on: a barrier
+    to vault, a 2 m ledge to climb, and a low roof to slide under.
 - **Running shows**: the gun swings, bounces, rolls and nods with each stride, your
   view bobs a little, and sprinting swings the gun down and across your body and
   widens the view. Other players bounce with each step, stride wider as they speed up

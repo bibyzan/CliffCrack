@@ -20,14 +20,18 @@ const (
 // capsule is the body's axis, bottom to top.
 func (p *Player) capsule() (a, b mathx.Vec3) {
 	a = p.Body.Position
-	return a, a.Add(mathx.Vec3{0, bodyLength, 0})
+	return a, a.Add(mathx.Vec3{0, bodyLength - 0.6*CrouchDrop*p.Crouch, 0})
 }
 
 // Head is the centre of the player's head.
-func (p *Player) Head() mathx.Vec3 { return p.Body.Position.Add(mathx.Vec3{0, headHeight, 0}) }
+func (p *Player) Head() mathx.Vec3 {
+	return p.Body.Position.Add(mathx.Vec3{0, headHeight - CrouchDrop*p.Crouch, 0})
+}
 
 // Chest is where to aim for a body shot.
-func (p *Player) Chest() mathx.Vec3 { return p.Body.Position.Add(mathx.Vec3{0, bodyLength * 0.8, 0}) }
+func (p *Player) Chest() mathx.Vec3 {
+	return p.Body.Position.Add(mathx.Vec3{0, (bodyLength - 0.6*CrouchDrop*p.Crouch) * 0.8, 0})
+}
 
 // rayHit is how far along the ray (dir a unit vector) it enters the
 // player's hitbox, within maxDist, and whether that's the head.

@@ -52,6 +52,7 @@ type InputMsg struct {
 	Seq                      uint32
 	Move                     [2]float32
 	Fire, Aim, Sprint        bool
+	Crouch                   bool `json:",omitempty"`
 	Yaw, Pitch               float32
 	Jump, Fired, Reload      uint32
 	Melee, Throw, SwitchGren uint32
@@ -105,6 +106,7 @@ func (s *InputSender) Next(in arena.Input, yaw, pitch float32) InputMsg {
 	m := &s.last
 	m.Seq++
 	m.Move, m.Fire, m.Aim, m.Sprint, m.Yaw, m.Pitch, m.View = in.Move, in.Fire, in.Aim, in.Sprint, yaw, pitch, in.ViewTime
+	m.Crouch = in.Crouch
 	count := func(c *uint32, pressed bool) {
 		if pressed {
 			*c++
@@ -177,7 +179,7 @@ func (r *InputReceiver) Input(p *arena.Player) arena.Input {
 		return arena.Input{}
 	}
 	u := r.used
-	in := arena.Input{Move: m.Move, Fire: m.Fire, Aim: m.Aim, Sprint: m.Sprint,
+	in := arena.Input{Move: m.Move, Fire: m.Fire, Aim: m.Aim, Sprint: m.Sprint, Crouch: m.Crouch,
 		Jump: m.Jump != u.Jump, FirePressed: m.Fired != u.Fired, Reload: m.Reload != u.Reload,
 		Melee: m.Melee != u.Melee, Throw: m.Throw != u.Throw, SwitchGrenade: m.SwitchGren != u.SwitchGren,
 		Gadget:   m.Gadget != u.Gadget,

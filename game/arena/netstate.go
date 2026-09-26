@@ -51,6 +51,13 @@ type NetPlayer struct {
 	SinceLand    float32
 	JumpQueue    float32
 	OnSlope      bool
+	Crouch       float32     `json:",omitempty"`
+	Crouched     bool        `json:",omitempty"`
+	WasCrouch    bool        `json:",omitempty"`
+	Sliding      bool        `json:",omitempty"`
+	SlideTime    float32     `json:",omitempty"`
+	SlideCool    float32     `json:",omitempty"`
+	Mantle       MantleState `json:",omitempty"`
 	SincePad     float32
 	SinceJump    float32
 	Slots        [2]WeaponKind
@@ -133,6 +140,8 @@ func (a *Arena) Snapshot() Snapshot {
 			Sway: p.sway, Breath: p.Breath, Shield: p.Shield, Health: p.Health, Dead: p.Dead, DiedAt: p.DiedAt,
 			Flash: p.Flash, OnGround: p.onGround, Boosted: p.boosted, BoostTop: p.boostTop, SincePad: p.sincePad,
 			SinceJump: p.sinceJump, Airborne: p.airborne, SinceLand: p.sinceLand, JumpQueue: p.jumpQueue, OnSlope: p.onSlope,
+			Crouch: p.Crouch, Crouched: p.crouched, WasCrouch: p.wasCrouch, Sliding: p.Sliding, SlideTime: p.slideTime,
+			SlideCool: p.slideCool, Mantle: p.Mantle,
 			Slots: p.Slots, Active: p.Active, Current: p.Current, Switching: p.Switching,
 			ADS: p.ADS, Descope: p.descope, HammerSwing: p.Hammer.Swing, HammerStruck: p.Hammer.struck,
 			HammerOut: p.HammerOut, ElbowSwing: p.Elbow.Swing, ElbowStruck: p.Elbow.struck, Gadget: p.Gadget,
@@ -189,6 +198,8 @@ func (a *Arena) ApplySnapshot(s *Snapshot, keepAim int) {
 		p.Shield, p.Health, p.Dead, p.DiedAt, p.Flash = np.Shield, np.Health, np.Dead, np.DiedAt, np.Flash
 		p.onGround, p.boosted, p.boostTop, p.sincePad, p.sinceJump = np.OnGround, np.Boosted, np.BoostTop, np.SincePad, np.SinceJump
 		p.airborne, p.sinceLand, p.jumpQueue, p.onSlope = np.Airborne, np.SinceLand, np.JumpQueue, np.OnSlope
+		p.Crouch, p.crouched, p.wasCrouch, p.Sliding = np.Crouch, np.Crouched, np.WasCrouch, np.Sliding
+		p.slideTime, p.slideCool, p.Mantle = np.SlideTime, np.SlideCool, np.Mantle
 		w := &p.Weapons
 		w.Slots, w.Active, w.Current, w.Switching, w.descope = np.Slots, np.Active, np.Current, np.Switching, np.Descope
 		if i != keepAim {
@@ -445,11 +456,13 @@ func (a *Arena) Predict(p *Player, in Input, dt float32) {
 		return
 	}
 	var ev Events
-	a.movePlayer(p, dt, in, &ev)
-	if p.Grapple.On && (in.Jump || !a.pullGrapple(p, dt)) {
-		p.Grapple.On = false // (the host decides; this is what it will)
+	if !a.traverse(p, dt, &in, &ev) {
+		a.movePlayer(p, dt, in, &ev)
+		if p.Grapple.On && (in.Jump || !a.pullGrapple(p, dt)) {
+			p.Grapple.On = false // (the host decides; this is what it will)
+		}
+		a.stepUp(p, dt)
 	}
-	a.stepUp(p, dt)
 	a.Phys.StepBody(p.Body, dt)
 	a.headRoom(p)
 	a.touchDown(p, dt)

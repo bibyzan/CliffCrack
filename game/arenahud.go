@@ -76,9 +76,9 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 		}
 		b.Panel("##arenahint", 0.5, hintY, hudText, 1.05)
 		b.ColorText(withAlpha(uiMuted, fade), "%s", prompt(in,
-			"LMB  fire    RMB  aim    1 2 / wheel  swap    R  reload    E  pick up    F  elbow    Q  gadget    G  grenade    C  frag / sticky",
-			"RT  fire    LT  aim    Y  swap    X  reload (hold: pick up)    R3  elbow    RB  gadget    LB  grenade    B  frag / sticky",
-			"Stick  move (push all the way to sprint)  ·  drag right side  look  ·  hold FIRE and drag to aim while shooting"))
+			"LMB  fire    RMB  aim    1 2 / wheel  swap    R  reload    E  pick up    F  elbow    Q  gadget    G  grenade    C  frag / sticky    Ctrl  crouch (sprinting: slide)    Space  jump, vault, climb",
+			"RT  fire    LT  aim    Y  swap    X  reload (hold: pick up)    R3  elbow    RB  gadget    LB  grenade    D-pad down  frag / sticky    B  crouch (sprinting: slide)",
+			"Stick  move (push all the way to sprint)  ·  drag right side  look  ·  CROUCH while sprinting to slide  ·  JUMP at a ledge to climb"))
 		b.End()
 	}
 }

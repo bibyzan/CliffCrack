@@ -82,6 +82,16 @@ func GenerateRange() *Site {
 	}
 	s.Structures = append(s.Structures, Bunker(rng, v(firingLine-40, 0, -9), 0), Glasshouse(rng, v(firingLine-55, 0, 9), 0))
 
+	// A movement course down the right-hand side, to practise on: a
+	// waist-high barrier to vault, a 2 m ledge to climb (and drop off), and
+	// a low roof to slide under.
+	const cz0, cz1 = -13, -9.5
+	add(Bay, v(1.6, 0, cz0), v(2, 1.0, cz1))       // the barrier
+	add(Bay, v(-7.5, 0, cz0), v(-4, 2.0, cz1))     // the ledge
+	add(Bay, v(-17, 1.35, cz0), v(-12, 1.55, cz1)) // the roof ...
+	add(Bay, v(-17, 0, cz0), v(-16.7, 1.35, cz0+0.3))
+	add(Bay, v(-12.3, 0, cz0), v(-12, 1.35, cz0+0.3)) // ... on two posts at the back
+
 	// The weapon table, to the left of the line: every gun, crates of both
 	// grenades and both gadgets, none of which run out.
 	add(Bay, v(tableX0, 0, tableZ-0.6), v(tableX1, tableH, tableZ+0.6))

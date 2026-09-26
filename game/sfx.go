@@ -44,6 +44,11 @@ func newArenaSounds() arenaSounds {
 		empty:  audio.Synth(0.3, click(0, 1), tone(audio.Sine, 900, 900, 0, 20, 120, 0.2)),
 		jump:   audio.Synth(0.22, hiss(0, 90, 30, 1, 1400, 200), tone(audio.Sine, 180, 240, 0, 80, 30, 0.4)),
 		land:   audio.Synth(0.55, hiss(0, 110, 26, 1, 450, 0), tone(audio.Sine, 95, 50, 0, 110, 22, 0.8)),
+		// Traversal: a slide's long gritty scrape; a vault's whoosh and a
+		// palm slapped on the top; a climb's scramble and the pull-up.
+		slide: audio.Synth(0.5, hiss(0, 520, 4, 0.9, 2200, 300), hiss(0, 480, 5, 0.5, 700, 0)),
+		vault: audio.Synth(0.4, hiss(0, 140, 18, 0.8, 2400, 500), tone(audio.Sine, 140, 90, 60, 60, 40, 0.6), hiss(60, 40, 60, 0.6, 3000, 800)),
+		climb: audio.Synth(0.5, hiss(0, 90, 30, 0.6, 3000, 700), hiss(120, 90, 30, 0.6, 3000, 700), tone(audio.Sine, 110, 70, 200, 120, 18, 0.7)),
 		// The hammer: a whoosh, and a heavy crunching thud.
 		swing: audio.Synth(0.25, audio.Layer{Wave: audio.Noise, Length: ms(200), Attack: ms(70), Decay: 14, Volume: 1, LowPass: 2600, HighPass: 400}),
 		thud:  audio.Synth(0.95, tone(audio.Sine, 85, 38, 0, 260, 11, 1), hiss(0, 160, 28, 0.9, 1600, 0), hiss(10, 90, 40, 0.5, 0, 900)),

@@ -82,6 +82,7 @@ type arenaSounds struct {
 	throw, stick, stickyBoom, pickup                     *audio.Sound
 	magOut, magIn, charge, shellIn, pump                 *audio.Sound
 	elbow, punch, hook, catch, release, draw             *audio.Sound
+	slide, vault, climb                                  *audio.Sound
 	guns                                                 [len(arena.WeaponNames)]*audio.Sound
 	breaks                                               [arena.MaterialCount]*audio.Sound
 }
@@ -155,6 +156,7 @@ type Arena struct {
 	bob        float32 // walk-cycle phase for the weapon sway and head bob
 	runAmt     float32 // 0..1 how much you're running (eased): scales the sway and bob
 	sprintAmt  float32 // 0..1 how much you're sprinting (eased): the sprint pose
+	slideAmt   float32 // 0..1 how much you're sliding (eased): the slide pose and view
 	strides    []float32
 	prevPull   bool    // trigger state last frame (for the pad's "pressed")
 	padHold    float32 // s the pad's X has been held (tap: reload, hold: pick up)
@@ -398,7 +400,7 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 		me := m.me()
 		m.touch.floating = m.settings.FloatingStick
 		m.touch.show(me, m.sim().NearestPickup(me), &m.as.icons)
-		tyaw, tpitch, pause := m.touch.read(in, float32(w), float32(h), me, &touch)
+		tyaw, tpitch, pause := m.touch.read(in, float32(w), float32(h), dt, me, &touch)
 		m.wantsPause = m.wantsPause || pause
 		// A thumb can't track like a mouse: the pad's aim assist helps it too.
 		if tyaw != 0 || tpitch != 0 || touch.Move != [2]float32{} {
@@ -421,10 +423,13 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 
 	c.Jump = in.Pressed(input.KeySpace) || in.PadPressed(input.PadA)
 	c.Sprint = in.Down(input.KeyLeftShift) || in.PadDown(input.PadLStick)
+	// Crouch (held; running fast, a slide): Left Ctrl, or B as in most
+	// shooters.
+	c.Crouch = in.Down(input.KeyLeftControl) || in.PadDown(input.PadB)
 	c.Melee = in.Pressed(input.KeyF) || in.PadPressed(input.PadRStick)
 	c.Gadget = in.Pressed(input.KeyQ) || in.PadPressed(input.PadRB)
 	c.Throw = in.Pressed(input.KeyG) || in.PadPressed(input.PadLB)
-	c.SwitchGrenade = in.Pressed(input.KeyC) || in.PadPressed(input.PadB)
+	c.SwitchGrenade = in.Pressed(input.KeyC) || in.PadPressed(input.PadDown)
 	m.gadgetHover = -1
 	auto := false
 	if m.wantGadget > 0 && m.match.Phase == arena.PhaseCountdown {
@@ -482,6 +487,7 @@ func mergeTouch(c, t arena.Input) arena.Input {
 		c.Move[0], c.Move[1] = c.Move[0]/l, c.Move[1]/l
 	}
 	c.Sprint = c.Sprint || t.Sprint
+	c.Crouch = c.Crouch || t.Crouch
 	c.Aim = c.Aim || t.Aim
 	c.Fire = c.Fire || t.Fire
 	c.FirePressed = c.FirePressed || t.FirePressed
@@ -561,6 +567,11 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 	ease := 1 - float32(math.Exp(-10*float64(dt)))
 	m.runAmt += (run - m.runAmt) * ease
 	m.sprintAmt += (sprint*(1-me.ADS) - m.sprintAmt) * ease
+	sliding := float32(0)
+	if me.Sliding {
+		sliding = 1
+	}
+	m.slideAmt += (sliding - m.slideAmt) * ease
 
 	// Walk cycles: the weapon sway, and everyone's legs.
 	for i, p := range m.sim().Players {
@@ -763,6 +774,15 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 			sound, volume = m.sfx.jump, 0.6
 		case arena.ActLand:
 			sound, volume = m.sfx.land, min(1, act.Value/10)
+		case arena.ActSlide:
+			sound, volume = m.sfx.slide, 0.9
+		case arena.ActVault:
+			sound, volume = m.sfx.vault, 0.9
+			if mine {
+				m.fovKick = max(m.fovKick, 0.35)
+			}
+		case arena.ActClimb:
+			sound, volume = m.sfx.climb, 0.9
 		case arena.ActThrow:
 			sound, volume = m.sfx.throw, 0.8
 			if mine {
@@ -923,6 +943,22 @@ func (m *Arena) weaponModel() mathx.Mat4 {
 	pitch -= 0.5 * sprint
 	yaw += 0.6 * sprint
 	roll += 0.35 * sprint
+	// Sliding: the gun drops a little and cants over. Vaulting it dips out
+	// of the way of the hand planted on the top; climbing it goes right
+	// down, both hands on the ledge (see appendArms).
+	slide := smooth(m.slideAmt)
+	offset = offset.Add(mathx.Vec3{-0.02, -0.05, 0.02}.Scale(slide))
+	roll += 0.45 * slide
+	pitch -= 0.08 * slide
+	if e := mantleReach(me); e > 0 {
+		if me.Mantle.Vault {
+			offset[1] -= 0.1 * e
+			roll -= 0.35 * e
+		} else {
+			offset[1] -= 0.4 * e
+			pitch -= 0.7 * e
+		}
+	}
 	offset[1] -= 0.35 * w.Switching / arena.SwitchTime // lowered while swapping
 	size := float32(0.55)                              // modelled at real scale; drawn this close they need shrinking
 	// Throwing a grenade: the gun dips out of the way of the throwing arm.
@@ -1026,7 +1062,7 @@ func (m *Arena) muzzle() mathx.Vec3 {
 func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
 	m.viewAspect = aspect
 	eye := m.eye()
-	fov := m.settings.fovRadians() * 1.25 * (1 + 0.18*m.fovKick) * (1 + 0.07*smooth(m.sprintAmt)) // a wider view suits first person; wider still in a launch
+	fov := m.settings.fovRadians() * 1.25 * (1 + 0.18*m.fovKick) * (1 + 0.07*smooth(m.sprintAmt)) * (1 + 0.1*smooth(m.slideAmt)) // a wider view suits first person; wider still in a launch
 	fov = min(fov, 1.9)
 	zoom := m.me().Zoom()
 	fov = 2 * float32(math.Atan(math.Tan(float64(fov)/2)/float64(zoom))) // aiming down the sights magnifies
@@ -1269,11 +1305,21 @@ func (m *Arena) appendPads(out []render.DrawCmd) []render.DrawCmd {
 	return out
 }
 
+// mantleReach is how far p's hands are reaching for a ledge in a vault or
+// climb (0..1): up as it starts, gone as it ends.
+func mantleReach(p *arena.Player) float32 {
+	k := p.Mantling()
+	if k < 0 {
+		return 0
+	}
+	return smooth(clampf(k/0.2, 0, 1)) * (1 - smooth(clampf((k-0.8)/0.2, 0, 1)))
+}
+
 // runFactors is how much p is running (0..1: still to walking pace) and
 // sprinting (0..1: walking to sprinting pace), on the ground.
 func runFactors(p *arena.Player) (run, sprint float32) {
-	if p.Dead || !p.OnGround() {
-		return 0, 0
+	if p.Dead || !p.OnGround() || p.Sliding || p.Mantle.On {
+		return 0, 0 // gliding, or scrambling: no stride
 	}
 	v := p.Body.Velocity
 	speed := float32(math.Hypot(float64(v[0]), float64(v[2])))

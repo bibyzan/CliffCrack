@@ -36,7 +36,7 @@ var (
 // touchIcons are the controls' own icons (the Arena's also show weapons and
 // grenades, from its HUD icons). Loaded once, the first time they're needed.
 type touchIcons struct {
-	jump, aim, reload, pause icon
+	jump, aim, reload, pause, crouch icon
 }
 
 var loadedTouchIcons *touchIcons
@@ -51,7 +51,7 @@ func getTouchIcons() *touchIcons {
 	for _, x := range []struct {
 		dst  *icon
 		name string
-	}{{&t.jump, "jump"}, {&t.aim, "aim"}, {&t.reload, "reload"}, {&t.pause, "pause"}} {
+	}{{&t.jump, "jump"}, {&t.aim, "aim"}, {&t.reload, "reload"}, {&t.pause, "pause"}, {&t.crouch, "crouch"}} {
 		ic, err := loadIcon(x.name, 128)
 		if err != nil {
 			logf("touch controls: %v", err)

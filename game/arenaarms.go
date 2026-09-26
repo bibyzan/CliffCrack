@@ -351,6 +351,25 @@ func (m *Arena) appendArms(out []render.DrawCmd, model mathx.Mat4, mk *marker, p
 				Flags: gfx.DrawFlat, Mesh: m.as.gem})
 		}
 	}
+	// Vaulting or climbing: the hands go to the ledge's lip (the off hand
+	// for a vault, both for a climb), flat on the top, fingers over the far
+	// side, and stay there in the world as the body pulls up past them.
+	if e := mantleReach(m.me()); e > 0 {
+		mt := &m.me().Mantle
+		edge := mt.Dir.Cross(mathx.Vec3{0, 1, 0}).Normalize() // along the lip, to the right
+		lip := mt.Top.Sub(mt.Dir.Scale(0.14)).Add(mathx.Vec3{0, 0.012, 0})
+		ledge := func(side float32) hold {
+			return hold{at: lip.Add(edge.Scale(0.2 * side)), axis: edge, towards: mt.Dir, radius: 0.012}
+		}
+		blend := func(from hold, to hold) hold {
+			return hold{at: lerp3(from.at, to.at, e), axis: lerp3(from.axis, to.axis, e).Normalize(),
+				towards: lerp3(from.towards, to.towards, e).Normalize(), radius: from.radius + (to.radius-from.radius)*e}
+		}
+		fore = blend(fore, ledge(-1))
+		if !mt.Vault {
+			grip = blend(grip, ledge(1))
+		}
+	}
 	out = m.arm(out, c(rightShoulder), grip, dirC(rightPole))
 	out = m.arm(out, c(leftShoulder), fore, dirC(leftPole))
 	if pose.shell && reloadingNow {

@@ -31,10 +31,12 @@ type arenaTouch struct {
 	touchControls
 	fire, jump, aim, reload, swap touchButton
 	melee, throw, kind, pickUp    touchButton
-	gadget                        touchButton
+	gadget, crouch                touchButton
 	pause                         touchButton
 
-	aiming bool // AIM toggles the sights
+	aiming      bool    // AIM toggles the sights
+	crouched    bool    // CROUCH toggles crouching (tapped at a sprint, a slide)
+	sinceCrouch float32 // s since it was last toggled
 }
 
 const (
@@ -54,6 +56,7 @@ func newArenaTouch() *arenaTouch {
 		fire:   cornerButton("FIRE", 0.32, 0.38, 0.092, touchRed),
 		aim:    cornerButton("AIM", 0.12, 0.34, 0.07, touchBack),
 		jump:   cornerButton("JUMP", 0.11, 0.13, 0.068, touchOrange),
+		crouch: cornerButton("CROUCH", 0.3, 0.12, 0.06, touchBack),
 		reload: cornerButton("RELOAD", 0.62, 0.12, 0.058, touchBack),
 		swap:   cornerButton("SWAP", 0.78, 0.10, 0.055, touchBack),
 		gadget: cornerButton("GADGET", 0.11, 0.54, 0.055, touchBack),
@@ -66,8 +69,8 @@ func newArenaTouch() *arenaTouch {
 	// FIRE and AIM turn the camera as they drag: tap AIM and keep going to
 	// aim in one stroke, and shoot while you track.
 	t.fire.look, t.aim.look = true, true
-	t.jump.icon, t.aim.icon, t.reload.icon = icons.jump, icons.aim, icons.reload
-	t.buttons = []*touchButton{&t.fire, &t.jump, &t.aim, &t.reload, &t.swap,
+	t.jump.icon, t.aim.icon, t.reload.icon, t.crouch.icon = icons.jump, icons.aim, icons.reload, icons.crouch
+	t.buttons = []*touchButton{&t.fire, &t.jump, &t.aim, &t.reload, &t.swap, &t.crouch,
 		&t.melee, &t.throw, &t.kind, &t.pickUp, &t.gadget, &t.pause}
 	return t
 }
@@ -75,7 +78,7 @@ func newArenaTouch() *arenaTouch {
 // release lets go of everything, the sights included.
 func (t *arenaTouch) release() {
 	t.touchControls.release()
-	t.aiming = false
+	t.aiming, t.crouched = false, false
 }
 
 // show sets the buttons' icons from your loadout (ic: the HUD's icons) and
@@ -116,7 +119,7 @@ func (t *arenaTouch) show(me *arena.Player, pickup *arena.Pickup, ic *hudIcons) 
 // keyboard's and pad's, see mergeTouch) and returns the look, in radians
 // (yaw right, pitch up), and whether pause was tapped. The caller scales the
 // look for sensitivity and zoom.
-func (t *arenaTouch) read(in *input.State, w, h float32, me *arena.Player, c *arena.Input) (yaw, pitch float32, pause bool) {
+func (t *arenaTouch) read(in *input.State, w, h, dt float32, me *arena.Player, c *arena.Input) (yaw, pitch float32, pause bool) {
 	f := t.update(in, w, h)
 
 	// Move: a radial deadzone, rescaled so the edge of it is a crawl.
@@ -138,6 +141,18 @@ func (t *arenaTouch) read(in *input.State, w, h float32, me *arena.Player, c *ar
 	}
 	t.aim.lit = t.aiming
 	c.Aim = c.Aim || t.aiming
+
+	// CROUCH toggles; at a sprint it's a slide. Jumping stands you up, and so
+	// does sprinting on once a slide's over (as in THE FINALS).
+	t.sinceCrouch += dt
+	if t.crouch.pressed {
+		t.crouched, t.sinceCrouch = !t.crouched, 0
+	}
+	if t.jump.pressed || me.Dead || (c.Sprint && !me.Sliding && t.sinceCrouch > 0.3) {
+		t.crouched = false
+	}
+	t.crouch.lit = t.crouched
+	c.Crouch = c.Crouch || t.crouched
 	c.Fire = c.Fire || t.fire.down
 	c.FirePressed = c.FirePressed || t.fire.pressed
 	c.Jump = c.Jump || t.jump.pressed
