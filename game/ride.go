@@ -13,10 +13,11 @@ import (
 const (
 	rideBallRadius = 0.5
 	// Cruise speed: what the ride builds towards on the ground, rising from
-	// 20 m/s (72 km/h) at the top to ~50 m/s (180 km/h) far down.
-	rideCruiseBase = 20.0
+	// 22 m/s (79 km/h) at the top to ~52 m/s (187 km/h) far down.
+	rideCruiseBase = 22.0
 	rideCruiseGain = 30.0
-	rideTuckBonus  = 0.15  // W: cruise this much faster
+	rideTuckBonus  = 0.3   // W: cruise this much faster...
+	rideTuckBoost  = 0.8   // ... and push up to it this much harder
 	rideBrakeCut   = 0.6   // S: cruise this much slower...
 	rideBrakeDrag  = 0.012 // ... and scrub speed with quadratic drag
 	rideBoost      = 6.0   // m/s^2 at most of push towards the cruise speed
@@ -40,12 +41,18 @@ const (
 	rideBankMax  = 16.0
 
 	// Snowballs roll down the banks at a ball that stays up there.
-	snowballAfter   = 0.8  // seconds up on a bank before the first one
-	snowballEvery   = 1.4  // seconds between them
-	snowballMax     = 3    // alive at once
-	snowballLife    = 14.0 // seconds before one melts away
-	rideStartSpeed  = 7.0  // push off the cliff top
-	rideBodiesAhead = 2    // chunks of obstacle colliders kept ahead of the ball
+	snowballAfter = 0.4  // seconds up on a bank before the first one
+	snowballEvery = 0.6  // seconds between them
+	snowballMax   = 7    // alive at once
+	snowballSpeed = 16.0 // m/s down the bank
+	// In the narrows they tumble off the gorge walls at a ball that climbs
+	// one: sooner and more often, the walls being quick to climb.
+	snowballWall      = 1.5  // metres up a wall before they come
+	snowballWallAfter = 0.15 // seconds up it before the first
+	snowballWallEvery = 0.35 // seconds between them
+	snowballLife      = 14.0 // seconds before one melts away
+	rideStartSpeed    = 7.0  // push off the cliff top
+	rideBodiesAhead   = 2    // chunks of obstacle colliders kept ahead of the ball
 )
 
 // rideInput is one frame of control. Steer is -1 (left) .. 1 (right) relative
@@ -70,6 +77,7 @@ type obstacleTag struct{ kind course.ObstacleKind }
 type snowball struct {
 	body *physics.Body
 	age  float32
+	hit  bool // it has struck the ball
 }
 
 // ride is the Run mode's simulation: the ball on the generated course, the
@@ -220,7 +228,8 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 	}
 	speed := b.Velocity.Len()
 	if onGround && speed < cruise {
-		b.Velocity = b.Velocity.Add(r.heading.Scale(min(rideBoost, (cruise-speed)*0.8) * dt))
+		boost := float32(rideBoost) * (1 + rideTuckBoost*max(throttle, 0))
+		b.Velocity = b.Velocity.Add(r.heading.Scale(min(boost, (cruise-speed)*0.8) * dt))
 	}
 	if speed > cruise {
 		drag += rideOverDrag * (speed - cruise) / speed
@@ -259,6 +268,9 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 			r.crash("hit " + what)
 			ev.crashed = true
 			return ev
+		}
+		if sb, ok := other.UserData.(*snowball); ok {
+			sb.hit = true
 		}
 		if hit.Speed > 3 {
 			ev.landed = max(ev.landed, hit.Speed)
@@ -343,15 +355,24 @@ func (r *ride) bankPush(dt float32) {
 // there, ages them and clears away old ones.
 func (r *ride) updateSnowballs(dt float32) {
 	out, side := r.bankOut()
-	if out > rideBankFree+3 && r.course.ValleyWeight(r.s()) > 0.99 {
+	up := out > rideBankFree+3 && r.course.ValleyWeight(r.s()) > 0.99
+	wall, wallSide, narrows := r.wallOut()
+	if narrows && wall > snowballWall {
+		up, out, side = true, wall, wallSide
+	}
+	if up {
 		r.onBank += dt
 	} else {
 		r.onBank = 0
 	}
 	r.nextBall -= dt
-	if r.onBank > snowballAfter && r.nextBall <= 0 && len(r.snowballs) < snowballMax {
-		r.spawnSnowball(side)
-		r.nextBall = snowballEvery
+	after, every := float32(snowballAfter), float32(snowballEvery)
+	if narrows {
+		after, every = snowballWallAfter, snowballWallEvery
+	}
+	if r.onBank > after && r.nextBall <= 0 && len(r.snowballs) < snowballMax {
+		r.spawnSnowball(side, narrows, out)
+		r.nextBall = every
 	}
 	alive := r.snowballs[:0]
 	for _, sb := range r.snowballs {
@@ -367,23 +388,71 @@ func (r *ride) updateSnowballs(dt float32) {
 	r.snowballs = alive
 }
 
-// spawnSnowball starts a snowball further up the bank and a little ahead,
-// already rolling down across the ball's line.
-func (r *ride) spawnSnowball(side float32) {
+// wallOut is, in the narrows, how far the ball has climbed past the gorge
+// floor's edge (metres, positive up a wall) and which wall (+1 for +x).
+func (r *ride) wallOut() (out, side float32, narrows bool) {
+	s := r.s()
+	if k, ok := r.course.SectionAt(s); !ok || k.Kind != course.Narrows {
+		return 0, 0, false
+	}
+	u := r.ball.Position[0] - r.course.PathCentre(s)
+	side = 1
+	if u < 0 {
+		side = -1
+	}
+	return abs32(u) - r.course.PathHalfWidth(s), side, true
+}
+
+// spawnSnowball starts a snowball further up the bank (or, in the narrows,
+// the gorge wall) the ball is on, out metres past the floor's edge, and a
+// little ahead, already rolling down across the ball's line.
+func (r *ride) spawnSnowball(side float32, narrows bool, out float32) {
 	if r.rng == nil {
 		r.rng = rand.New(rand.NewPCG(r.course.Seed, 0x5a0b))
 	}
-	// Timed to cross the ball's line about 1.5 s later: it starts ~12 m up
-	// the bank, rolling down at ~8 m/s while drifting downhill at half the
-	// ball's speed, so it starts 0.75 s of the ball's speed ahead.
+	// Timed to cross the ball's line about 1 s later: it starts ~16 m up
+	// the bank, rolling down at snowballSpeed while drifting downhill at half
+	// the ball's speed, so it starts half a second of the ball's speed ahead.
 	b := r.ball
-	ahead := 8 + 0.75*b.Velocity.Len() + 4*r.rng.Float32()
+	ahead := 6 + 0.5*b.Velocity.Len() + 6*r.rng.Float32()
 	s := r.s() + ahead
-	x := b.Position[0] + side*(10+3*r.rng.Float32())
+	x := b.Position[0] + side*(13+5*r.rng.Float32())
 	radius := 1.6 + 0.7*r.rng.Float32()
+	vel := mathx.Vec3{-side * snowballSpeed * (0.85 + 0.3*r.rng.Float32()), 0, b.Velocity[2] * 0.5}
+	if narrows {
+		// A gorge wall is too steep (sheer in places) to roll one down from
+		// far off: it would drop off a ledge and bounce clear. It tumbles
+		// off the wall just above the ball instead, keeping pace with it,
+		// and falls in on it, shoving it back onto the floor. Smaller, so
+		// the floor isn't blocked once it's down.
+		radius = 1.1 + 0.5*r.rng.Float32()
+		z := b.Position[2] - 0.5*r.rng.Float32()
+		vel = b.Velocity.Add(mathx.Vec3{-side * snowballSpeed * 0.6, -3, 0})
+		// Beside and a little above the ball, stepped in off the wall until
+		// clear of it.
+		y := b.Position[1] + 0.6*radius + 0.3
+		for off := radius + 1.2; off > 0; off -= 0.25 {
+			x = b.Position[0] + side*off
+			if r.course.Height(x, z)+radius+0.2 < y {
+				break
+			}
+		}
+		body := physics.NewSphere(radius, 40*radius)
+		body.Position, body.Velocity = mathx.Vec3{x, y, z}, vel
+		r.addSnowball(body)
+		return
+	}
 	body := physics.NewSphere(radius, 40*radius) // heavy: it shoves the ball
-	body.Position = mathx.Vec3{x, r.course.Height(x, -s) + radius + 0.5, -s}
-	body.Velocity = mathx.Vec3{-side * 8, 0, b.Velocity[2] * 0.5}
+	// Clear of the ground: on a steep face a sphere touching it sits much
+	// higher over the point below its centre than its radius.
+	grade := abs32(r.course.Height(x+0.5, -s)-r.course.Height(x-0.5, -s)) + abs32(r.course.Height(x, -s-0.5)-r.course.Height(x, -s+0.5))
+	lift := radius*float32(math.Sqrt(float64(1+grade*grade))) + 0.3
+	body.Position = mathx.Vec3{x, r.course.Height(x, -s) + lift, -s}
+	body.Velocity = vel
+	r.addSnowball(body)
+}
+
+func (r *ride) addSnowball(body *physics.Body) {
 	body.Restitution = 0.2
 	body.Friction = 0.8
 	sb := &snowball{body: body}

@@ -112,3 +112,46 @@ func TestSectionsAreRideable(t *testing.T) {
 		}
 	}
 }
+
+// TestSnowballsKnockAWallRiderBackIntoTheNarrows holds the ball against a
+// gorge wall, climbing it: snowballs tumble off the wall into it and knock
+// it back onto the gorge floor, again and again.
+func TestSnowballsKnockAWallRiderBackIntoTheNarrows(t *testing.T) {
+	c := course.New(12)
+	k := firstSection(t, c, course.Narrows)
+	r := newRide(c, noObstacles)
+	s := k.Start + 110 // past the pinch, in the gorge proper
+	rideFrom(r, s, c.PathHalfWidth(s)+3, 25)
+	hits, knocked := 0, 0
+	var top float32
+	lastHit := float32(-10)
+	for i := 0; i < 5*60 && !r.crashed && r.s() < k.End()-100; i++ {
+		r.step(1.0/60, rideInput{steer: 1}) // keep trying to climb the right wall
+		for _, sb := range r.snowballs {
+			if sb.hit && sb.age >= 0 {
+				hits++
+				sb.age = -1000 // (counted)
+				lastHit = r.time
+			}
+		}
+		out, _, _ := r.wallOut()
+		top = max(top, out)
+		if out < 0 && r.time-lastHit < 1 {
+			knocked++ // back on the floor, just after a hit
+			lastHit = -10
+		}
+	}
+	t.Logf("%d hits, knocked back onto the floor %d times; at most %.1f m up the wall", hits, knocked, top)
+	if hits == 0 {
+		t.Fatal("no snowballs struck a ball climbing the gorge wall")
+	}
+	if knocked < 2 {
+		t.Errorf("knocked back onto the floor %d times in 5 s of climbing the wall; want it again and again", knocked)
+	}
+	if top > 8 {
+		t.Errorf("the ball got %.1f m up the wall: the snowballs should keep it low", top)
+	}
+	if r.crashed {
+		t.Errorf("snowballs should knock you about, not end the run: %s", r.cause)
+	}
+}

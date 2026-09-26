@@ -84,8 +84,10 @@ func TestHittingAnObstacleEndsTheRun(t *testing.T) {
 			}
 		}
 	}
-	r.ball.Position = rock.Centre.Add(mathx.Vec3{0, 0, 6})
-	r.ball.Velocity = mathx.Vec3{0, 0, -15}
+	at := rock.Centre.Add(mathx.Vec3{0, 0, 6})
+	at[1] = r.course.Height(at[0], at[2]) + rideBallRadius // on the snow, uphill of it
+	r.ball.Position = at
+	r.ball.Velocity = mathx.Vec3{0, -15 * course.GradeAt(-at[2]), -15} // down the slope
 	r.distance = 0
 	for i := 0; i < 120 && !r.crashed; i++ {
 		r.step(1.0/60, rideInput{})

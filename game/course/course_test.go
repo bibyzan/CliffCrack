@@ -133,8 +133,11 @@ func TestStartIsAboveTheCliff(t *testing.T) {
 
 func TestItGetsSteeperAndHarder(t *testing.T) {
 	c := New(21)
-	if a, b := GradeAt(100), GradeAt(3000); b < a*1.5 {
-		t.Errorf("grade %v at 100 m vs %v at 3 km: the slope should steepen", a, b)
+	if a, b := GradeAt(dropLength), GradeAt(3000); b < a*1.5 {
+		t.Errorf("grade %v after the drop vs %v at 3 km: the slope should steepen", a, b)
+	}
+	if a, b := GradeAt(10), GradeAt(dropLength); a < b+0.5 {
+		t.Errorf("grade %v on the drop vs %v after it: the drop should be much steeper", a, b)
 	}
 	// Average obstacles per plain-valley chunk, early vs late.
 	count := func(from, to int) float64 {

@@ -13,7 +13,7 @@ import (
 func camOnFlat(t *testing.T) (*ride, *chaseCam) {
 	t.Helper()
 	r := newTestRide(1)
-	const s = 60
+	const s = 400 // past the steep drop, before any section
 	x := r.course.Centre(s)
 	r.ball.Position = mathx.Vec3{x, r.course.Height(x, -s) + rideBallRadius, -s}
 	r.ball.Teleported()
