@@ -118,3 +118,21 @@ func TestFlipWindingAndIcosphere(t *testing.T) {
 		t.Error("flipped normals should point inwards")
 	}
 }
+
+// A sphere has no zero-area triangles at its poles: their facing would be
+// down to rounding (which differs by CPU: arm64 fuses multiply-adds), and
+// they'd be drawn for nothing.
+func TestSphereHasNoDegenerateTriangles(t *testing.T) {
+	for _, rings := range []int{2, 12, 16} {
+		m := Sphere(1, 24, rings)
+		for i := 0; i < len(m.Indices); i += 3 {
+			a, b, c := m.Vertices[m.Indices[i]], m.Vertices[m.Indices[i+1]], m.Vertices[m.Indices[i+2]]
+			if b.Position.Sub(a.Position).Cross(c.Position.Sub(a.Position)).Len() < 1e-6 {
+				t.Fatalf("Sphere(1, 24, %d): triangle %d has no area", rings, i/3)
+			}
+		}
+		if want := 24 * 2 * (rings - 1) * 3; len(m.Indices) != want {
+			t.Errorf("Sphere(1, 24, %d): %d indices, want %d (two triangles a quad, one at each pole)", rings, len(m.Indices), want)
+		}
+	}
+}

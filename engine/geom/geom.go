@@ -133,12 +133,16 @@ func Sphere(radius float32, segments, rings int) MeshData {
 	var m MeshData
 	for r := 0; r <= rings; r++ {
 		theta := math.Pi * float64(r) / float64(rings) // 0 at the north pole
+		sin, cos := math.Sin(theta), math.Cos(theta)
+		if r == 0 || r == rings {
+			sin = 0 // exactly on the axis (sin(pi) isn't quite 0)
+		}
 		for s := 0; s <= segments; s++ {
 			phi := 2 * math.Pi * float64(s) / float64(segments)
 			n := mathx.Vec3{
-				float32(math.Sin(theta) * math.Cos(phi)),
-				float32(math.Cos(theta)),
-				float32(math.Sin(theta) * math.Sin(phi)),
+				float32(sin * math.Cos(phi)),
+				float32(cos),
+				float32(sin * math.Sin(phi)),
 			}
 			m.Vertices = append(m.Vertices, Vertex{
 				Position: n.Scale(radius),
@@ -152,7 +156,14 @@ func Sphere(radius float32, segments, rings int) MeshData {
 		for s := uint32(0); s < uint32(segments); s++ {
 			a := r*stride + s // this ring
 			b := a + stride   // ring below
-			m.Indices = append(m.Indices, a, a+1, b, a+1, b+1, b)
+			// At the poles one of the quad's triangles has no area (two of
+			// its corners are the pole): leave it out.
+			if r > 0 {
+				m.Indices = append(m.Indices, a, a+1, b)
+			}
+			if r < uint32(rings)-1 {
+				m.Indices = append(m.Indices, a+1, b+1, b)
+			}
 		}
 	}
 	return m
