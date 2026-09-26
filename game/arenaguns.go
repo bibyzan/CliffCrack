@@ -105,7 +105,19 @@ type paintball struct {
 	colour   [4]float32
 	age      float32
 	player   bool // it hits a player
+	atMe     bool // it hits the local player (their hit sounds cover it)
+	mine     bool // the local player fired it
+	near     bool // its near-miss splat has played (see nearMiss)
 }
+
+// A paintball landing within nearMissRange of your head is heard close up:
+// it fizzes past and SPLATs, from where it lands. The sound's fizz comes
+// first, so it's started nearMissLead before the ball lands.
+const (
+	nearMissRange = 2.6   // m
+	nearMissLead  = 0.055 // s
+	nearMissGap   = 0.13  // s at least between them (a burst, a shotgun blast)
+)
 
 // splat is a burst of paint left on a surface: a blob with a couple of
 // smaller drops round it.
@@ -167,9 +179,21 @@ func splatSize(k arena.WeaponKind) float32 {
 // where they land, and ages the splats (they go with the piece they're on).
 func (m *Arena) updatePaint(dt float32) {
 	heard := 0
+	eye := m.eye()
 	for i := range m.balls {
 		b := &m.balls[i]
 		b.age += dt
+		// Someone else's paint about to land right by you: the close SPLAT,
+		// louder the closer.
+		if !b.near && !b.mine && !b.atMe && !m.me().Dead {
+			if d := b.to.Sub(eye).Len(); d < nearMissRange && b.to.Sub(b.from).Len()-b.age*b.speed < b.speed*nearMissLead {
+				b.near = true
+				if m.elapsed-m.lastNear >= nearMissGap {
+					m.lastNear = m.elapsed
+					m.playAt(m.sfx.nearSplat, b.to, 1-0.35*d/nearMissRange)
+				}
+			}
+		}
 		if b.age*b.speed < b.to.Sub(b.from).Len() {
 			continue
 		}
@@ -179,7 +203,7 @@ func (m *Arena) updatePaint(dt float32) {
 			}
 			m.splatCount++
 			m.splats = append(m.splats, newSplat(m.rng, b.to, b.normal, b.chunk, b.size*5, b.colour, m.splatCount))
-			if heard < 2 { // a burst of rifle fire doesn't need every splut
+			if heard < 2 && !b.near { // a burst of rifle fire doesn't need every splut
 				m.playAt(m.sfx.splat, b.to, 0.7)
 				heard++
 			}

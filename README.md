@@ -575,7 +575,16 @@ rematch on a new site.
   (`audio.Synth`: layers of swept tones and filtered noise, with an echo for the chasm):
   gas pops for the markers, a wet splut where paint lands, a tink off armour and a
   glassy shatter when it pops, a crack, crunch, tinkle or clang for each material, and
-  booms and collapses that echo off the walls. The bot is a blocky soldier whose legs, head and
+  booms and collapses that echo off the walls. Paint landing within 2.6 m of your head
+  (someone else's) fizzes past and SPLATs, from where it lands. The rifle's shot is a
+  tuned pop with body under a crisp transient, in four takes so a burst doesn't repeat
+  itself; each player's gun is a choke group, so a shot cuts off the last one's tail.
+  Your armour recharging is a soft swell and a quiet chime.
+- **The mixer** (`engine/audio`) starts each sound as far into the next block the
+  device reads as it was triggered after the last read began, so rapid fire keeps its
+  rhythm rather than snapping to block boundaries (a stutter). It caps voices at 40
+  (fading the oldest), and the mix goes through a limiter rather than being clipped:
+  a pile-up of sounds is turned down smoothly instead of crackling. The bot is a blocky soldier whose legs, head and
   weapon follow its movement and aim; it flashes when hit and topples when it dies.
 
 #### The bot

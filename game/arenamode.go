@@ -83,6 +83,7 @@ type arenaSounds struct {
 	magOut, magIn, charge, shellIn, pump                 *audio.Sound
 	elbow, punch, hook, catch, release, draw             *audio.Sound
 	slide, vault, climb                                  *audio.Sound
+	nearSplat                                            *audio.Sound
 	guns                                                 [len(arena.WeaponNames)]*audio.Sound
 	breaks                                               [arena.MaterialCount]*audio.Sound
 }
@@ -171,6 +172,7 @@ type Arena struct {
 	reloadT    float32          // how far through the reload it was last frame
 	lastPump   float32          // the shotgun's time since its last shot, last frame
 	lastBolt   float32          // ... and the sniper's
+	lastNear   float32          // when (elapsed) the last near-miss splat played
 }
 
 func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64, practice bool) (*Arena, error) {
@@ -543,7 +545,7 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 	m.popped *= float32(math.Exp(-1.5 * float64(dt)))
 	// Your armour starting to come back.
 	if charging := me.Shield < arena.MaxShield && me.Shield > 0 && !me.Dead && me.Shield > m.lastShield; charging && !m.charging {
-		m.play(m.sfx.recharge, 0.6)
+		m.play(m.sfx.recharge, 0.25)
 		m.charging = true
 	} else if !charging {
 		m.charging = false
@@ -594,16 +596,22 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		if shotSounds < 2 { // a shotgun blast is one sound, not twelve
 			shotSounds++
 			if snd := m.sfx.guns[s.Weapon]; snd != nil {
+				// Each player's gun is a choke group: a shot cuts off the
+				// tail of their last, so rapid fire stays a run of clean
+				// shots.
+				group := chokeGuns + s.By.ID
 				if s.By == me {
-					m.play(snd, 0.8)
+					m.playChoked(snd, 0.8, 0, group)
 				} else {
-					m.playAt(snd, s.From, 0.9)
+					vol, pan := m.placeSound(s.From, 0.9)
+					m.playChoked(snd, vol, pan, group)
 				}
 			}
 		}
 		if g := arena.Guns[s.Weapon]; g != nil && len(m.balls) < maxBalls {
 			m.balls = append(m.balls, paintball{from: from, to: s.To, normal: s.Normal, chunk: s.Chunk, speed: g.BallSpeed,
-				size: ballSize(s.Weapon), colour: paintColor[team(s.By)], player: s.Victim != nil})
+				size: ballSize(s.Weapon), colour: paintColor[team(s.By)], player: s.Victim != nil,
+				mine: s.By == me, atMe: s.Victim == me})
 			if s.Victim != nil {
 				m.balls[len(m.balls)-1].normal = mathx.Vec3{}
 			}
@@ -849,13 +857,29 @@ func (m *Arena) playAt(s *audio.Sound, pos mathx.Vec3, volume float32) {
 	if m.sound == nil {
 		return
 	}
+	vol, pan := m.placeSound(pos, volume)
+	m.sound.Play(s, vol, pan)
+}
+
+// placeSound is the volume and pan of a sound at pos, from the view.
+func (m *Arena) placeSound(pos mathx.Vec3, volume float32) (vol, pan float32) {
 	p := m.view().TransformPoint(pos) // camera space: +X right
 	dist := p.Len()
-	pan := float32(0)
 	if dist > 0 {
 		pan = p[0] / dist
 	}
-	m.sound.Play(s, volume/(1+0.04*dist), pan)
+	return volume / (1 + 0.04*dist), pan
+}
+
+// chokeGuns is the first of the choke groups for players' guns (one each,
+// by player ID).
+const chokeGuns = 100
+
+// playChoked plays s in a choke group (see audio.Mixer.PlayChoked).
+func (m *Arena) playChoked(s *audio.Sound, volume, pan float32, group int) {
+	if m.sound != nil {
+		m.sound.PlayChoked(s, volume, pan, group)
+	}
 }
 
 // eye is the camera position: the local player's eye, sinking to the

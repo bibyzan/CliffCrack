@@ -70,17 +70,85 @@ func TestStopLoopAndVolume(t *testing.T) {
 	m.Stop(12345) // unknown: no-op
 }
 
-func TestReadClampsAndFillsWholeFrames(t *testing.T) {
+func TestReadLimitsAndFillsWholeFrames(t *testing.T) {
 	m := NewMixer()
 	m.Play(constant(2, 0.9), 1, -1)
-	m.Play(constant(2, 0.9), 1, -1) // sums to 1.8: must clamp to 1
+	m.Play(constant(2, 0.9), 1, -1) // sums to 1.8: must be limited, not clipped
 	p := make([]byte, 21)           // 2 whole frames (16 bytes) + junk
 	n, err := m.Read(p)
 	if err != nil || n != 16 {
 		t.Fatalf("Read = %d, %v; want 16, nil", n, err)
 	}
-	if l := math.Float32frombits(binary.LittleEndian.Uint32(p[0:])); l != 1 {
-		t.Errorf("left sample = %v, want clamped 1", l)
+	if l := math.Float32frombits(binary.LittleEndian.Uint32(p[0:])); l > limitCeil+1e-4 || l < limitCeil-0.01 {
+		t.Errorf("left sample = %v, want held at the limiter's ceiling %v", l, float32(limitCeil))
+	}
+}
+
+// The limiter turns a loud pile-up down smoothly and lets it back up: it
+// never clips, and quiet sounds after it come back to full level.
+func TestLimiterRecovers(t *testing.T) {
+	m := NewMixer()
+	loud := constant(SampleRate/10, 0.9)
+	for range 4 {
+		m.Play(loud, 1, 0) // 4 x 0.9 x -3 dB: well over
+	}
+	p := make([]byte, 8*SampleRate/10)
+	m.Read(p)
+	for i := 0; i < len(p); i += 4 {
+		if v := math.Float32frombits(binary.LittleEndian.Uint32(p[i:])); v > limitCeil+1e-4 {
+			t.Fatalf("sample %d = %v: over the ceiling", i/4, v)
+		}
+	}
+	m.Play(constant(SampleRate/2, 0.3), 1, 0)
+	q := make([]byte, 8*SampleRate/2)
+	m.Read(q)
+	last := math.Float32frombits(binary.LittleEndian.Uint32(q[len(q)-8:]))
+	want := float32(0.3 * math.Sqrt2 / 2 * busGain)
+	if math.Abs(float64(last-want)) > 0.01 {
+		t.Errorf("a quiet sound after the pile-up plays at %v, want back to %v", last, want)
+	}
+}
+
+// A choked sound cuts off the last one in its group (after a short fade);
+// other groups are left alone.
+func TestChoke(t *testing.T) {
+	m := NewMixer()
+	long := constant(SampleRate, 0.5)
+	m.PlayChoked(long, 1, 0, 1)
+	m.PlayChoked(long, 1, 0, 2)
+	m.PlayChoked(long, 1, 0, 1) // cuts the first
+	m.Mix(make([]float32, 2*fadeFrames+2))
+	if n := m.Playing(); n != 2 {
+		t.Errorf("%d voices after choking one of three, want 2", n)
+	}
+}
+
+// Variants: every take gets played.
+func TestVariants(t *testing.T) {
+	takes := []*Sound{constant(1, 0.1), constant(1, 0.2), constant(1, 0.3)}
+	s := Variants(3, func(i int) *Sound { return takes[i] })
+	m := NewMixer()
+	heard := map[float32]bool{}
+	for range 60 {
+		m.Play(s, 1, -1)
+		out := make([]float32, 2)
+		m.Mix(out)
+		heard[float32(math.Round(float64(out[0])*10)/10)] = true
+	}
+	if len(heard) != 3 {
+		t.Errorf("heard %d of 3 takes in 60 plays", len(heard))
+	}
+}
+
+// Past maxVoices the oldest is faded out, so a flood can't pile up forever.
+func TestVoiceCap(t *testing.T) {
+	m := NewMixer()
+	for range maxVoices + 10 {
+		m.Play(constant(SampleRate, 0.01), 1, 0)
+	}
+	m.Mix(make([]float32, 2*fadeFrames+2))
+	if n := m.Playing(); n > maxVoices {
+		t.Errorf("%d voices playing, want at most %d", n, maxVoices)
 	}
 }
 
@@ -142,5 +210,29 @@ func TestBlip(t *testing.T) {
 	}
 	if peak <= 0.1 || peak > 0.5 {
 		t.Errorf("peak = %v, want (0.1, 0.5]", peak)
+	}
+}
+
+// A sound started between the device's reads starts as far into the next
+// block as it came after the last read began, so rapid fire keeps its
+// rhythm instead of snapping to block boundaries.
+func TestStartsKeepTheirTiming(t *testing.T) {
+	m := NewMixer()
+	block := SampleRate / 25 // 40 ms reads
+	m.Read(make([]byte, 8*block))
+	time.Sleep(20 * time.Millisecond) // halfway to the next read
+	m.Play(constant(block, 0.5), 1, 0)
+	out := make([]float32, 2*block)
+	m.Mix(out)
+	first := -1
+	for f := range block {
+		if out[2*f] != 0 {
+			first = f
+			break
+		}
+	}
+	// Scheduling isn't exact: half a block, give or take a few ms.
+	if lo, hi := block/2-SampleRate*4/1000, block/2+SampleRate*12/1000; first < lo || first > hi {
+		t.Errorf("started %d frames into the block, want about %d (half way)", first, block/2)
 	}
 }

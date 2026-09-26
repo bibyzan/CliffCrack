@@ -84,8 +84,13 @@ func newArenaSounds() arenaSounds {
 		// over a thump; coming back, a rising shimmer.
 		armour: audio.Synth(0.3, tone(audio.Sine, 2600, 2300, 0, 110, 32, 0.8), tone(audio.Sine, 3900, 3700, 0, 80, 40, 0.3), hiss(0, 40, 90, 0.4, 0, 5000)),
 		pop:    audio.Synth(0.9, hiss(0, 320, 11, 1, 0, 2800), tone(audio.Sine, 1500, 380, 0, 260, 10, 0.7), tone(audio.Sine, 130, 60, 0, 200, 15, 0.8)),
-		recharge: audio.Synth(0.28, audio.Layer{Wave: audio.Triangle, Start: 300, End: 1200, Length: ms(420), Attack: ms(80), Decay: 3, Volume: 0.8},
-			audio.Layer{Wave: audio.Sine, Start: 2400, End: 2400, Delay: ms(120), Length: ms(300), Attack: ms(60), Decay: 6, Volume: 0.3, Tremolo: 18}),
+		// ... coming back, a soft airy swell under a warm rising tone, and a
+		// quiet chime as it settles: heard, not startling.
+		recharge: audio.Synth(0.22,
+			audio.Layer{Wave: audio.Noise, Length: ms(520), Attack: ms(260), Decay: 5, Volume: 0.3, LowPass: 2000, HighPass: 350},
+			audio.Layer{Wave: audio.Sine, Start: 392, End: 587, Length: ms(480), Attack: ms(220), Decay: 3, Volume: 0.45},
+			audio.Layer{Wave: audio.Sine, Start: 1175, End: 1175, Delay: ms(300), Length: ms(420), Attack: ms(12), Decay: 9, Volume: 0.18},
+			audio.Layer{Wave: audio.Sine, Start: 1760, End: 1760, Delay: ms(300), Length: ms(320), Attack: ms(12), Decay: 12, Volume: 0.07}),
 		// Grenades: the pin and a whoosh of the throw; a sticky's wet slap
 		// and arming chirp as it sticks; its bright burst of paint.
 		throw: audio.Synth(0.4, click(0, 0.8), audio.Layer{Wave: audio.Noise, Delay: ms(60), Length: ms(220), Attack: ms(80), Decay: 12, Volume: 1, LowPass: 2400, HighPass: 300}),
@@ -104,11 +109,36 @@ func newArenaSounds() arenaSounds {
 		pickup: audio.Synth(0.45, hiss(0, 120, 25, 0.5, 3000, 700), click(90, 1), tone(audio.Sine, 700, 900, 90, 60, 40, 0.4), click(160, 0.8)),
 		// Paint landing on a surface: a wet splut.
 		splat: audio.Synth(0.25, hiss(0, 55, 60, 1, 2200, 300), tone(audio.Sine, 420, 200, 0, 50, 60, 0.5)),
+		// Paint landing right by you: a ball fizzing past, then a big wet
+		// SPLAT: a heavy slap with a thud in it and paint spattering.
+		nearSplat: audio.Variants(3, func(i int) *audio.Sound {
+			return audio.SynthTake(i, 0.6,
+				audio.Layer{Wave: audio.Noise, Length: ms(60), Attack: ms(45), Decay: 20, Volume: 0.35, LowPass: 7000, HighPass: 2500}, // the fizz past
+				hiss(55, 18, 140, 0.9, 0, 1400),               // the slap
+				hiss(55, 150, 26, 1, 1500, 90),                // the splat
+				tone(audio.Sine, 190, 60, 55, 70, 38, 0.9),    // the thud
+				hiss(95, 120, 30, 0.35, 5000, 1800),           // spatter
+				tone(audio.Sine, 900, 380, 110, 45, 55, 0.18)) // a drip
+		}),
 	}
 
 	// The markers: gas pops with a click of the trigger, weightier up the
 	// range; the shotgun racks its pump; the sniper cracks and echoes.
-	s.guns[arena.WeaponRifle] = audio.Synth(0.32, hiss(0, 55, 60, 1, 6500, 1200), tone(audio.Sine, 240, 120, 0, 45, 55, 0.6), click(0, 0.5))
+	//
+	// The rifle fires every 75 ms, so each shot has to be short and read
+	// as a shot: a crisp transient, a tuned pop with body under it, a puff
+	// of gas, and the bolt's tick. Four takes, a little apart in pitch, so
+	// a burst isn't one sound repeating (and each cuts the last off: see
+	// the choke where they're played).
+	s.guns[arena.WeaponRifle] = audio.Variants(4, func(i int) *audio.Sound {
+		k := float32([]float64{1, 1.05, 0.96, 1.02}[i])
+		return audio.SynthTake(i, 0.42,
+			hiss(0, 7, 300, 0.55, 0, 3500),                 // the transient
+			tone(audio.Sine, 560*k, 190*k, 0, 38, 70, 1),   // the pop
+			tone(audio.Sine, 150*k, 75*k, 0, 60, 45, 0.55), // the body
+			audio.Layer{Wave: audio.Noise, Length: ms(65), Attack: ms(3), Decay: 50, Volume: 0.4, LowPass: 4200, HighPass: 900}, // gas
+			click(28, 0.22)) // the bolt
+	})
 	s.guns[arena.WeaponPistol] = audio.Synth(0.5, hiss(0, 80, 42, 1, 7500, 700), tone(audio.Sine, 190, 85, 0, 80, 32, 0.8), click(0, 0.6))
 	s.guns[arena.WeaponShotgun] = audio.Synth(0.9, hiss(0, 260, 16, 1, 3200, 0), tone(audio.Sine, 95, 42, 0, 220, 12, 1),
 		hiss(0, 60, 50, 0.5, 0, 2000), click(360, 0.7), hiss(380, 70, 45, 0.4, 3000, 800), click(470, 0.8))

@@ -36,13 +36,17 @@ type Layer struct {
 // Synth mixes layers into a sound, softly saturated and scaled so its
 // loudest moment is at volume. Noise is seeded, so a recipe always sounds
 // the same.
-func Synth(volume float32, layers ...Layer) *Sound {
+func Synth(volume float32, layers ...Layer) *Sound { return SynthTake(0, volume, layers...) }
+
+// SynthTake is Synth with its noise seeded by take: another take of the same
+// recipe, alike but not identical (for Variants).
+func SynthTake(take int, volume float32, layers ...Layer) *Sound {
 	var n int
 	for _, l := range layers {
 		n = max(n, int((l.Delay+l.Length).Seconds()*SampleRate))
 	}
 	mono := make([]float32, n)
-	rng := rand.New(rand.NewPCG(uint64(n), 0x5eed))
+	rng := rand.New(rand.NewPCG(uint64(n), 0x5eed+uint64(take)))
 	for _, l := range layers {
 		addLayer(mono, l, rng)
 	}
