@@ -18,7 +18,7 @@ const (
 	touchMargin   = 0.09 // gap to the screen's edges (clears the rounded corners)
 	touchStickR   = 0.13 // how far the stick's knob travels
 	touchKnobR    = 0.055
-	touchStickRim = 2.0 // a fixed stick is taken by a thumb landing this many radii from its centre
+	touchStickRim = 2.0  // a fixed stick is taken by a thumb landing this many radii from its centre
 	touchHitSlop  = 1.35 // buttons take touches this much further out than they're drawn
 	touchLookSens = 3.0  // radians of camera turn per screen height of drag
 )

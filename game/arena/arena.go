@@ -764,3 +764,10 @@ func clamp(v, lo, hi float32) float32 { return max(lo, min(hi, v)) }
 func wrap(a float32) float32 {
 	return float32(math.Mod(math.Mod(float64(a)+math.Pi, 2*math.Pi)+2*math.Pi, 2*math.Pi) - math.Pi)
 }
+
+// WalkSpeed and SprintSpeed are how fast players move on foot (m/s), for
+// animating them.
+const (
+	WalkSpeed   = walkSpeed
+	SprintSpeed = sprintSpeed
+)

@@ -83,9 +83,9 @@ func (r *Run) UI(b *ui.Builder, in *input.State) {
 
 	// The speedometer sits bottom left, or bottom centre when the touch
 	// stick has that corner.
-	speedoX, speedoSize, powersY := 0.5+(0.015-0.5)*r.settings.hudBox(), float32(210), float32(0.66)
+	speedoX, speedoSize, powersY := 0.5+(0.015-0.5)*r.settings.hudBox(), float32(260), float32(0.8)
 	if r.touchOn {
-		speedoX, speedoSize, powersY = 0.5, 150, 0.7
+		speedoX, speedoSize, powersY = 0.5, 210, 0.76
 		r.touch.ui(b)
 	}
 	if !r.ride.crashed {

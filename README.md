@@ -237,9 +237,10 @@ Specifics:
   controls hide while a gamepad is in use.
 - **Touch controls** in the Arena (and the Firing Range), after phone shooters: the stick
   moves (pushed all the way forward, it sprints). The right thumb rests on FIRE, low in the
-  corner, with the other buttons in an arc round it (jump, aim, which toggles, reload,
-  swap, grenade, frag/sticky, hammer), so the rest of the right half is free for looking
-  around, and FIRE looks too as it drags, so you can aim while you shoot. The buttons have
+  corner, with AIM (a toggle) beside it towards the edge and JUMP below that; the rest keep
+  to the edges, RELOAD and SWAP low along the bottom and HAMMER, the grenade and
+  frag/sticky up the right side, so the middle of the right half is free for looking
+  around. FIRE looks too as it drags, so you can aim while you shoot. The buttons have
   icons, and some show your loadout: FIRE the gun in hand, SWAP the other one, the grenade
   button the kind it'll throw and the small one beside it the kind to switch to. PICK UP
   appears, showing what's there, when something's at your feet. Touch aiming gets the
@@ -438,8 +439,8 @@ rematch on a new site.
   later (200, 4 m): stuck to someone, that's them done.
 - **The guns are paintball markers**, after Halo: Combat Evolved's loadout: bright
   plastic bodies with a paint hopper fed in from the side (clear of the sights), a gas
-  tank, rails, grips and guards, and proper sights: a holographic sight with a red ring
-  reticle on the rifle, three-dot tritium irons on the pistol, a big ghost ring and a
+  tank, rails, grips and guards, and proper sights: a mini reflex sight on the rifle (a
+  squat body on a rail clamp, a hooded amber window with a red dot), three-dot tritium irons on the pistol, a big ghost ring and a
   glowing fibre bead on the shotgun, a scope on the sniper and a ladder on the
   launcher. Shots are instant, but you see each paintball fly out at the gun's speed and
   burst into a splat of the shooter's colour (yours cyan, theirs orange) that stays for
@@ -460,14 +461,24 @@ rematch on a new site.
   them back. Against a structure it
   spreads 120 damage over a 0.75 m radius, enough to hole brick or wood in one hit;
   concrete takes two.
-- **Rifle**: 48 rounds (and 144 in reserve) at 800 rpm, 9 a ball. Wild from the hip and blooms fast;
-  its climb has to be pulled down.
-- **Pistol**: 12 rounds (48), one per click, 40 a ball. Three to the body pop armour,
-  then one to the head kills. 2× zoom.
-- **Shotgun** (a pickup): 8 pumps (16) of 12 pellets (14 each). Point-blank it all but kills
-  through full armour; past 7 m it falls away fast. Its pellets shred walls.
+- **Balance**, after Halo, tuned round the rifle (`game/arena/balance_test.go` holds
+  it): the rifle takes most of a magazine, and the pistol kills quicker for a steady
+  hand, so it's the thing to draw when the rifle runs dry.
+- **Rifle**: 36 rounds (and 108 in reserve) at 800 rpm, 7 a ball (×1.25 to the head):
+  24 to the body or 19 to the head, most of a magazine as you really hit. Wild from
+  the hip and blooms fast; its climb has to be pulled down. A mini reflex sight.
+- **Pistol**: 12 rounds (48), one per click every 0.28 s, 34 a ball. Three to the body
+  pop armour, then one to the head kills (0.84 s); five to the body. 2× zoom.
+- **Shotgun** (a pickup), after the SPAS-12: perforated heat shield, tube magazine, a
+  skeletal folding stock with its hook, and a big ribbed pump racked after every shot
+  (snapped back, held a beat, slammed home, the gun rocking with it; a shot a second).
+  8 shells (16) of 12 pellets, 16 each: point-blank it kills in one (seven pop armour,
+  five finish); past 7 m it falls away fast. Its pellets shred walls.
 - **Sniper** (a pickup): 4 rounds (12), 110 a ball. A headshot always kills; a body shot pops
   armour and a second one finishes. Wild from the hip, dead on through the 5× scope.
+  After each shot the bolt is worked, and the scope drops for it: the firing hand
+  leaves the grip, turns the bolt up, racks it back and home, and returns (a shot
+  every 1.25 s).
 - **Grenade launcher** (a pickup): six rounds of paint grenades (12 more), 2.2 s reload. Grenades arc under gravity and go
   off on impact, on reaching a player, or after 2.5 s. The 4.2 m blast does up to 120 to
   players and destroys chunks. Your own grenades hurt you at half damage, so a rocket
@@ -503,21 +514,28 @@ rematch on a new site.
   it loose) and damages the structures it hits, so a collapse can bring down what's
   below. Rubble clears after 3–12 s or once it falls into the chasm, with at most 700
   pieces kept. A big collapse rumbles and shakes the view.
-- **The look**: nothing in the arena is a plain box. The guns, the characters and the
-  first-person arms are built from chamfered boxes (every edge cut back, octagonal in
+- **The look**: nothing in the arena is a plain box. The guns and the characters are
+  built from chamfered boxes (every edge cut back, octagonal in
   section) and faceted gems, flat-shaded per facet like the mountains; each model is
   baked into one mesh per colour at first use, so the detail costs a few draws. The
   characters have round helmets with wraparound visors, shoulder domes and knee pads;
-  the arms are tapered prisms with elbow pads and gloved fists. Structure chunks and
+  the first-person arms are round and smooth shaded, set apart from the faceted world. Structure chunks and
   rubble have bevelled edges.
 - **HUD width** (in Settings): how much of the screen's width the HUD spans, 30 to 100%,
   centred. On an ultrawide, bring it in (about 50% on 32:9 gives a 16:9 box) so the
   armour bar, weapons, ammo, grenades, score and kill feed sit where you're looking.
   Run mode's speedometer and best distance follow it too.
-- **Aim assist (gamepad only)**: light, and never with the mouse. With the crosshair on
-  or just beside an enemy you can see (within 60 m), the right stick turns up to 45%
-  slower; while you're moving the stick or yourself, the aim drifts gently onto their
-  chest (faster with the sights up). It never snaps, and does nothing while you're still.
+- **Aim assist (gamepad and touch)**: light, and never with the mouse. With the
+  crosshair on or just beside an enemy you can see (within 60 m), careful turns go up
+  to 25% slower, but a flick isn't slowed at all, so snapping to a head is yours. While
+  you're moving, the aim drifts gently onto them (faster with the sights up); up and
+  down it only keeps you on their body, chest to head, so it never drags a headshot
+  down. It never snaps, and does nothing while you're still.
+- **Running shows**: the gun swings, bounces, rolls and nods with each stride, your
+  view bobs a little, and sprinting swings the gun down and across your body and
+  widens the view. Other players bounce with each step, stride wider as they speed up
+  and lean into a sprint.
+- **Being hit** tints the view red behind the HUD and the crosshair, never over them.
 - **The helmet HUD** is drawn in the world a hand's width from your eye, framed by
   faint visor brackets: your **armour bar** across the top (segments that drain, flash
   when hit, sweep back as it recharges, amber when low and red once it's gone, with
@@ -527,13 +545,17 @@ rematch on a new site.
   your two weapons, the rounds left in the magazine (spent ones dim) and your frags
   and stickies. Text is just the score, magazine and reserve, the kill feed, name tags
   and banners.
-- **First-person arms** hold every weapon (two-bone arms reaching from out of view):
-  the firing hand on the grip, the other on the fore grip or pump. **Reloads are
+- **First-person arms** hold every weapon (two-bone arms reaching from out of view,
+  round tapered limbs with ball joints, an elbow pad and an armoured bracer): gloved
+  hands close round what they hold, palm flat against it on the side the arm comes
+  from, four fingers wrapped round the front and the thumb over the other side. The
+  firing hand grips the grip with its index finger on the trigger; the other takes the
+  fore grip, or cups the pump or handguard from beneath. **Reloads are
   animated**: the rifle, pistol and sniper drop their magazine, the hand fetches a
   fresh one, seats it and works the charging handle, slide or bolt; the shotgun rolls
   to show its port and takes shells one at a time (fire to break off); the launcher
-  swings its drum out and swaps it. Each step has its sound, and the shotgun's pump
-  racks after every shot. Throwing a grenade takes the off hand off the gun.
+  swings its drum out and swaps it. Each step has its sound; the shotgun's pump racks
+  after every shot and the sniper's bolt is worked. Throwing a grenade takes the off hand off the gun.
 - Tracers of paint, dust in each material's colour, explosions, screen
   shake and panned sounds do the rest. The sounds are synthesised at startup
   (`audio.Synth`: layers of swept tones and filtered noise, with an echo for the chasm):

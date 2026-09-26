@@ -126,6 +126,77 @@ func flatRing(r float32) geom.MeshData {
 	return m
 }
 
+// roundedBox is a box of half extents half with its edges and corners
+// rounded to radius r, in steps segments per quarter turn: each face is a
+// grid whose outer rows wrap round the edges.
+func roundedBox(half mathx.Vec3, r float32, steps int) geom.MeshData {
+	// Along each axis: the arc's samples into the rounded edge at each end,
+	// the flat between.
+	axis := func(h float32) []float32 {
+		var at []float32
+		for i := steps; i >= 0; i-- {
+			at = append(at, -(h-r)-r*float32(math.Sin(float64(i)/float64(steps)*math.Pi/2)))
+		}
+		for i := 0; i <= steps; i++ {
+			at = append(at, (h-r)+r*float32(math.Sin(float64(i)/float64(steps)*math.Pi/2)))
+		}
+		return at
+	}
+	inner := mathx.Vec3{half[0] - r, half[1] - r, half[2] - r}
+	var m geom.MeshData
+	for k := range 3 {
+		u, v := (k+1)%3, (k+2)%3
+		us, vs := axis(half[u]), axis(half[v])
+		for _, sign := range []float32{-1, 1} {
+			base := uint32(len(m.Vertices))
+			for _, b := range vs {
+				for _, a := range us {
+					var q mathx.Vec3
+					q[k], q[u], q[v] = sign*half[k], a, b
+					// Round it: out from the inner box by r.
+					var in mathx.Vec3
+					for i := range 3 {
+						in[i] = clampf(q[i], -inner[i], inner[i])
+					}
+					n := q.Sub(in).Normalize()
+					m.Vertices = append(m.Vertices, geom.Vertex{Position: in.Add(n.Scale(r)), Normal: n})
+				}
+			}
+			cols := uint32(len(us))
+			for j := uint32(0); j+1 < uint32(len(vs)); j++ {
+				for i := uint32(0); i+1 < cols; i++ {
+					a := base + j*cols + i
+					tri := [][3]uint32{{a, a + 1, a + cols + 1}, {a, a + cols + 1, a + cols}}
+					for _, t := range tri {
+						pa, pb, pc := m.Vertices[t[0]].Position, m.Vertices[t[1]].Position, m.Vertices[t[2]].Position
+						if pb.Sub(pa).Cross(pc.Sub(pa)).Dot(pa.Add(pb).Add(pc)) < 0 {
+							t[1], t[2] = t[2], t[1] // face out
+						}
+						m.Indices = append(m.Indices, t[0], t[1], t[2])
+					}
+				}
+			}
+		}
+	}
+	return m
+}
+
+// flatDisc is a flat disc of radius r in the XY plane, facing both ways.
+func flatDisc(r float32) geom.MeshData {
+	const n = 32
+	var m geom.MeshData
+	m.Vertices = append(m.Vertices, geom.Vertex{Normal: mathx.Vec3{0, 0, 1}})
+	for i := 0; i < n; i++ {
+		a := 2 * math.Pi * float64(i) / n
+		m.Vertices = append(m.Vertices, geom.Vertex{Position: mathx.Vec3{r * float32(math.Cos(a)), r * float32(math.Sin(a)), 0}, Normal: mathx.Vec3{0, 0, 1}})
+	}
+	for i := uint32(1); i <= n; i++ {
+		j := i%n + 1
+		m.Indices = append(m.Indices, 0, i, j, 0, j, i) // both faces
+	}
+	return m
+}
+
 // limbMesh is an octagonal prism along Z from -1 to 1, radius 1, its ends
 // tapered to a point-ish cap: a limb when scaled (r, r, length/2).
 func limbMesh() geom.MeshData {
@@ -152,6 +223,41 @@ func limbMesh() geom.MeshData {
 	return m
 }
 
+// tubeMesh is a smooth round tube along Z from -1 (radius 1) to 1 (radius
+// taper), open at the ends (joints cover them): a limb segment when scaled
+// (r, r, length/2).
+func tubeMesh(taper float32) geom.MeshData {
+	const sides = 20
+	var m geom.MeshData
+	slope := (taper - 1) / 2 // dr/dz
+	for j, z := range []float32{-1, 1} {
+		rad := 1 + (taper-1)*float32(j)
+		for i := 0; i <= sides; i++ {
+			a := 2 * math.Pi * float64(i) / sides
+			c, s := float32(math.Cos(a)), float32(math.Sin(a))
+			m.Vertices = append(m.Vertices, geom.Vertex{
+				Position: mathx.Vec3{c * rad, s * rad, z},
+				Normal:   mathx.Vec3{c, s, -slope}.Normalize(),
+			})
+		}
+	}
+	for i := uint32(0); i < sides; i++ {
+		a, b := i, i+sides+1 // this column at each end
+		// Wound to face outwards.
+		m.Indices = append(m.Indices, a, a+1, b+1, a, b+1, b)
+	}
+	// Make sure the winding faces out (whichever way Grid-style order ends up).
+	for t := 0; t+2 < len(m.Indices); t += 3 {
+		pa, pb, pc := m.Vertices[m.Indices[t]].Position, m.Vertices[m.Indices[t+1]].Position, m.Vertices[m.Indices[t+2]].Position
+		n := pb.Sub(pa).Cross(pc.Sub(pa))
+		mid := pa.Add(pb).Add(pc)
+		if n[0]*mid[0]+n[1]*mid[1] < 0 {
+			m.Indices[t+1], m.Indices[t+2] = m.Indices[t+2], m.Indices[t+1]
+		}
+	}
+	return m
+}
+
 // meshBuilder merges shapes into one mesh.
 type meshBuilder struct{ m geom.MeshData }
 
@@ -173,6 +279,10 @@ func partShape(p gunPart) geom.MeshData {
 		return gem(p.half)
 	case p.ring:
 		return flatRing(p.half[0])
+	case p.disc:
+		return flatDisc(p.half[0])
+	case p.soft:
+		return roundedBox(p.half, 0.85*min(p.half[0], p.half[1], p.half[2]), 3)
 	}
 	return chamferBox(p.half, 0.5*min(p.half[0], p.half[1], p.half[2])) // octagonal: as round as a box gets
 }

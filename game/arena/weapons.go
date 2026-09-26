@@ -89,6 +89,10 @@ type GunState struct {
 	bloom     float32 // extra spread from firing, radians; settles back
 }
 
+// idleSinceShot is a gun's SinceShot before it's first fired: long enough
+// that nothing's cycling.
+const idleSinceShot = 10
+
 // HammerState is the sledgehammer's swing.
 type HammerState struct {
 	Swing  float32 // seconds into the current swing, -1 when idle
@@ -140,6 +144,7 @@ func newWeapons() Weapons {
 	for k, g := range Guns {
 		if g != nil {
 			w.States[k].Ammo, w.States[k].Reserve = g.Mag, g.Reserve
+			w.States[k].SinceShot = idleSinceShot // not mid-pump or mid-bolt on arrival
 		}
 	}
 	w.Grenades = [GrenadeKinds]int{Frag: 2, Sticky: 1}
@@ -261,12 +266,13 @@ func (a *Arena) updateWeapons(p *Player, dt float32, in Input, ev *Events) {
 
 	// Aiming down the sights: raised over the gun's ADS time while the aim
 	// button is held, and dropped while switching, reloading, sprinting,
-	// swinging or knocked out of a scope.
+	// swinging, working a bolt or knocked out of a scope.
 	w.descope = max(w.descope-dt, 0)
 	g, s := w.Gun()
 	// (Sprint held while scoped in holds your breath rather than sprinting.)
 	breathing := g != nil && g.Zoom >= 4 && w.ADS > 0.5
-	aiming := g != nil && in.Aim && w.Switching == 0 && s.Reloading == 0 && w.descope == 0 && (!sprinting(in) || breathing) && !w.Swinging()
+	racking := g != nil && g.BoltTime > 0 && s.SinceShot < g.BoltTime
+	aiming := g != nil && in.Aim && w.Switching == 0 && s.Reloading == 0 && w.descope == 0 && (!sprinting(in) || breathing) && !w.Swinging() && !racking
 	switch {
 	case g == nil:
 		w.ADS = 0

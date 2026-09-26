@@ -49,12 +49,15 @@ type marker struct {
 	// For the arms and the reload: where each hand holds it, the parts that
 	// come away (a magazine, a drum) and the pump that slides.
 	grip, fore mathx.Vec3 // the firing hand, and the supporting hand
+	foreFlat   bool       // the supporting hand holds a flat handguard or pump (along the barrel), not a fore grip
 	reload     reloadStyle
 	mag        []gunPart  // the magazine (or drum), in its seat
 	magHold    mathx.Vec3 // where the supporting hand takes it
 	magDrop    mathx.Vec3 // which way it comes out
 	charge     mathx.Vec3 // a handle the supporting hand works after a new magazine (zero: none)
 	pump       []gunPart  // slides back and forth after each shot (a pump shotgun)
+	bolt       []gunPart  // turned and pulled back after each shot (a bolt action), about boltPivot
+	boltPivot  mathx.Vec3
 }
 
 // reloadStyle is how a gun is reloaded: a magazine swapped, shells pushed
@@ -217,6 +220,10 @@ func (m *Arena) appendPaint(out []render.DrawCmd) []render.DrawCmd {
 	return out
 }
 
+// reticleDepth is how far in front of the eye the crosshair (and a
+// scope's overlay) is drawn, in m.
+const reticleDepth = 0.1
+
 // appendReticle draws the crosshair a little way in front of the camera:
 // four ticks spread as wide as the gun's current cone, so bloom shows. With
 // the sights up it's a dot; through a scope, the scope's ring and lines.
@@ -226,7 +233,7 @@ func (m *Arena) appendReticle(out []render.DrawCmd, fovY float32) []render.DrawC
 		return out
 	}
 	cam := m.camWorld()
-	const d = 0.1 // m in front of the eye
+	const d = reticleDepth
 	col := withAlpha(uiWhite, 0.9)
 	if m.hitMark > 0 {
 		col = uiAccent

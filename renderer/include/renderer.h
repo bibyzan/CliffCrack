@@ -98,8 +98,9 @@ enum {
     R_UI_SEPARATOR,
     R_UI_PROGRESS,      // bar filled to value (0..1), min/max = size in pixels (0 = default), label overlaid
     R_UI_SAME_LINE,     // keep the next widget on this line, value = spacing in pixels (0 = default)
-    R_UI_GAUGE,         // dial: value within min..max (shown as the big number), x = diameter in
-                        //   pixels, y = where the red zone starts (fraction of the range, 0 = none),
+    R_UI_GAUGE,         // half-circle dial: value within min..max (shown as the big number), x = its
+                        //   width (the diameter) in pixels, y = where the red zone starts (fraction of
+                        //   the range, 0 = none),
                         //   label = the unit under the number
     R_UI_CIRCLE,        // disc behind every window (e.g. touch controls): x/y = centre and value =
                         //   radius in pixels, min = ring width (0 = filled), result (in) = colour as

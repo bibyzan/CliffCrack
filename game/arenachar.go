@@ -78,7 +78,10 @@ const (
 func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride float32) []render.DrawCmd {
 	pos, _ := p.Body.Interpolated(m.alpha())
 	feet := pos.Sub(mathx.Vec3{0, arena.PlayerRadius, 0})
-	base := mathx.Translate(feet[0], feet[1], feet[2]).Mul(mathx.RotateY(-p.Yaw))
+	// Running: the body bounces with each step and leans into a sprint.
+	run, sprint := runFactors(p)
+	feet[1] += 0.05 * run * (1 + 0.5*sprint) * float32(math.Abs(math.Sin(float64(stride))))
+	base := mathx.Translate(feet[0], feet[1], feet[2]).Mul(mathx.RotateY(-p.Yaw)).Mul(mathx.RotateX(-0.18 * sprint))
 	if p.Dead {
 		t := clampf((m.sim().Time-p.DiedAt)/0.5, 0, 1)
 		base = base.Mul(mathx.RotateX(smooth(t) * math.Pi / 2 * 0.97))
@@ -100,7 +103,8 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 	speed := float32(math.Hypot(float64(v[0]), float64(v[2])))
 	swing := float32(0)
 	if !p.Dead {
-		swing = 0.55 * float32(math.Sin(float64(stride))) * clampf(speed/6, 0, 1)
+		swing = (0.6 + 0.3*clampf((speed-arena.WalkSpeed)/(arena.SprintSpeed-arena.WalkSpeed), 0, 1)) *
+			float32(math.Sin(float64(stride))) * clampf(speed/arena.WalkSpeed, 0, 1)
 		if !p.OnGround() {
 			swing = 0.35 // legs tucked mid-jump
 		}

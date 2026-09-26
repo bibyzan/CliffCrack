@@ -68,13 +68,33 @@ type arenaAssets struct {
 	panel     render.Texture
 	materials [len(materialColor)]render.Texture
 	chasm     *chasm
-	ring      render.Mesh // the sniper scope's surround
-	thinRing  render.Mesh // reticles: a ring of radius 1, 0.18 thick
-	quad      render.Mesh // HUD icons: a unit quad facing the eye
-	gem       render.Mesh // a faceted ball, radius 1
-	bevel     render.Mesh // a chamfered cube, half extents 1 (structure chunks and rubble)
-	limb      render.Mesh // a tapered prism along Z, radius 1, -1..1
+	ring      render.Mesh         // the sniper scope's surround
+	thinRing  render.Mesh         // reticles: a ring of radius 1, 0.18 thick
+	quad      render.Mesh         // HUD icons: a unit quad facing the eye
+	gem       render.Mesh         // a faceted ball, radius 1
+	bevel     render.Mesh         // a chamfered cube, half extents 1 (structure chunks and rubble)
+	limb      render.Mesh         // a tapered prism along Z, radius 1, -1..1
+	ball      render.Mesh         // a smooth ball, radius 1 (arms' joints and hands)
+	tubes     map[int]render.Mesh // smooth tubes by taper (percent), made as needed (see tube)
 	icons     hudIcons
+}
+
+// tube is a smooth tube along Z, radius 1 at -1 narrowing to taper at 1
+// (to the nearest percent), made the first time it's asked for.
+func (as *arenaAssets) tube(taper float32) render.Mesh {
+	k := int(taper*100 + 0.5)
+	if mesh, ok := as.tubes[k]; ok {
+		return mesh
+	}
+	mesh, err := render.CreateMesh(tubeMesh(float32(k) / 100))
+	if err != nil {
+		logf("arena: tube mesh: %v", err)
+	}
+	if as.tubes == nil {
+		as.tubes = map[int]render.Mesh{}
+	}
+	as.tubes[k] = mesh
+	return mesh
 }
 
 func newArenaAssets() (*arenaAssets, error) {
@@ -125,6 +145,9 @@ func newArenaAssets() (*arenaAssets, error) {
 		return nil, err
 	}
 	if as.limb, err = render.CreateMesh(limbMesh()); err != nil {
+		return nil, err
+	}
+	if as.ball, err = render.CreateMesh(geom.Sphere(1, 20, 12)); err != nil {
 		return nil, err
 	}
 	if as.icons, err = loadIcons(); err != nil {
@@ -336,6 +359,8 @@ type gunPart struct {
 	flags        gfx.DrawFlags
 	round        bool // a ball (a paint hopper, a gas tank) rather than a box
 	ring         bool // a thin ring in the XY plane (a sight's reticle), half X and Y its radius
+	disc         bool // a flat round disc in the XY plane (a lens), half X its radius
+	soft         bool // a box with its edges rounded right off (see roundedBox)
 }
 
 // The sledgehammer, handle along +Y, the head's striking face towards -Z:

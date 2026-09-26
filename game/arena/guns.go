@@ -32,40 +32,47 @@ type GunSpec struct {
 	ADSMove float32 // movement speed with the sights up, as a fraction
 
 	BallSpeed float32 // m/s the paintballs fly (drawn; the hit is instant)
+	BoltTime  float32 // s the bolt's worked after a shot, the sights down meanwhile (0: no bolt)
 }
 
 // Guns are the specs by slot; nil for the hammer and the launcher.
 var Guns = [weaponCount]*GunSpec{
-	// The assault rifle: a hopper-fed marker hosing paint. Weak per ball
-	// and wild from the hip, it blooms fast; aim down the sights to tame it.
+	// The assault rifle: a hopper-fed marker hosing paint, and the yardstick
+	// the others are tuned around. Weak per ball (24 to the body, 19 to the
+	// head: most of a magazine as you really hit), wild from the hip, and it
+	// blooms fast; aim down the sights to tame it.
 	WeaponRifle: {
-		Mag: 48, Reserve: 144, Interval: 0.075, Auto: true, Reload: 2.0, Pellets: 1,
-		Damage: 9, HeadMult: 1.5, ChunkDamage: 9, Range: 120, Push: 0.3,
+		Mag: 36, Reserve: 108, Interval: 0.075, Auto: true, Reload: 2.0, Pellets: 1,
+		Damage: 7, HeadMult: 1.25, ChunkDamage: 9, Range: 120, Push: 0.3,
 		HipSpread: 0.012, ADSSpread: 0.004, MoveSpread: 0.012, Bloom: 0.008, MaxBloom: 0.055, BloomDecay: 3.5, Recoil: 0.009,
 		Zoom: 1.35, ADSTime: 0.16, ADSMove: 0.7, BallSpeed: 140,
 	},
-	// The pistol: three body shots pop armour, then a headshot kills.
+	// The pistol: three body shots pop armour, then a headshot kills (five to
+	// the body). Measured, not spammed: quicker than the rifle for a steady
+	// hand, and the thing to draw when the rifle's empty.
 	WeaponPistol: {
-		Mag: 12, Reserve: 48, Interval: 0.2, Reload: 1.4, Pellets: 1,
-		Damage: 40, HeadMult: 1.5, Precision: true, ChunkDamage: 22, Range: 150, Push: 0.8,
+		Mag: 12, Reserve: 48, Interval: 0.28, Reload: 1.4, Pellets: 1,
+		Damage: 34, HeadMult: 1.5, Precision: true, ChunkDamage: 22, Range: 150, Push: 0.8,
 		HipSpread: 0.008, ADSSpread: 0.0008, MoveSpread: 0.01, Bloom: 0.018, MaxBloom: 0.04, BloomDecay: 7, Recoil: 0.018,
 		Zoom: 2, ADSTime: 0.14, ADSMove: 0.8, BallSpeed: 190,
 	},
-	// The pump shotgun: a cone of paint that shreds up close and falls away
-	// fast. Its pellets tear through walls.
+	// The pump shotgun, after the SPAS-12: a cone of paint that kills in one
+	// up close (seven pellets pop armour, five more finish) and falls away
+	// fast, and a long pump between shots. Its pellets tear through walls.
 	WeaponShotgun: {
-		Mag: 8, Reserve: 16, Interval: 0.85, Reload: 0.42, PerShell: true, Pellets: 12,
-		Damage: 14, HeadMult: 1.25, ChunkDamage: 22, Range: 40, Falloff: 7, Push: 0.9,
+		Mag: 8, Reserve: 16, Interval: 1.0, Reload: 0.42, PerShell: true, Pellets: 12,
+		Damage: 16, HeadMult: 1.25, ChunkDamage: 22, Range: 40, Falloff: 7, Push: 0.9,
 		HipSpread: 0.075, ADSSpread: 0.055, MoveSpread: 0.01, Recoil: 0.07,
 		Zoom: 1.15, ADSTime: 0.18, ADSMove: 0.8, BallSpeed: 110,
 	},
 	// The sniper: a body shot pops armour, a second finishes; a headshot
-	// always kills. Wild from the hip, dead on through the scope.
+	// always kills. Wild from the hip, dead on through the scope, and the
+	// bolt's worked between shots.
 	WeaponSniper: {
-		Mag: 4, Reserve: 12, Interval: 0.7, Reload: 2.5, Pellets: 1,
+		Mag: 4, Reserve: 12, Interval: 1.25, Reload: 2.5, Pellets: 1,
 		Damage: 110, HeadMult: 2, Precision: true, HeadKills: true, ChunkDamage: 90, Range: 300, Push: 3,
 		HipSpread: 0.035, ADSSpread: 0, MoveSpread: 0.02, Bloom: 0.03, MaxBloom: 0.05, BloomDecay: 3, Recoil: 0.07,
-		Zoom: 5, ADSTime: 0.24, ADSMove: 0.5, BallSpeed: 420,
+		Zoom: 5, ADSTime: 0.24, ADSMove: 0.5, BallSpeed: 420, BoltTime: 1.0,
 	},
 }
 

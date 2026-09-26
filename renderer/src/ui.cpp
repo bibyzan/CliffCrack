@@ -219,32 +219,35 @@ static ImU32 lerp_color(ImU32 a, ImU32 b, float t) {
                                      x.w + (y.w - x.w) * t));
 }
 
-// Draws a speedometer-style dial at the cursor: a 270-degree arc open at the
-// bottom, filled up to the value in colours running white -> orange -> red,
-// with ticks, a needle and the value in the middle.
+// Draws a speedometer at the cursor: a half circle standing on its base, no
+// backing, filled left to right up to the value in colours running white ->
+// orange -> red over a faint dark track, with ticks, a pointer on the arc and
+// the value in the middle. Everything is drop-shadowed, as it sits straight
+// on the scene.
 static void draw_gauge(const RUICmd& c, const std::string& unit) {
-    const float  size = (c.x > 0.0f ? c.x : 200.0f) * g_scale;
+    const float  size = (c.x > 0.0f ? c.x : 200.0f) * g_scale; // the dial's width (its diameter)
+    const float  radius = size * 0.44f;
+    const float  thick = size * 0.07f;
     const ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImGui::Dummy(ImVec2(size, size));
+    ImGui::Dummy(ImVec2(size, size * 0.5f + thick * 0.5f));
     ImDrawList* dl = ImGui::GetWindowDrawList();
 
     const float  range = c.max > c.min ? c.max - c.min : 1.0f;
     const float  t = std::clamp((c.value - c.min) / range, 0.0f, 1.0f);
-    const ImVec2 centre(origin.x + size * 0.5f, origin.y + size * 0.5f);
-    const float  radius = size * 0.44f;
-    const float  thick = size * 0.075f;
-    const float  start = 0.75f * kPi, sweep = 1.5f * kPi; // from bottom-left, clockwise to bottom-right
+    const ImVec2 centre(origin.x + size * 0.5f, origin.y + size * 0.5f); // the middle of the base
+    const float  start = kPi, sweep = kPi;                                 // from the left, over the top, to the right
     auto angle = [&](float f) { return start + sweep * f; };
     auto at = [&](float a, float r) { return ImVec2(centre.x + std::cos(a) * r, centre.y + std::sin(a) * r); };
+    auto shadowed = [&](ImVec2 p) { return ImVec2(p.x + std::max(1.0f, size * 0.008f), p.y + std::max(1.0f, size * 0.008f)); };
+    const ImU32 shadow = srgb(0.02f, 0.03f, 0.08f, 0.5f);
 
     const ImU32 white = srgb(1.0f, 1.0f, 1.0f), orange = srgb(0.96f, 0.52f, 0.16f), red = srgb(1.0f, 0.30f, 0.18f);
     auto heat = [&](float f) { return f < 0.5f ? lerp_color(white, orange, f * 2.0f) : lerp_color(orange, red, f * 2.0f - 1.0f); };
 
-    // Backing disc and track.
-    dl->AddCircleFilled(centre, radius + thick * 1.1f, srgb(0.05f, 0.07f, 0.14f, 0.72f), 64);
+    // Track: a dark band for contrast on snow, then the red zone.
     dl->PathArcTo(centre, radius, angle(0.0f), angle(1.0f), 64);
-    dl->PathStroke(srgb(1.0f, 1.0f, 1.0f, 0.14f), thick);
-    if (c.y > 0.0f && c.y < 1.0f) { // red zone
+    dl->PathStroke(srgb(0.05f, 0.07f, 0.14f, 0.45f), thick);
+    if (c.y > 0.0f && c.y < 1.0f) {
         dl->PathArcTo(centre, radius, angle(c.y), angle(1.0f), 24);
         dl->PathStroke(srgb(1.0f, 0.30f, 0.18f, 0.35f), thick);
     }
@@ -256,41 +259,39 @@ static void draw_gauge(const RUICmd& c, const std::string& unit) {
         dl->PathStroke(heat(f1), thick);
     }
 
-    // Ticks every tenth of the range (labelled every other), small ones between.
-    ImFont* font = ImGui::GetFont();
-    const float label_size = size * 0.085f;
+    // Ticks every tenth of the range, small ones between. (No numbers: the
+    // readout in the middle says the speed.)
     for (int i = 0; i <= 20; ++i) {
         const float f = i / 20.0f;
         const bool  major = i % 2 == 0;
         const float a = angle(f);
-        const float r0 = radius - thick * (major ? 1.25f : 0.9f), r1 = radius - thick * 0.55f;
-        dl->AddLine(at(a, r0), at(a, r1), srgb(1.0f, 1.0f, 1.0f, major ? 0.8f : 0.4f), major ? 2.0f * g_scale : 1.0f * g_scale);
-        if (major && i % 4 == 0 && i > 0 && i < 20) { // the ends would crowd the readout
-            char text[16];
-            std::snprintf(text, sizeof text, "%.0f", c.min + range * f);
-            const ImVec2 ts = font->CalcTextSizeA(label_size, FLT_MAX, 0.0f, text);
-            const ImVec2 p = at(a, radius - thick * 2.2f);
-            dl->AddText(font, label_size, ImVec2(p.x - ts.x * 0.5f, p.y - ts.y * 0.5f), srgb(1.0f, 1.0f, 1.0f, 0.7f), text);
-        }
+        const float r0 = radius - thick * (major ? 1.2f : 0.85f), r1 = radius - thick * 0.55f;
+        const float w = major ? 2.0f * g_scale : 1.0f * g_scale;
+        dl->AddLine(shadowed(at(a, r0)), shadowed(at(a, r1)), shadow, w);
+        dl->AddLine(at(a, r0), at(a, r1), srgb(1.0f, 1.0f, 1.0f, major ? 0.85f : 0.45f), w);
     }
 
-    // Needle with a hub.
-    const float a = angle(t);
-    dl->AddLine(at(a + kPi, radius * 0.12f), at(a, radius * 0.92f), heat(t), size * 0.022f);
-    dl->AddCircleFilled(centre, size * 0.04f, heat(t), 24);
-    dl->AddCircleFilled(centre, size * 0.02f, srgb(0.05f, 0.07f, 0.14f), 16);
+    // A pointer on the arc where the value is, rather than a needle across
+    // the readout.
+    const float  a = angle(t);
+    const ImVec2 tip = at(a, radius - thick * 0.9f);
+    const ImVec2 b0 = at(a - 0.07f, radius + thick * 0.75f), b1 = at(a + 0.07f, radius + thick * 0.75f);
+    dl->AddTriangleFilled(shadowed(tip), shadowed(b0), shadowed(b1), shadow);
+    dl->AddTriangleFilled(tip, b0, b1, heat(t));
 
-    // The value, big, with the unit under it, low in the dial's open bottom.
-    char value[16];
+    // The value, big, with the unit under it, in the middle of the arch.
+    ImFont* font = ImGui::GetFont();
+    char    value[16];
     std::snprintf(value, sizeof value, "%.0f", c.value);
-    const float  value_size = size * 0.2f, unit_size = size * 0.075f;
+    const float  value_size = size * 0.22f, unit_size = size * 0.075f;
     const ImVec2 vs = font->CalcTextSizeA(value_size, FLT_MAX, 0.0f, value);
-    const ImVec2 vp(centre.x - vs.x * 0.5f, centre.y + radius * 0.3f);
-    dl->AddText(font, value_size, ImVec2(vp.x + 2.0f, vp.y + 2.0f), srgb(0.02f, 0.03f, 0.08f, 0.55f), value);
-    dl->AddText(font, value_size, vp, heat(t), value);
     const ImVec2 us = font->CalcTextSizeA(unit_size, FLT_MAX, 0.0f, unit.c_str());
-    dl->AddText(font, unit_size, ImVec2(centre.x - us.x * 0.5f, vp.y + vs.y * 0.92f), srgb(0.86f, 0.88f, 0.96f, 0.85f),
-                unit.c_str());
+    const ImVec2 up(centre.x - us.x * 0.5f, centre.y - us.y);
+    const ImVec2 vp(centre.x - vs.x * 0.5f, up.y - vs.y * 0.92f);
+    dl->AddText(font, value_size, shadowed(vp), shadow, value);
+    dl->AddText(font, value_size, vp, heat(t), value);
+    dl->AddText(font, unit_size, shadowed(up), shadow, unit.c_str());
+    dl->AddText(font, unit_size, up, srgb(0.86f, 0.88f, 0.96f, 0.85f), unit.c_str());
 }
 
 // Draws a disc or ring behind every window (on-screen touch controls), with

@@ -144,7 +144,9 @@ type Arena struct {
 	headMark   bool    // the last hit marker was a headshot
 	hurt       float32 // 0..1 red flash when you take damage
 	shake      float32 // camera shake strength, decays
-	bob        float32 // walk-cycle phase for the weapon sway
+	bob        float32 // walk-cycle phase for the weapon sway and head bob
+	runAmt     float32 // 0..1 how much you're running (eased): scales the sway and bob
+	sprintAmt  float32 // 0..1 how much you're sprinting (eased): the sprint pose
 	strides    []float32
 	prevPull   bool    // trigger state last frame (for the pad's "pressed")
 	padHold    float32 // s the pad's X has been held (tap: reload, hold: pick up)
@@ -158,6 +160,7 @@ type Arena struct {
 	reloadEase float32          // 0..1 the gun turned for a reload
 	reloadT    float32          // how far through the reload it was last frame
 	lastPump   float32          // the shotgun's time since its last shot, last frame
+	lastBolt   float32          // ... and the sniper's
 }
 
 func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64, practice bool) (*Arena, error) {
@@ -369,6 +372,7 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 		stickMoving := x*x+y*y > 0.01
 		lx, ly := in.PadAxis(input.PadLeftX), in.PadAxis(input.PadLeftY)
 		slow, assist = m.aimAssist(stickMoving || lx*lx+ly*ly > 0.04, dt)
+		slow = flickFade(slow, float32(math.Hypot(float64(x), float64(y)))*arenaStickYaw)
 	}
 	if x != 0 || y != 0 {
 		yaw += x * arenaStickYaw * dt * slow
@@ -385,6 +389,7 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 		// A thumb can't track like a mouse: the pad's aim assist helps it too.
 		if tyaw != 0 || tpitch != 0 || touch.Move != [2]float32{} {
 			slow, assist = m.aimAssist(true, dt)
+			slow = flickFade(slow, float32(math.Hypot(float64(tyaw), float64(tpitch)))/max(dt, 1e-3))
 		}
 		yaw += tyaw * slow
 		pitch += tpitch * slow
@@ -457,7 +462,6 @@ func mergeTouch(c, t arena.Input) arena.Input {
 	return c
 }
 
-
 // playerName is how the HUD refers to a player.
 func (m *Arena) playerName(p *arena.Player) string {
 	switch {
@@ -514,6 +518,13 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		m.reloadEase = max(m.reloadEase-dt*5, 0)
 	}
 	m.reloadCues(me)
+
+	// How hard you're running, eased so the sway and the sprint pose come
+	// and go smoothly.
+	run, sprint := runFactors(me)
+	ease := 1 - float32(math.Exp(-10*float64(dt)))
+	m.runAmt += (run - m.runAmt) * ease
+	m.sprintAmt += (sprint*(1-me.ADS) - m.sprintAmt) * ease
 
 	// Walk cycles: the weapon sway, and everyone's legs.
 	for i, p := range m.sim().Players {
@@ -788,8 +799,14 @@ func (m *Arena) eye() mathx.Vec3 {
 	if me.Dead {
 		t := clampf((m.sim().Time-me.DiedAt)/0.6, 0, 1)
 		eye[1] -= (arena.EyeHeight + arena.PlayerRadius - 0.35) * smooth(t)
+		return eye
 	}
-	return eye
+	// Head bob: down on each footfall and a little side to side, while
+	// running; calmer with the sights up.
+	bob := m.runAmt * (1 - 0.95*me.ADS) * (1 + 0.5*m.sprintAmt)
+	right, _ := flatRight(me.Yaw)
+	eye[1] += 0.035 * bob * (float32(math.Abs(math.Cos(float64(m.bob)))) - 0.6)
+	return eye.Add(right.Scale(0.012 * bob * float32(math.Sin(float64(m.bob)))))
 }
 
 // viewAngles is the player's yaw and pitch plus camera shake.
@@ -827,12 +844,23 @@ func (m *Arena) weaponModel() mathx.Mat4 {
 	w := &me.Weapons
 	ads := smooth(w.ADS)
 	offset := mathx.Vec3{0.16, -0.16, -0.4}
-	sway := 1 - 0.85*ads
-	offset[0] += 0.012 * sway * float32(math.Sin(float64(m.bob)))
-	offset[1] += 0.01 * sway * float32(math.Abs(math.Cos(float64(m.bob))))
-	offset[1] -= 0.35 * w.Switching / arena.SwitchTime // lowered while swapping
 	var pitch, roll, yaw float32
-	size := float32(0.55) // modelled at real scale; drawn this close they need shrinking
+	// Running: the gun swings side to side with each stride, bounces with
+	// each step, rolls and nods; more the faster you go, much less with the
+	// sights up. Sprinting it swings down and across the body, canted.
+	sprint := smooth(m.sprintAmt)
+	sway := m.runAmt * (1 - 0.85*ads) * (1 + 0.6*sprint)
+	sb, cb := float32(math.Sin(float64(m.bob))), float32(math.Cos(float64(m.bob)))
+	offset[0] += 0.03 * sway * sb
+	offset[1] += 0.026*sway*float32(math.Abs(float64(cb))) - 0.012*sway
+	roll += 0.07 * sway * sb
+	pitch += 0.03 * sway * float32(math.Cos(2*float64(m.bob)))
+	offset = offset.Add(mathx.Vec3{-0.07, -0.07, 0.05}.Scale(sprint))
+	pitch -= 0.5 * sprint
+	yaw += 0.6 * sprint
+	roll += 0.35 * sprint
+	offset[1] -= 0.35 * w.Switching / arena.SwitchTime // lowered while swapping
+	size := float32(0.55)                              // modelled at real scale; drawn this close they need shrinking
 	// Throwing a grenade: the gun dips out of the way of the throwing arm.
 	offset[1] -= 0.22 * m.throwAnim
 	pitch -= 0.5 * m.throwAnim
@@ -877,6 +905,22 @@ func (m *Arena) weaponModel() mathx.Mat4 {
 		}
 		kick := w.States[held].Kick
 		size = mk.size
+		// Working the action: the pump rocks the gun back and tilts it; the
+		// bolt rolls it over to the left to show the bolt, and brings it in.
+		since := w.States[held].SinceShot
+		if mk.pump != nil {
+			p := pumpAt(since)
+			pitch += 0.12 * p
+			roll -= 0.2 * p
+			offset = offset.Add(mathx.Vec3{-0.01 * p, -0.012 * p, 0.02 * p})
+		}
+		if mk.bolt != nil {
+			_, _, reach := boltAt(since)
+			e := smooth(reach)
+			roll += 0.45 * e
+			pitch += 0.1 * e
+			offset = offset.Add(mathx.Vec3{-0.05 * e, 0.01 * e, 0.03 * e})
+		}
 		// Sights up: the sight sits on the eye's line, a hand's width out.
 		aimed := mathx.Vec3{0, 0, -mk.relief}.Sub(mk.sight.Scale(size))
 		offset = offset.Add(aimed.Sub(offset).Scale(ads))
@@ -909,7 +953,7 @@ func (m *Arena) muzzle() mathx.Vec3 {
 // Render returns the frame parameters and the draw list (appended to out[:0]).
 func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
 	eye := m.eye()
-	fov := m.settings.fovRadians() * 1.25 * (1 + 0.18*m.fovKick) // a wider view suits first person; wider still in a launch
+	fov := m.settings.fovRadians() * 1.25 * (1 + 0.18*m.fovKick) * (1 + 0.07*smooth(m.sprintAmt)) // a wider view suits first person; wider still in a launch
 	fov = min(fov, 1.9)
 	zoom := m.me().Zoom()
 	fov = 2 * float32(math.Atan(math.Tan(float64(fov)/2)/float64(zoom))) // aiming down the sights magnifies
@@ -1059,6 +1103,10 @@ func (m *Arena) appendWeapon(out []render.DrawCmd) []render.DrawCmd {
 	if mk.pump != nil {
 		out = m.drawParts(out, model.Mul(translate(m.pumpOffset())), mk.pump)
 	}
+	if mk.bolt != nil {
+		lift, back, _ := boltAt(m.me().States[held].SinceShot)
+		out = m.drawParts(out, model.Mul(boltFrame(mk, lift, back)), mk.bolt)
+	}
 	if mk.mag != nil {
 		out = m.drawParts(out, model.Mul(translate(pose.magOff)), mk.mag)
 	}
@@ -1090,7 +1138,12 @@ func (m *Arena) appendHurt(out []render.DrawCmd) []render.DrawCmd {
 	if a < 0.01 {
 		return out
 	}
-	model := m.camWorld().Mul(mathx.Translate(0, 0, -0.06)).Mul(mathx.RotateX(math.Pi / 2)).Mul(mathx.Scale(0.3, 1, 0.3))
+	// Behind the helmet HUD (helmetDepth) and the reticle (reticleDepth), so
+	// it tints the view and the gun but never hides the armour bar, health or
+	// crosshair: in front of them, it would cover them (it writes depth) just
+	// when they matter.
+	const d = reticleDepth * 1.15
+	model := m.camWorld().Mul(mathx.Translate(0, 0, -d)).Mul(mathx.RotateX(math.Pi / 2)).Mul(mathx.Scale(5*d, 1, 5*d))
 	return append(out, render.DrawCmd{Model: model, Color: withAlpha(hurtColor, a), Flags: gfx.DrawUnlit, Mesh: m.sc.shadow})
 }
 
@@ -1140,4 +1193,15 @@ func (m *Arena) appendPads(out []render.DrawCmd) []render.DrawCmd {
 		}
 	}
 	return out
+}
+
+// runFactors is how much p is running (0..1: still to walking pace) and
+// sprinting (0..1: walking to sprinting pace), on the ground.
+func runFactors(p *arena.Player) (run, sprint float32) {
+	if p.Dead || !p.OnGround() {
+		return 0, 0
+	}
+	v := p.Body.Velocity
+	speed := float32(math.Hypot(float64(v[0]), float64(v[2])))
+	return clampf(speed/arena.WalkSpeed, 0, 1), clampf((speed-arena.WalkSpeed)/(arena.SprintSpeed-arena.WalkSpeed), 0, 1)
 }

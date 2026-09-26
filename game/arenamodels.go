@@ -8,8 +8,8 @@ import (
 
 // The markers' models, in weapon space: metres, barrel down -Z, +Y up, the
 // hand at the grip. Each is built from boxes, balls (hoppers, tanks, bells)
-// and rings (sight reticles), with lit plastics and glowing sights: a holo
-// sight on the rifle, tritium irons on the pistol, a ghost ring and a fibre
+// and rings (sight reticles), with lit plastics and glowing sights: a mini
+// reflex sight on the rifle, tritium irons on the pistol, a ghost ring and a fibre
 // bead on the shotgun, a scope on the sniper, a ladder on the launcher.
 var (
 	sightRed   = mathx.SRGB(1.00, 0.16, 0.10, 1)
@@ -18,6 +18,9 @@ var (
 	tealDark   = mathx.SRGB(0.06, 0.40, 0.40, 1)
 	rubber     = mathx.SRGB(0.10, 0.10, 0.11, 1)
 	paintBalls = mathx.SRGB(0.10, 0.78, 1.00, 1)
+	opticBlack = mathx.SRGB(0.05, 0.05, 0.06, 1) // anodised: a touch darker than the gun's black
+	lensAmber  = mathx.SRGB(1.00, 0.55, 0.22, 1) // a reflex window's coating
+	lensSheen  = mathx.SRGB(0.95, 0.45, 0.95, 1) // ... and the magenta at its edge
 )
 
 // b, r and o are shorthands for a box, a ball and a ring part.
@@ -35,6 +38,19 @@ func r(cx, cy, cz, hx, hy, hz float32, col [4]float32) gunPart {
 func o(cx, cy, cz, rad float32, col [4]float32) gunPart {
 	p := b(cx, cy, cz, rad, rad, 1, col)
 	p.ring = true
+	return p
+}
+
+// d is a flat round disc of radius rad in the XY plane (a lens).
+func d(cx, cy, cz, rad float32, col [4]float32) gunPart {
+	p := b(cx, cy, cz, rad, rad, 1, col)
+	p.disc = true
+	return p
+}
+
+// soft rounds a box part's edges right off: machined, not cut.
+func soft(p gunPart) gunPart {
+	p.soft = true
 	return p
 }
 
@@ -109,36 +125,35 @@ var markers = [...]marker{
 				b(0, -0.05, 0.108, 0.013, 0.013, 0.012, gasSteel),          // regulator
 				glow(b(0.016, -0.04, 0.108, 0.002, 0.004, 0.004, tritium)), // gauge
 				b(0, -0.018, 0.275, 0.018, 0.038, 0.008, tealDark),         // butt plate
-				// The holo sight: a big armoured window up on a riser, well
-				// clear of the body, with a thick hood and side guards, framed
-				// front and back so it reads as a window right up at the eye;
-				// and in the glass, a glowing ring with four ticks round a dot.
-				b(0, 0.066, 0.035, 0.016, 0.012, 0.032, gunBlack),     // riser
-				b(0, 0.064, 0.035, 0.018, 0.004, 0.022, gunMetal),     // riser clamp
-				b(0, 0.084, 0.035, 0.024, 0.006, 0.04, gunBlack),      // base
-				b(-0.029, 0.112, 0.035, 0.003, 0.025, 0.04, gunBlack), // side walls
-				b(0.029, 0.112, 0.035, 0.003, 0.025, 0.04, gunBlack),
-				b(0, 0.139, 0.035, 0.032, 0.004, 0.04, gunBlack),      // hood
-				b(0, 0.142, -0.004, 0.03, 0.002, 0.008, markerTeal),   // hood lip
-				b(-0.033, 0.1, 0.03, 0.003, 0.016, 0.024, markerTeal), // side guards
-				b(0.033, 0.1, 0.03, 0.003, 0.016, 0.024, markerTeal),
-				r(0.037, 0.098, 0.05, 0.005, 0.008, 0.008, gunMetal),  // battery cap
-				b(0.034, 0.088, 0.012, 0.003, 0.003, 0.004, gunMetal), // buttons
-				b(0.034, 0.088, 0.022, 0.003, 0.003, 0.004, gunMetal),
-				glow(b(0.0342, 0.095, 0.017, 0.0006, 0.0015, 0.002, sightRed)), // power light
-				// The rear frame round the eyepiece.
-				b(0, 0.136, 0.074, 0.028, 0.0025, 0.002, gunBlack),
-				b(0, 0.088, 0.074, 0.028, 0.0025, 0.002, gunBlack),
-				b(-0.0265, 0.112, 0.074, 0.0025, 0.022, 0.002, gunBlack),
-				b(0.0265, 0.112, 0.074, 0.0025, 0.022, 0.002, gunBlack),
-				// The glass and the reticle.
-				glow(b(0, 0.112, -0.004, 0.026, 0.022, 0.0004, withAlpha(lensBlue, 0.12))),
-				glow(o(0, 0.112, -0.002, 0.0085, sightRed)),
-				glow(b(0, 0.112, -0.002, 0.0011, 0.0011, 0.0004, sightRed)),
-				glow(b(0.0122, 0.112, -0.002, 0.0022, 0.0006, 0.0004, sightRed)),
-				glow(b(-0.0122, 0.112, -0.002, 0.0022, 0.0006, 0.0004, sightRed)),
-				glow(b(0, 0.1242, -0.002, 0.0006, 0.0022, 0.0004, sightRed)),
-				glow(b(0, 0.0998, -0.002, 0.0006, 0.0022, 0.0004, sightRed)),
+				// A mini reflex sight, low on the rail: a clamp with a cross
+				// bolt, a squat body with the brightness dial and two ears
+				// low at the back, +/- buttons on the right; and at the front,
+				// the hood round an amber-coated window with the red dot in
+				// it. Machined: every edge rounded off.
+				soft(b(0, 0.0615, 0.028, 0.0165, 0.0045, 0.044, gunBlack)),          // clamp base
+				soft(b(0.0185, 0.0605, 0.032, 0.0025, 0.0065, 0.017, gunBlack)),     // clamp jaw
+				r(0.0215, 0.0605, 0.032, 0.0015, 0.0032, 0.0032, gunMetal),          // cross bolt
+				soft(b(0, 0.0725, 0.03, 0.0155, 0.0065, 0.04, opticBlack)),          // body
+				soft(b(0, 0.0795, 0.057, 0.0135, 0.003, 0.012, opticBlack)),         // rear block, low: the eye looks over it
+				r(0, 0.0828, 0.054, 0.0058, 0.0011, 0.0058, gunMetal),               // dial
+				soft(b(-0.0105, 0.0835, 0.066, 0.0028, 0.0022, 0.0028, opticBlack)), // ears
+				soft(b(0.0105, 0.0835, 0.066, 0.0028, 0.0022, 0.0028, opticBlack)),
+				soft(b(0.0158, 0.0735, 0.03, 0.0012, 0.0038, 0.011, rubber)), // button panel
+				r(0.0172, 0.0735, 0.025, 0.0009, 0.0026, 0.0026, gunBlack),   // + and -
+				r(0.0172, 0.0735, 0.035, 0.0009, 0.0026, 0.0026, gunBlack),
+				soft(b(0, 0.0805, 0.022, 0.0035, 0.0015, 0.0035, gunBlack)), // emitter
+				// The hood: walls either side of the window, round top corners
+				// (rounded rods along the hood), and the top between them.
+				soft(b(-0.0175, 0.0875, -0.002, 0.003, 0.0155, 0.016, opticBlack)),
+				soft(b(0.0175, 0.0875, -0.002, 0.003, 0.0155, 0.016, opticBlack)),
+				soft(b(-0.0158, 0.1025, -0.002, 0.0047, 0.0047, 0.016, opticBlack)),
+				soft(b(0.0158, 0.1025, -0.002, 0.0047, 0.0047, 0.016, opticBlack)),
+				soft(b(0, 0.1045, -0.002, 0.016, 0.0028, 0.016, opticBlack)),
+				soft(b(0, 0.1068, 0.012, 0.013, 0.0009, 0.0018, gunMetal)), // a lit edge along the back of the hood
+				// The glass: amber, a magenta sheen at the top, and the dot.
+				glow(b(0, 0.089, -0.004, 0.0148, 0.0142, 0.0004, withAlpha(lensAmber, 0.22))),
+				glow(b(-0.004, 0.0985, -0.0037, 0.009, 0.0038, 0.0003, withAlpha(lensSheen, 0.2))),
+				glow(r(0, 0.089, -0.002, 0.0012, 0.0012, 0.0004, sightRed)),
 			},
 			row(b(0, 0.057, -0.16, 0.013, 0.0015, 0.004, gunMetal), 9, mathx.Vec3{0, 0, 0.032}),      // rail notches
 			row(b(0.032, 0.012, -0.235, 0.0008, 0.006, 0.014, gunBlack), 3, mathx.Vec3{0, 0, 0.034}), // handguard slots
@@ -158,7 +173,7 @@ var markers = [...]marker{
 		magHold: mathx.Vec3{0, -0.12, -0.03}, magDrop: mathx.Vec3{0, -1, 0.2},
 		charge: mathx.Vec3{0.038, 0.032, 0.07},
 		grip:   mathx.Vec3{0, -0.075, 0.09}, fore: mathx.Vec3{0, -0.09, -0.17},
-		muzzle: mathx.Vec3{0, 0.018, -0.54}, sight: mathx.Vec3{0, 0.112, 0.08}, size: 0.55, relief: 0.1,
+		muzzle: mathx.Vec3{0, 0.018, -0.54}, sight: mathx.Vec3{0, 0.089, 0.08}, size: 0.55, relief: 0.1,
 	},
 	arena.WeaponPistol: {
 		parts: join(
@@ -199,18 +214,31 @@ var markers = [...]marker{
 		muzzle: mathx.Vec3{0, 0.03, -0.16}, sight: mathx.Vec3{0, 0.058, 0.09}, size: 0.6, relief: 0.19,
 	},
 	arena.WeaponShotgun: {
+		// After the SPAS-12: a long black receiver, a perforated heat shield
+		// over the barrel, the tube magazine under it, a big ribbed pump,
+		// and a skeletal folding stock with its hook; the sights a ghost
+		// ring on ears and a glowing fibre bead.
 		parts: join(
 			[]gunPart{
-				b(0, 0, 0.02, 0.032, 0.04, 0.13, markerPurple),      // receiver
-				b(0.0325, 0.01, 0.0, 0.0006, 0.012, 0.06, gunBlack), // ejection port
-				b(0, 0.02, -0.3, 0.018, 0.018, 0.18, gunBlack),      // barrel
-				b(0, 0.041, -0.3, 0.006, 0.003, 0.18, gunMetal),     // vent rib
-				b(0, 0.02, -0.49, 0.021, 0.021, 0.012, gunMetal),    // muzzle
-				r(0, 0.02, -0.5, 0.019, 0.019, 0.002, gunBlack),
-				b(0, -0.014, -0.26, 0.014, 0.014, 0.15, gunBlack),   // magazine tube
-				b(0, -0.014, -0.415, 0.016, 0.016, 0.006, gunMetal), // tube cap
-				b(0, -0.012, 0.24, 0.028, 0.04, 0.08, markerPurple), // stock
-				b(0, -0.012, 0.325, 0.03, 0.045, 0.008, rubber),     // butt pad
+				b(0, 0, 0.02, 0.029, 0.038, 0.13, gunBlack),               // receiver
+				b(0.0295, 0.006, 0.03, 0.0006, 0.022, 0.09, markerPurple), // side panels
+				b(-0.0295, 0.006, 0.03, 0.0006, 0.022, 0.09, markerPurple),
+				b(0.0302, 0.012, -0.005, 0.0006, 0.011, 0.05, gunMetal), // ejection port
+				b(0, 0.02, -0.31, 0.013, 0.013, 0.2, gunBlack),          // barrel
+				b(0, 0.022, -0.3, 0.02, 0.02, 0.145, gunMetal),          // heat shield
+				b(0, 0.02, -0.495, 0.018, 0.018, 0.012, gunBlack),       // muzzle
+				r(0, 0.02, -0.508, 0.015, 0.015, 0.002, gunMetal),
+				b(0, -0.022, -0.27, 0.014, 0.014, 0.2, gunBlack),    // magazine tube
+				b(0, -0.022, -0.475, 0.016, 0.016, 0.008, gunMetal), // tube cap
+				b(0, 0.0, -0.46, 0.012, 0.03, 0.01, gunBlack),       // barrel band
+				// The folding stock: two struts back from the receiver to the
+				// butt plate, and the hook folded down under it.
+				b(0, 0.018, 0.22, 0.006, 0.006, 0.1, gunMetal),
+				b(0, -0.035, 0.2, 0.006, 0.006, 0.1, gunMetal),
+				b(0, -0.008, 0.315, 0.012, 0.052, 0.009, gunBlack), // butt plate
+				b(0, -0.068, 0.31, 0.012, 0.012, 0.006, rubber),
+				b(0, -0.082, 0.28, 0.005, 0.005, 0.03, gunMetal), // the hook
+				b(0, -0.072, 0.252, 0.005, 0.015, 0.005, gunMetal),
 				// A big ghost ring rear, on protective ears, that frames the
 				// target; and a glowing fibre bead up front.
 				b(0, 0.048, 0.07, 0.022, 0.008, 0.014, gunBlack),
@@ -222,17 +250,23 @@ var markers = [...]marker{
 				glow(r(0, 0.07, -0.46, 0.004, 0.004, 0.004, fiberRed)),
 				glow(r(0, 0.07, -0.455, 0.0022, 0.0022, 0.006, withAlpha(fiberRed, 0.6))), // the fibre's glow
 			},
+			// The heat shield's rows of holes, top and sides.
+			row(b(0, 0.0425, -0.42, 0.005, 0.0008, 0.006, gunBlack), 7, mathx.Vec3{0, 0, 0.038}),
+			row(b(0.0205, 0.022, -0.42, 0.0008, 0.006, 0.006, gunBlack), 7, mathx.Vec3{0, 0, 0.038}),
+			row(b(-0.0205, 0.022, -0.42, 0.0008, 0.006, 0.006, gunBlack), 7, mathx.Vec3{0, 0, 0.038}),
 			row(b(0.034, -0.006, -0.03, 0.004, 0.006, 0.011, markerOrange), 4, mathx.Vec3{0, 0, 0.026}), // spare paint shells
-			hopper(-0.085, 0.04, 0.02, 0.05),
 			grip(-0.035, 0.12),
 		),
 		pump: join(
-			[]gunPart{b(0, -0.014, -0.2, 0.026, 0.024, 0.07, markerLime)},
-			row(b(0, -0.0145, -0.245, 0.0265, 0.0245, 0.0025, rubber), 5, mathx.Vec3{0, 0, 0.022}),
+			[]gunPart{
+				b(0, -0.016, -0.19, 0.03, 0.028, 0.09, markerPurple), // the pump: long and chunky
+				b(0, -0.016, -0.285, 0.027, 0.025, 0.006, gunBlack),  // its front lip
+			},
+			row(b(0, -0.0165, -0.25, 0.0305, 0.0285, 0.003, rubber), 7, mathx.Vec3{0, 0, 0.02}), // grip ribs
 		),
 		reload:  reloadShells,
 		magHold: mathx.Vec3{0, -0.045, 0.0}, // the loading port
-		grip:    mathx.Vec3{0, -0.075, 0.12}, fore: mathx.Vec3{0, -0.045, -0.2},
+		grip:    mathx.Vec3{0, -0.075, 0.12}, fore: mathx.Vec3{0, -0.045, -0.2}, foreFlat: true,
 		muzzle: mathx.Vec3{0, 0.02, -0.51}, sight: mathx.Vec3{0, 0.07, 0.1}, size: 0.55, relief: 0.1,
 	},
 	arena.WeaponSniper: {
@@ -240,8 +274,7 @@ var markers = [...]marker{
 			[]gunPart{
 				b(0, 0, 0.03, 0.028, 0.036, 0.16, markerWhite),      // receiver
 				b(0.0285, 0.0, 0.03, 0.0006, 0.008, 0.14, gunBlack), // stripe
-				b(0.028, 0.02, 0.1, 0.008, 0.006, 0.01, gunMetal),   // bolt
-				r(0.036, 0.02, 0.1, 0.007, 0.007, 0.007, gunBlack),  // bolt knob
+				b(0, 0.03, 0.1, 0.012, 0.008, 0.04, gunMetal),       // the bolt's shroud
 				b(0, 0.01, -0.25, 0.018, 0.018, 0.1, gunMetal),      // shroud
 				b(0, 0.01, -0.47, 0.012, 0.012, 0.14, gunBlack),     // barrel
 				b(0, 0.01, -0.625, 0.017, 0.013, 0.025, gunMetal),   // muzzle brake
@@ -260,8 +293,8 @@ var markers = [...]marker{
 				b(0.021, 0.085, -0.01, 0.007, 0.009, 0.009, gunMetal), // windage
 				b(0, 0.064, -0.06, 0.013, 0.012, 0.008, gunBlack),     // rings
 				b(0, 0.064, 0.06, 0.013, 0.012, 0.008, gunBlack),
-				glow(b(0, 0.085, -0.163, 0.02, 0.02, 0.0006, lensBlue)), // objective
-				glow(b(0, 0.085, 0.144, 0.015, 0.015, 0.0006, withAlpha(lensBlue, 0.5))),
+				glow(d(0, 0.085, -0.166, 0.021, lensBlue)), // objective
+				glow(d(0, 0.085, 0.146, 0.016, withAlpha(lensBlue, 0.5))),
 			},
 			hopper(-0.07, 0.03, 0.06, 0.04),
 			grip(-0.035, 0.13),
@@ -271,8 +304,16 @@ var markers = [...]marker{
 			b(0, -0.081, -0.02, 0.018, 0.003, 0.032, markerWhite), // base plate
 		},
 		magHold: mathx.Vec3{0, -0.085, -0.02}, magDrop: mathx.Vec3{0, -1, 0.1},
-		charge: mathx.Vec3{0.04, 0.02, 0.1}, // the bolt
-		grip:   mathx.Vec3{0, -0.075, 0.13}, fore: mathx.Vec3{0, -0.03, -0.22},
+		charge: mathx.Vec3{0.052, 0.02, 0.1}, // the bolt knob
+		// The bolt: a handle out to the right with a big knob, turned up
+		// and pulled back between shots (about the bore, boltPivot).
+		bolt: []gunPart{
+			b(0, 0.02, 0.1, 0.009, 0.009, 0.045, gunMetal),        // bolt body
+			b(0.028, 0.02, 0.105, 0.02, 0.0045, 0.0045, gunMetal), // handle
+			r(0.05, 0.02, 0.105, 0.009, 0.009, 0.009, gunBlack),   // knob
+		},
+		boltPivot: mathx.Vec3{0, 0.02, 0.1},
+		grip:      mathx.Vec3{0, -0.075, 0.13}, fore: mathx.Vec3{0, -0.03, -0.22}, foreFlat: true,
 		muzzle: mathx.Vec3{0, 0.01, -0.65}, sight: mathx.Vec3{0, 0.085, 0.16}, size: 0.55, relief: 0.2, scope: true,
 	},
 	arena.WeaponLauncher: {
