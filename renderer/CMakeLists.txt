@@ -150,7 +150,8 @@ find_program(GLSLC glslc HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/bin" REQ
 
 set(SHADER_SOURCES
     shaders/mesh.vert
-    shaders/mesh.frag)
+    shaders/mesh.frag
+    shaders/shadow.vert)
 
 set(SHADER_OUT_DIR "${VKGAME_BIN_DIR}/shaders")
 set(SPIRV_OUTPUTS "")

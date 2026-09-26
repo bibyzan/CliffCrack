@@ -26,6 +26,9 @@ const (
 	// DrawSky draws a procedural sky: the fog colour at the horizon blending to
 	// the draw colour overhead, with a sun disc. Use it on an inside-out dome.
 	DrawSky
+	// DrawNoShadow casts no shadow (decals, the first-person view). Unlit, sky
+	// and translucent draws never cast one either.
+	DrawNoShadow
 )
 
 // DrawCmd draws one mesh. Its layout must match RDrawCmd in renderer.h

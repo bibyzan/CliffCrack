@@ -244,10 +244,10 @@ func (m *Arena) appendBodyPaint(out []render.DrawCmd, p *arena.Player, upper, he
 		f := frame.Mul(mathx.Translate(bp.at[0], bp.at[1], bp.at[2])).Mul(alignUp(bp.normal).Mat4()).
 			Mul(mathx.RotateY(bp.spin)).Mul(mathx.Translate(0, lift, 0))
 		out = append(out, render.DrawCmd{Model: f.Mul(mathx.Scale(bp.size, 1, bp.size*0.8)), Color: bp.colour,
-			Flags: gfx.DrawFlat, Mesh: m.sc.shadow})
+			Flags: gfx.DrawFlat | gfx.DrawNoShadow, Mesh: m.sc.shadow})
 		for _, d := range bp.drops {
 			model := f.Mul(mathx.Translate(d[0], 0.0005, d[1])).Mul(mathx.Scale(d[2], 1, d[2]))
-			out = append(out, render.DrawCmd{Model: model, Color: bp.colour, Flags: gfx.DrawFlat, Mesh: m.sc.shadow})
+			out = append(out, render.DrawCmd{Model: model, Color: bp.colour, Flags: gfx.DrawFlat | gfx.DrawNoShadow, Mesh: m.sc.shadow})
 		}
 	}
 	return out

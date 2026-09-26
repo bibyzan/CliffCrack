@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 40">
+  <!-- The revolver, barrel to the right: a curved grip, the frame, the fluted cylinder, a long barrel with its underlug, the hammer and front sight. -->
+  <polygon points="6,36 14,18 26,18 24,24 16,38"/>
+  <rect x="20" y="12" width="14" height="12" rx="2"/>
+  <rect x="26" y="10" width="16" height="14" rx="3"/>
+  <rect x="29" y="14" width="10" height="2" fill="#000"/>
+  <rect x="29" y="19" width="10" height="2" fill="#000"/>
+  <rect x="40" y="12" width="36" height="6"/>
+  <rect x="40" y="18" width="30" height="4"/>
+  <polygon points="18,11 22,6 25,7 23,12"/>
+  <rect x="72" y="8" width="3" height="4"/>
+  <polygon points="26,24 32,24 30,30 26,30"/>
+</svg>

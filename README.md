@@ -64,6 +64,7 @@ build/bin/game.exe -drop 60                   # start with 60 physics balls
 build/bin/game.exe -hold W -screenshot out.png -frames 110   # scripted input for tests
 build/bin/game.exe -mode arena -hold W -click -screenshot out.png -frames 250   # ... -click holds the left button
 build/bin/game.exe -mode range -weapon sniper -aim -screenshot out.png -frames 90    # the firing range, sniper scoped (-aim holds the right button)
+build/bin/game.exe -mode arena -demolish spire -screenshot out.png -frames 420   # blow out the spire's base as the fight starts and watch it fall
 go test ./engine/... ./game/course ./game/arena   # engine, course and arena tests (no GPU needed)
 ```
 
@@ -405,7 +406,7 @@ rematch on a new site.
 - **Players** have **armour** (100) over their health (60). Armour takes hits first,
   and paint from a gun stops there: the shot that breaks it does no more. Once it
   breaks you're **popped** (a burst of paint and a pop): exposed, and one headshot from
-  a precision gun (the pistol or the sniper) kills you. Blasts, hammer blows, rubble
+  a precision gun (the pistol, revolver or sniper) kills you. Blasts, hammer blows
   and falls carry on through armour into health. Armour recharges 4 s after you last
   took damage. There's no bar: the HUD reads ARMOUR, ARMOUR CRACKED (under half), or
   ARMOUR dimmed red with your health under it once it's gone, and your view pulses.
@@ -480,6 +481,10 @@ rematch on a new site.
   (snapped back, held a beat, slammed home, the gun rocking with it; a shot a second).
   8 shells (16) of 12 pellets, 16 each: point-blank it kills in one (seven pop armour,
   five finish); past 7 m it falls away fast. Its pellets shred walls.
+- **Revolver** (a pickup): six rounds (24), 70 a ball every 0.55 s, ×1.5 to the head.
+  Three to the body kill, or two to the head. It kicks hard (the gun rears up with
+  every shot, and the view with it) and reloads slowly, the cylinder swung out and
+  refilled (2.3 s). Chrome with a walnut grip, 1.6× zoom.
 - **Sniper** (a pickup): 4 rounds (12), 110 a ball. A headshot always kills; a body shot pops
   armour and a second one finishes. Wild from the hip, dead on through the 5× scope.
   After each shot the bolt is worked, and the scope drops for it: the firing hand
@@ -514,11 +519,22 @@ rematch on a new site.
   10 m. Anything further out falls. Shoot out the keep's columns and the middle of its
   deck drops while the edges hang off the stairs and bridges. A building also comes down
   once it has lost 65% of its original footing.
+- **Stress**: every chunk carries the weight above it, shared between whatever holds it
+  up, and remembers what it carried when the site was built. Take supports away and the
+  rest carry more; one carrying over 1.6× its design load creaks (dust, a groan), loses
+  HP a little faster the more it's over, and gives way in the end, so a deck on two of
+  its four posts sags for a few seconds and then comes down.
+- **Toppling**: a big piece that loses its footing (4 or more chunks standing 2.5 m or
+  taller) doesn't fall apart where it stood. It tips over as one, pivoting on the edge of
+  its base towards the side that was hit, speeding up as it goes, and shatters where it
+  lands, or on whatever it hits on the way down. Blow out the base of the spire and the
+  whole spire falls across the arena.
 - **Debris**: a broken chunk shatters into 2–7 physics pieces (a few big ones and a
-  spray of chips; glass into shards), and collapsing chunks drop whole. Rubble falling
-  faster than 7 m/s **crushes**: it hurts players it lands on (credited to whoever broke
-  it loose) and damages the structures it hits, so a collapse can bring down what's
-  below. Rubble clears after 3–12 s or once it falls into the chasm, with at most 700
+  spray of chips; glass into shards), and collapsing chunks drop whole. Falling rubble
+  and toppling pieces don't hurt players, they **shove** them (harder the bigger they
+  are), which can push you off an edge and into the chasm (credited to whoever broke
+  it loose). Rubble falling faster than 7 m/s damages the structures it hits, so a
+  collapse can bring down what's below. Rubble clears after 3–12 s or once it falls into the chasm, with at most 700
   pieces kept. A big collapse rumbles and shakes the view.
 - **The look**: nothing in the arena is a plain box. The guns and the characters are
   built from chamfered boxes (every edge cut back, octagonal in
@@ -596,7 +612,7 @@ rematch on a new site.
   (someone else's) fizzes past and SPLATs, from where it lands. The rifle's shot is a
   tuned pop with body under a crisp transient, in four takes so a burst doesn't repeat
   itself; each player's gun is a choke group, so a shot cuts off the last one's tail.
-  Your armour recharging is a soft swell and a quiet chime.
+  Your armour recharging is a rising arpeggio of soft bells over a warm pad.
 - **The mixer** (`engine/audio`) starts each sound as far into the next block the
   device reads as it was triggered after the last read began, so rapid fire keeps its
   rhythm rather than snapping to block boundaries (a stutter). It caps voices at 40
@@ -663,8 +679,9 @@ and the bot's `Think` are just two sources of commands for the same step.
   linked together, everything stands before any damage
 - structures: support, spans, collapse, the footing rule, every blueprint in every
   rotation; blowing out the floor drops what stands on it, the keep comes down without
-  its columns, a pad dies with its floor, falling rubble hurts, and a player knocked into
-  the pit is credited to whoever hit them
+  its columns, a pad dies with its floor, falling rubble shoves but doesn't hurt,
+  overstressed supports give way, a tower and the spire topple as one (sweeping players
+  aside), and a player knocked into the pit is credited to whoever hit them
 - the bot: it kills a standing target but not instantly, and it can't see through walls
   but hears gunfire. It breaks through a wall to reach a hidden player, the skill levels
   rank easy < normal < hard, and two bots finish a whole match.
@@ -860,10 +877,16 @@ ios/                 the app's main.m and Info.plist
 - [x] Input abstraction + orbit/fly camera controls
 - [x] Entity model: scene.World with hierarchy, generational IDs, behaviours
 - [x] Hot-reloadable gameplay scripts with [Yaegi](https://github.com/traefik/yaegi)
-- [x] Audio: Go mixer on oto (WASAPI), positional pan/attenuation, `-audio=false` to mute
+- [x] Audio: Go mixer on oto (WASAPI), positional pan/attenuation, `-audio=false` to mute;
+      oto's player buffer cut to 20 ms (its default half second made every sound late)
 - [x] Physics: pure-Go rigid bodies (dynamic spheres; static/kinematic spheres and boxes)
 - [x] Heightfield terrain collider, seeded noise, streamed procedural terrain (Run mode)
 - [x] Per-draw shading flags (flat, snow, unlit, sky), distance fog, deferred mesh freeing
+- [x] Sun shadows: a 2048² shadow map, 90 m across, centred ahead of the camera and
+      moved in whole texels (no crawling edges), drawn from the frame's draw list before
+      the scene; soft edges from a filtered 3x3 comparison done in the shader (the iOS
+      Simulator's GPU has no comparing samplers). Unlit, sky, translucent and
+      `R_DRAW_NO_SHADOW` draws (decals, the first-person view) cast none
 - [x] Main menu, HUD and game-over card (anchored/overlay UI windows, scaled fonts)
 - [x] Gamepad support (GLFW on desktop, Android input), touch as mouse
 - [x] Android build: NativeActivity + c-shared Go, pre-rotated swapchain, window lifecycle
@@ -871,7 +894,7 @@ ios/                 the app's main.m and Info.plist
 
 ### Next ideas
 
-- Shadows (a sun shadow map) and PBR materials (metallic/roughness from glTF)
+- PBR materials (metallic/roughness from glTF); cascaded shadows for longer views
 - Dynamic boxes in physics (debris is sphere-collided for now); physics bodies as scene components
 - Text input and more widgets in the debug UI; an entity inspector
 - Frustum culling and instancing once scenes get large

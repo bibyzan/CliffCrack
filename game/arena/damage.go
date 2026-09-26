@@ -13,8 +13,7 @@ const (
 	// Falling rubble hurts: a piece moving faster than crushSpeed that hits
 	// a player or a standing chunk damages it by its weight and speed.
 	crushSpeed        = 7    // m/s
-	crushPlayerScale  = 0.35 // damage per sqrt(kg) m/s
-	crushPlayerMax    = 55
+	crushPush         = 0.08 // of the rubble's speed a player is shoved at, per sqrt(kg)
 	crushChunkMinMass = 25   // kg: lighter pieces just bounce off structures
 	crushChunkScale   = 0.04 // damage per kg m/s
 	crushChunkMax     = 260
@@ -30,6 +29,7 @@ func (a *Arena) damageChunk(c *Chunk, damage float32, push mathx.Vec3, by *Playe
 	if by != nil {
 		a.lastBreaker = by
 	}
+	a.lastBreakAt = c.Centre
 	if c.HP <= 0 {
 		a.breakChunk(c, push, by, ev)
 	} else {
@@ -93,21 +93,17 @@ func (a *Arena) settle(ev *Events) {
 	if !dirty {
 		return
 	}
-	for _, c := range unsupported(a.chunks) {
-		a.removeChunk(c, nil)
-		drift := mathx.Vec3{a.rng.Float32() - 0.5, -0.5, a.rng.Float32() - 0.5}.Scale(0.8)
-		d := a.addDebris(c.Centre, c.Half, c.Mat, drift)
-		d.By = a.lastBreaker
-		d.Collapsed = true
-		ev.Breaks = append(ev.Breaks, Break{At: c.Centre, Half: c.Half, Mat: c.Mat, Collapsed: true, Chunk: c})
-	}
+	a.collapse(unsupported(a.chunks), ev) // big pieces fall over, the rest crumbles
 	for _, s := range a.Structures {
 		s.dirty = false // the fallen chunks don't hold anything up either
 	}
+	computeLoads(a.chunks, false) // what's left carries more
 }
 
-// crush lets heavy, fast rubble hurt what it hits: players, and the
-// structures it lands on (so a collapse can bring down what's below it).
+// crush lets heavy, fast rubble hit what it meets: it damages the
+// structures it lands on (so a collapse can bring down what's below it),
+// and shoves players, without hurting them. A shove can still knock someone
+// into the pit: the fall is credited to whoever brought the rubble down.
 func (a *Arena) crush(ev *Events) {
 	for _, im := range a.Phys.Impacts() {
 		d, ok := im.A.UserData.(*Debris)
@@ -124,9 +120,18 @@ func (a *Arena) crush(ev *Events) {
 		mass := d.Body.Mass
 		switch o := other.UserData.(type) {
 		case *Player:
-			damage := min(float32(math.Sqrt(float64(mass)))*d.speed*crushPlayerScale, crushPlayerMax)
-			if damage >= 3 {
-				a.hurtPlayer(o, d.By, damage, false, WeaponRubble, im.Point, d.Body.Velocity.Scale(0.15), ev)
+			// Heavier pieces shove harder: up to the rubble's own speed.
+			k := min(float32(math.Sqrt(float64(mass)))*crushPush, 1)
+			shove := d.Body.Velocity.Scale(k)
+			shove[1] = max(shove[1], 0)
+			if shove.Len() > 2 {
+				shove[1] = max(shove[1], 3) // off their feet, so the shove carries (on the ground, footing would stop it dead)
+			}
+			if o.Body.Velocity.Len() < shove.Len() {
+				o.Body.Velocity = o.Body.Velocity.Add(shove.Sub(o.Body.Velocity).Scale(0.6))
+			}
+			if d.By != nil && d.By != o {
+				o.lastHitBy, o.lastHitAt = d.By, a.Time
 			}
 		case *Chunk:
 			if mass >= crushChunkMinMass {

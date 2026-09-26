@@ -56,6 +56,16 @@ var Guns = [weaponCount]*GunSpec{
 		HipSpread: 0.008, ADSSpread: 0.006, MoveSpread: 0.005, Bloom: 0.005, MaxBloom: 0.035, BloomDecay: 5, Recoil: 0.006,
 		Zoom: 1.2, ADSTime: 0.12, ADSMove: 0.85, BallSpeed: 120,
 	},
+	// The revolver: a hand cannon. Six rounds, slow, and 70 a ball: two to
+	// the body pop armour and a third drops them, or two to the head (the
+	// first pops them, the second, a precision hit, kills). It kicks hard,
+	// so the second shot has to be pulled back down onto them.
+	WeaponRevolver: {
+		Mag: 6, Reserve: 24, Interval: 0.55, Reload: 2.3, Pellets: 1,
+		Damage: 70, HeadMult: 1.5, Precision: true, ChunkDamage: 45, Range: 140, Push: 1.8,
+		HipSpread: 0.012, ADSSpread: 0.001, MoveSpread: 0.012, Bloom: 0.025, MaxBloom: 0.045, BloomDecay: 3.5, Recoil: 0.09,
+		Zoom: 1.6, ADSTime: 0.18, ADSMove: 0.75, BallSpeed: 230,
+	},
 	// The pistol: three body shots pop armour, then a headshot kills (five to
 	// the body). Measured, not spammed: quicker than the rifle for a steady
 	// hand, and the thing to draw when the rifle's empty.

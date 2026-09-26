@@ -59,7 +59,7 @@ func loadIcons() (hudIcons, error) {
 	load := loadIcon
 	var h hudIcons
 	var err error
-	for k, name := range []string{"hammer", "rifle", "pistol", "shotgun", "sniper", "launcher", "smg"} {
+	for k, name := range []string{"hammer", "rifle", "pistol", "shotgun", "sniper", "launcher", "smg", "revolver"} {
 		if h.weapons[k], err = load(name, 96); err != nil {
 			return h, err
 		}
@@ -399,6 +399,8 @@ func (h *helmet) loadout(me *arena.Player) {
 		round, rh, perRow = ic.ball, 0.016, 12
 	case arena.WeaponSMG:
 		round, rh, perRow = ic.ball, 0.009, 20
+	case arena.WeaponRevolver:
+		round, rh, perRow = ic.round, 0.03, 6
 	case arena.WeaponShotgun:
 		round, rh, perRow = ic.shell, 0.028, 8
 	case arena.WeaponSniper:

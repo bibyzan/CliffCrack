@@ -1,6 +1,6 @@
 #version 450
 
-// Must match RFrameParams (minus clear_color) in renderer.h.
+// Must match FrameUniforms in renderer.cpp.
 layout(set = 0, binding = 0) uniform Frame {
     mat4 view_proj;
     vec4 camera_pos;
@@ -8,6 +8,8 @@ layout(set = 0, binding = 0) uniform Frame {
     vec4 sun_color;
     vec4 ambient_color;
     vec4 fog_color;
+    mat4 light_view_proj;
+    vec4 shadow_params;
 } frame;
 
 // Must match the leading fields of RDrawCmd in renderer.h.

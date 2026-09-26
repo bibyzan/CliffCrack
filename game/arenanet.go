@@ -14,16 +14,17 @@ import (
 // everyone's input and sends the rest what happened; a guest sends its
 // input and plays what it's sent (see package online).
 type netPlay struct {
-	session *online.Session
-	host    bool
-	names   []string
-	peers   []string      // peer id by player index ("" for us)
-	links   []online.Link // the host's link to each guest by player index; a guest's to the host at [0]
-	recv    []online.InputReceiver
-	sender  online.InputSender
-	seq     uint32 // host: steps sent; guest: the newest snapshot applied
-	left    []bool // players whose link went down
-	over    string // why the match ended for us (the host left)
+	session  *online.Session
+	host     bool
+	cosmetic arena.Events // (a guest) what StepCosmetic showed, for the next effects
+	names    []string
+	peers    []string      // peer id by player index ("" for us)
+	links    []online.Link // the host's link to each guest by player index; a guest's to the host at [0]
+	recv     []online.InputReceiver
+	sender   online.InputSender
+	seq      uint32 // host: steps sent; guest: the newest snapshot applied
+	left     []bool // players whose link went down
+	over     string // why the match ended for us (the host left)
 
 	acc      float32     // time towards the next tick
 	pending  arena.Input // our input for the next tick
@@ -135,6 +136,8 @@ func (m *Arena) updateOnline(dt float32, in *input.State, mouseFree bool) {
 		ev = m.hostFrame(dt)
 	} else {
 		ev = m.guestFrame(dt)
+		ev.Merge(np.cosmetic) // what fell over and shattered here, between the host's updates
+		np.cosmetic = arena.Events{}
 	}
 	m.effects(dt, ev)
 	m.announce()
@@ -325,7 +328,7 @@ func (m *Arena) guestFrame(dt float32) arena.Events {
 	np.ticks(dt, func(in arena.Input) {
 		// Rubble first: stepping the world marks every body's last position,
 		// ours included, and ours should be where prediction moves it from.
-		a.StepCosmetic(netTick, me)
+		np.cosmetic.Merge(a.StepCosmetic(netTick, me))
 		if l := np.links[0]; l != nil {
 			in.ViewTime = np.interp.ViewTime() // judge our shots where we see everyone
 			msg := np.sender.Next(in, me.Yaw, me.Pitch)

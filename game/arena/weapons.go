@@ -18,7 +18,8 @@ const (
 	WeaponShotgun
 	WeaponSniper
 	WeaponLauncher
-	WeaponSMG // the submachine gun
+	WeaponSMG      // the submachine gun
+	WeaponRevolver // the hand cannon
 	weaponCount
 
 	// Not carried, but what else can take a player down.
@@ -32,7 +33,7 @@ const (
 )
 
 // WeaponNames are the HUD labels.
-var WeaponNames = [weaponCount]string{"HAMMER", "RIFLE", "PISTOL", "SHOTGUN", "SNIPER", "LAUNCHER", "SMG"}
+var WeaponNames = [weaponCount]string{"HAMMER", "RIFLE", "PISTOL", "SHOTGUN", "SNIPER", "LAUNCHER", "SMG", "REVOLVER"}
 
 // Cause is how the kill feed names what took a player down.
 func (k WeaponKind) Cause() string {

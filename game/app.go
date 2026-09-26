@@ -57,6 +57,7 @@ type Options struct {
 	StartAt   float32 // non-zero: runs start this many metres down the course (for testing sections)
 	Autopilot bool    // the player's runs steer themselves
 	Weapon    string  // Arena: start holding this weapon (by name; for screenshots)
+	Demolish  string  // Arena: as the fight starts, knock out the base of the structures of this name (to watch them fall)
 	DebugUI   bool    // show the Engine Demo's debug window at startup (F1 toggles)
 	Audio     *audio.Mixer
 	Demo      DemoOptions
@@ -185,6 +186,7 @@ func (a *App) enter(mode Mode) error {
 		m.Autopilot = a.opts.Autopilot
 		m.touchScreen = a.opts.Touch
 		m.startWeapon = a.opts.Weapon
+		m.demolish = a.opts.Demolish
 		m.newRound() // again, now it knows what to hand you
 		a.arena = m
 	}

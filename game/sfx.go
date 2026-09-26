@@ -78,19 +78,28 @@ func newArenaSounds() arenaSounds {
 		lose: audio.Synth(0.5, tone(audio.Triangle, 392, 392, 0, 300, 6, 0.8), tone(audio.Triangle, 330, 330, 130, 300, 6, 0.8),
 			tone(audio.Triangle, 262, 250, 260, 640, 3.5, 0.8)),
 		// A collapse: a long low rumble with the rattle of rubble in it.
+		// A structure under too much load: a low groan of stressed stone
+		// and steel, with a crackle in it.
+		creak: audio.Synth(0.45,
+			audio.Layer{Wave: audio.Saw, Start: 74, End: 61, Length: ms(750), Attack: ms(90), Decay: 3, Volume: 0.7, LowPass: 380, Tremolo: 6},
+			audio.Layer{Wave: audio.Triangle, Start: 148, End: 131, Length: ms(650), Attack: ms(120), Decay: 4, Volume: 0.25, LowPass: 600},
+			hiss(80, 60, 50, 0.35, 2500, 600), hiss(320, 50, 60, 0.3, 2500, 600)),
+		// A piece giving way and starting to fall over: a deep groan, the
+		// crack of it going, echoing.
+		topple: audio.Echo(audio.Synth(0.9,
+			audio.Layer{Wave: audio.Saw, Start: 60, End: 38, Length: ms(1300), Attack: ms(150), Decay: 1.8, Volume: 0.8, LowPass: 300},
+			hiss(0, 160, 18, 0.9, 1800, 150), tone(audio.Sine, 90, 45, 0, 400, 8, 0.8),
+			hiss(250, 700, 4, 0.4, 900, 0)), ms(260), 0.3, 2),
 		collapse: audio.Echo(audio.Synth(1, hiss(0, 1700, 2.4, 1, 240, 0), hiss(80, 1200, 5, 0.45, 1400, 300),
 			tone(audio.Sine, 48, 32, 0, 1500, 2.8, 0.6)), ms(300), 0.25, 2),
 		// Armour: paint on it tinks off; breaking, it shatters like glass
 		// over a thump; coming back, a rising shimmer.
 		armour: audio.Synth(0.3, tone(audio.Sine, 2600, 2300, 0, 110, 32, 0.8), tone(audio.Sine, 3900, 3700, 0, 80, 40, 0.3), hiss(0, 40, 90, 0.4, 0, 5000)),
 		pop:    audio.Synth(0.9, hiss(0, 320, 11, 1, 0, 2800), tone(audio.Sine, 1500, 380, 0, 260, 10, 0.7), tone(audio.Sine, 130, 60, 0, 200, 15, 0.8)),
-		// ... coming back, a soft airy swell under a warm rising tone, and a
-		// quiet chime as it settles: heard, not startling.
-		recharge: audio.Synth(0.22,
-			audio.Layer{Wave: audio.Noise, Length: ms(520), Attack: ms(260), Decay: 5, Volume: 0.3, LowPass: 2000, HighPass: 350},
-			audio.Layer{Wave: audio.Sine, Start: 392, End: 587, Length: ms(480), Attack: ms(220), Decay: 3, Volume: 0.45},
-			audio.Layer{Wave: audio.Sine, Start: 1175, End: 1175, Delay: ms(300), Length: ms(420), Attack: ms(12), Decay: 9, Volume: 0.18},
-			audio.Layer{Wave: audio.Sine, Start: 1760, End: 1760, Delay: ms(300), Length: ms(320), Attack: ms(12), Decay: 12, Volume: 0.07}),
+		// ... coming back, a quick rising arpeggio of soft bells (G major:
+		// G, B, D and the G above), a warm pad under it: a pleasant "you're
+		// back", quiet enough to sit under a fight.
+		recharge: audio.Synth(0.2, rechargeLayers()...),
 		// Grenades: the pin and a whoosh of the throw; a sticky's wet slap
 		// and arming chirp as it sticks; its bright burst of paint.
 		throw: audio.Synth(0.4, click(0, 0.8), audio.Layer{Wave: audio.Noise, Delay: ms(60), Length: ms(220), Attack: ms(80), Decay: 12, Volume: 1, LowPass: 2400, HighPass: 300}),
@@ -150,6 +159,10 @@ func newArenaSounds() arenaSounds {
 			audio.Layer{Wave: audio.Noise, Length: ms(48), Attack: ms(2), Decay: 65, Volume: 0.35, LowPass: 5000, HighPass: 1100},
 			click(20, 0.18))
 	})
+	// The revolver: a big deep crack and boom, and its echo off the walls.
+	s.guns[arena.WeaponRevolver] = audio.Echo(audio.Synth(0.9, hiss(0, 30, 90, 1, 0, 2200),
+		tone(audio.Sine, 900, 180, 0, 70, 40, 0.8), tone(audio.Sine, 95, 38, 0, 320, 9, 1),
+		hiss(0, 260, 14, 0.6, 1400, 0), click(0, 0.6)), ms(240), 0.25, 2)
 	s.guns[arena.WeaponPistol] = audio.Synth(0.5, hiss(0, 80, 42, 1, 7500, 700), tone(audio.Sine, 190, 85, 0, 80, 32, 0.8), click(0, 0.6))
 	s.guns[arena.WeaponShotgun] = audio.Synth(0.9, hiss(0, 260, 16, 1, 3200, 0), tone(audio.Sine, 95, 42, 0, 220, 12, 1),
 		hiss(0, 60, 50, 0.5, 0, 2000), click(360, 0.7), hiss(380, 70, 45, 0.4, 3000, 800), click(470, 0.8))
@@ -202,4 +215,24 @@ func newRunSounds() runSounds {
 		smash: audio.Synth(0.9, hiss(0, 260, 14, 1, 3000, 150), tone(audio.Square, 220, 60, 0, 160, 18, 0.35),
 			click(0, 0.8), click(35, 0.5)),
 	}
+}
+
+// rechargeLayers are the armour recharge chime's: four bell notes rising
+// 70 ms apart, each a sine with softer octave and twelfth overtones and a
+// gentle attack, over a soft pad swelling from the root.
+func rechargeLayers() []audio.Layer {
+	notes := []float32{784, 988, 1175, 1568} // G5 B5 D6 G6
+	var ls []audio.Layer
+	for i, f := range notes {
+		d := ms(float64(i) * 70)
+		vol := float32(0.5) - float32(i)*0.06
+		decay := float32(7) + float32(i)
+		ls = append(ls,
+			audio.Layer{Wave: audio.Sine, Start: f, End: f, Delay: d, Length: ms(520), Attack: ms(6), Decay: decay, Volume: vol},
+			audio.Layer{Wave: audio.Sine, Start: 2 * f, End: 2 * f, Delay: d, Length: ms(260), Attack: ms(4), Decay: 16, Volume: vol * 0.18},
+			audio.Layer{Wave: audio.Sine, Start: 3 * f, End: 3 * f, Delay: d, Length: ms(160), Attack: ms(3), Decay: 26, Volume: vol * 0.06})
+	}
+	return append(ls,
+		audio.Layer{Wave: audio.Sine, Start: 392, End: 392, Length: ms(700), Attack: ms(140), Decay: 4, Volume: 0.22},
+		audio.Layer{Wave: audio.Sine, Start: 588, End: 588, Length: ms(700), Attack: ms(160), Decay: 4.5, Volume: 0.1})
 }

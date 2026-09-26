@@ -46,6 +46,7 @@ func run() error {
 	drop := flag.Int("drop", 0, "number of physics balls to drop at startup")
 	hold := flag.String("hold", "", `keys to hold down every frame, e.g. "W" or "WD" (for scripted tests)`)
 	click := flag.Bool("click", false, "hold the left mouse button every frame (for scripted tests)")
+	demolish := flag.String("demolish", "", `Arena: as the fight starts, knock out the base of the structures with this name, e.g. "spire" (to watch it fall)`)
 	weapon := flag.String("weapon", "", `Arena: start holding this weapon ("rifle", "pistol", "shotgun", "sniper" or "launcher"; for screenshots)`)
 	server := flag.String("server", "", `online: the coordinator, e.g. "192.168.1.20:8080" (default: the setting, else localhost:8080)`)
 	name := flag.String("name", "", "online: the name to go by (default: the setting, else your account name)")
@@ -117,6 +118,7 @@ func run() error {
 		Seed:      *seed,
 		Autopilot: *autopilot,
 		Weapon:    *weapon,
+		Demolish:  *demolish,
 		Server:    *server,
 		AutoHost:  *hostRoom,
 		AutoJoin:  *joinRoom,

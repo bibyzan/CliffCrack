@@ -67,6 +67,8 @@ enum {
     R_DRAW_SNOW  = 1 << 1, // colour only faces that point up; steep faces become darker rock
     R_DRAW_UNLIT = 1 << 2, // colour as-is, no lighting (still fogged)
     R_DRAW_SKY   = 1 << 3, // procedural sky: fog colour at the horizon to `color` overhead, sun disc; no fog
+    R_DRAW_NO_SHADOW = 1 << 4, // casts no shadow (decals, the first-person view). Unlit, sky and
+                               //   translucent (alpha < 1) draws never cast one either.
 };
 
 // One draw of one mesh. Must match render.DrawCmd in Go.

@@ -140,22 +140,24 @@ func TestStairsClimbToTheKeep(t *testing.T) {
 	}
 }
 
-func TestFallingRubbleHurts(t *testing.T) {
-	a := flatArena(nil, at(0, 0, 0))
-	p := a.Players[0]
+// Falling rubble shoves you but never hurts, and the shove is credited to
+// whoever brought it down (a fall into the pit is theirs).
+func TestFallingRubbleShovesButDoesntHurt(t *testing.T) {
+	a := flatArena(nil, at(0, 0, 0), at(10, 10, 0))
+	p, by := a.Players[0], a.Players[1]
 	run(a, 0.2)
-	d := a.addDebris(p.Body.Position.Add(mathx.Vec3{0, 4, 0}), mathx.Vec3{0.5, 0.5, 0.5}, Concrete, mathx.Vec3{0, -10, 0})
-	d.By = nil
+	d := a.addDebris(p.Body.Position.Add(mathx.Vec3{-0.6, 3, 0}), mathx.Vec3{0.5, 0.5, 0.5}, Concrete, mathx.Vec3{6, -10, 0})
+	d.By = by
+	start := p.Body.Position
 	ev := run(a, 0.5)
-	if p.Durability() >= MaxShield+MaxHealth || len(ev.Hurts) == 0 {
-		t.Fatalf("a falling block of concrete didn't hurt: %v left", p.Durability())
+	if p.Durability() < MaxShield+MaxHealth || len(ev.Hurts) != 0 {
+		t.Fatalf("falling concrete hurt: %v left", p.Durability())
 	}
-	// Lying still, it's harmless to walk into.
-	health := p.Durability()
-	run(a, 1.5)
-	run(a, 0.5, Input{Move: [2]float32{0.3, 0.3}})
-	if p.Durability() < health {
-		t.Errorf("rubble at rest hurt: %v -> %v", health, p.Durability())
+	if moved := p.Body.Position.Sub(start); moved.Len() < 0.3 {
+		t.Errorf("falling concrete didn't shove the player (moved %v)", moved)
+	}
+	if p.lastHitBy != by {
+		t.Error("the shove should be credited to whoever brought the rubble down")
 	}
 }
 

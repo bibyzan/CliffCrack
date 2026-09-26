@@ -107,3 +107,16 @@ func TestSniperBoltDropsScope(t *testing.T) {
 		t.Errorf("ADS %v once the bolt's home, want the scope back up", p.ADS)
 	}
 }
+
+// The revolver: three to the body, or two to the head.
+func TestRevolver(t *testing.T) {
+	if got := hitsToKill(t, WeaponRevolver, false); got != 3 {
+		t.Errorf("revolver: %d body shots to kill, want 3", got)
+	}
+	if got := hitsToKill(t, WeaponRevolver, true); got != 2 {
+		t.Errorf("revolver: %d headshots to kill, want 2", got)
+	}
+	if r := Guns[WeaponRevolver]; r.Recoil < 3*Guns[WeaponPistol].Recoil || r.Damage < 2*Guns[WeaponPistol].Damage {
+		t.Error("the revolver should hit far harder and kick far more than the pistol")
+	}
+}

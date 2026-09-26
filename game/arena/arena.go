@@ -198,6 +198,7 @@ type Break struct {
 	At, Half  mathx.Vec3
 	Mat       Material
 	Collapsed bool // fell because nothing held it up, rather than broken
+	Toppled   bool // part of a piece that fell over, shattering where it landed
 	Chunk     *Chunk
 	Push      mathx.Vec3 // what it was hit with (its pieces fly with it)
 }
@@ -280,7 +281,9 @@ type Events struct {
 	Explosions []Explosion
 	Stuck      []Stick
 	Actions    []Action
-	Chipped    []*Chunk // damaged but still standing
+	Chipped    []*Chunk  // damaged but still standing
+	Strained   []*Chunk  // overstressed, creaking (see collapse.go)
+	Topples    []*Topple // pieces starting to fall over
 }
 
 func (ev *Events) act(p *Player, k ActionKind, v float32) {
@@ -318,6 +321,8 @@ func (ev *Events) Merge(o Events) {
 	ev.Stuck = append(ev.Stuck, o.Stuck...)
 	ev.Chipped = append(ev.Chipped, o.Chipped...)
 	ev.Actions = append(ev.Actions, o.Actions...)
+	ev.Strained = append(ev.Strained, o.Strained...)
+	ev.Topples = append(ev.Topples, o.Topples...)
 }
 
 // Arena is one round's state: the site (the indestructible shell,
@@ -347,6 +352,10 @@ type Arena struct {
 	nextGrenade int         // the last grenade's ID
 	chunks      []*Chunk    // every structure's, linked together
 	lastBreaker *Player     // who last damaged a structure: collapses are theirs
+	lastBreakAt mathx.Vec3  // where the last chunk broke (a toppling piece falls that way)
+
+	Topples    []*Topple // pieces of structures falling over (collapse.go)
+	nextTopple int
 }
 
 // New generates the site for seed with players at the spawns: player i
@@ -373,6 +382,7 @@ func newArena(seed uint64, site *Site) *Arena {
 	a.Phys.Gravity = mathx.Vec3{0, -gravity, 0}
 	addLevel(a.Phys, a.Level)
 	a.chunks = linkAll(a.Structures, a.Level)
+	computeLoads(a.chunks, true) // the design loads: what each piece carries as built
 	a.addSpots(site.Spots)
 	for _, s := range a.Structures {
 		for _, c := range s.Chunks {
@@ -470,6 +480,8 @@ func (a *Arena) Step(dt float32, inputs []Input) Events {
 	a.updateGrenades(dt, &ev)
 	a.updatePickups(dt)
 	a.settle(&ev)
+	a.strain(dt, &ev)
+	a.stepTopples(dt, true, &ev)
 	a.ageDebris(dt)
 	a.recordPast()
 	return ev

@@ -65,6 +65,11 @@ type Chunk struct {
 	anchored bool    // rests on the ground, or on something indestructible
 	base     bool    // anchored, or resting on another structure: its footing
 	reach    float32 // scratch for unsupported
+
+	// Stress (see collapse.go).
+	load, designLoad float32 // kg carried now, and when the site was built
+	order            int     // scratch for computeLoads: when it was settled
+	strainedAt       float32 // when it last creaked
 }
 
 // Slope is a tilted box standing in for a chunk in the physics.

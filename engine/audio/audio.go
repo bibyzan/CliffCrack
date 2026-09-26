@@ -73,6 +73,9 @@ const (
 	limitCeil  = 0.95                  // the limiter keeps the output under this
 	limitRel   = 0.08                  // s for the limiter to recover after a peak
 	busGain    = 0.8                   // headroom before the limiter
+
+	playerBuffer = SampleRate * 20 / 1000 // frames the device reads ahead of what's heard (20 ms)
+	maxWait      = SampleRate * 25 / 1000 // frames a sound is ever held back to keep its timing (see start)
 )
 
 // Mixer sums playing voices into one stereo stream. It is safe to call from
@@ -153,7 +156,7 @@ func (m *Mixer) start(s *Sound, volume, pan float32, loop bool) Voice {
 	// block boundaries, unevenly: a stutter.
 	wait := 0
 	if !m.readAt.IsZero() {
-		wait = min(int(time.Since(m.readAt).Seconds()*SampleRate), m.readFrames)
+		wait = min(int(time.Since(m.readAt).Seconds()*SampleRate), m.readFrames, maxWait)
 	}
 	m.next++
 	m.voices = append(m.voices, voice{
@@ -300,6 +303,11 @@ func Open(m *Mixer) (*Device, error) {
 	}
 	<-ready
 	p := ctx.NewPlayer(m)
+	// oto's player reads ahead from the mixer into a buffer of its own,
+	// half a second of sound by default, and a sound started now would only
+	// be heard behind all of it: a gunshot half a second (or more) late.
+	// Keep it to a few ms, just enough to not run dry.
+	p.SetBufferSize(playerBuffer * 8) // stereo float32 frames
 	p.Play()
 	return &Device{player: p}, nil
 }

@@ -56,6 +56,7 @@ type marker struct {
 	magDrop    mathx.Vec3 // which way it comes out
 	charge     mathx.Vec3 // a handle the supporting hand works after a new magazine (zero: none)
 	pump       []gunPart  // slides back and forth after each shot (a pump shotgun)
+	kick       float32    // how hard it kicks up in your hands per shot (0: the usual)
 	bolt       []gunPart  // turned and pulled back after each shot (a bolt action), about boltPivot
 	boltPivot  mathx.Vec3
 }
@@ -161,6 +162,8 @@ func ballSize(k arena.WeaponKind) float32 {
 		return 0.022
 	case arena.WeaponSMG:
 		return 0.024
+	case arena.WeaponRevolver:
+		return 0.034
 	}
 	return 0.028
 }
@@ -176,6 +179,8 @@ func splatSize(k arena.WeaponKind) float32 {
 		return 0.17
 	case arena.WeaponSMG:
 		return 0.11
+	case arena.WeaponRevolver:
+		return 0.24
 	}
 	return 0.13
 }
@@ -245,10 +250,10 @@ func (m *Arena) appendPaint(out []render.DrawCmd) []render.DrawCmd {
 		frame := mathx.Translate(s.at[0], s.at[1], s.at[2]).Mul(alignUp(s.normal).Mat4()).Mul(mathx.RotateY(s.spin)).
 			Mul(mathx.Translate(0, s.lift, 0))
 		col := withAlpha(s.colour, 0.95*fade)
-		out = append(out, render.DrawCmd{Model: frame.Mul(mathx.Scale(s.size, 1, s.size*0.8)), Color: col, Flags: gfx.DrawFlat, Mesh: m.sc.shadow})
+		out = append(out, render.DrawCmd{Model: frame.Mul(mathx.Scale(s.size, 1, s.size*0.8)), Color: col, Flags: gfx.DrawFlat | gfx.DrawNoShadow, Mesh: m.sc.shadow})
 		for _, d := range s.drops {
 			model := frame.Mul(mathx.Translate(d[0], 0.0004, d[1])).Mul(mathx.Scale(d[2], 1, d[2]))
-			out = append(out, render.DrawCmd{Model: model, Color: col, Flags: gfx.DrawFlat, Mesh: m.sc.shadow})
+			out = append(out, render.DrawCmd{Model: model, Color: col, Flags: gfx.DrawFlat | gfx.DrawNoShadow, Mesh: m.sc.shadow})
 		}
 	}
 	return out

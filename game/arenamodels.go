@@ -21,6 +21,8 @@ var (
 	opticBlack = mathx.SRGB(0.05, 0.05, 0.06, 1) // anodised: a touch darker than the gun's black
 	lensAmber  = mathx.SRGB(1.00, 0.55, 0.22, 1) // a reflex window's coating
 	lensSheen  = mathx.SRGB(0.95, 0.45, 0.95, 1) // ... and the magenta at its edge
+	chrome     = mathx.SRGB(0.72, 0.74, 0.78, 1) // polished steel
+	walnut     = mathx.SRGB(0.42, 0.24, 0.13, 1) // a wooden grip
 )
 
 // b, r and o are shorthands for a box, a ball and a ring part.
@@ -390,5 +392,48 @@ var markers = [...]marker{
 		charge: mathx.Vec3{0.028, 0.03, 0.02},
 		grip:   mathx.Vec3{0, -0.08, 0.06}, fore: mathx.Vec3{0, -0.07, -0.15},
 		muzzle: mathx.Vec3{0, 0.012, -0.24}, sight: mathx.Vec3{0, 0.071, 0.04}, size: 0.55, relief: 0.12,
+	},
+	arena.WeaponRevolver: {
+		// A big polished hand cannon: a long barrel over a full underlug, a
+		// chunky frame and hammer, a rounded wooden grip, a notch rear sight
+		// and a glowing red front blade. The fluted cylinder swings out to
+		// the left to reload.
+		parts: join(
+			[]gunPart{
+				soft(b(0, 0.022, -0.02, 0.018, 0.028, 0.045, chrome)),  // frame
+				soft(b(0, 0.04, -0.15, 0.013, 0.012, 0.09, chrome)),    // barrel
+				soft(b(0, 0.018, -0.14, 0.012, 0.013, 0.085, chrome)),  // underlug
+				b(0, 0.052, -0.14, 0.004, 0.003, 0.085, gunBlack),      // vent rib
+				r(0, 0.04, -0.242, 0.011, 0.011, 0.003, gunBlack),      // muzzle
+				soft(b(0, 0.055, 0.035, 0.005, 0.01, 0.012, gunBlack)), // hammer
+				b(0, 0.059, 0.02, 0.009, 0.003, 0.006, gunBlack),       // rear sight
+				b(0, 0.057, -0.225, 0.0025, 0.007, 0.008, gunBlack),    // front blade
+				glow(b(0, 0.063, -0.221, 0.0026, 0.0026, 0.0006, fiberRed)),
+				b(0, -0.012, 0.0, 0.003, 0.012, 0.028, gunBlack),      // trigger guard
+				b(0, -0.006, 0.005, 0.003, 0.01, 0.003, gunMetal),     // trigger
+				soft(b(0, -0.045, 0.05, 0.016, 0.045, 0.022, walnut)), // grip
+				soft(b(0, -0.088, 0.063, 0.017, 0.008, 0.024, walnut)),
+			},
+		),
+		// The cylinder: fluted, six chambers of paint showing at the back.
+		mag: join(
+			[]gunPart{r(0, 0.032, -0.052, 0.024, 0.024, 0.03, chrome)},
+			[]gunPart{
+				glow(r(0, 0.05, -0.022, 0.0045, 0.0045, 0.002, paintBalls)),
+				glow(r(0.0155, 0.041, -0.022, 0.0045, 0.0045, 0.002, paintBalls)),
+				glow(r(0.0155, 0.023, -0.022, 0.0045, 0.0045, 0.002, paintBalls)),
+				glow(r(0, 0.014, -0.022, 0.0045, 0.0045, 0.002, paintBalls)),
+				glow(r(-0.0155, 0.023, -0.022, 0.0045, 0.0045, 0.002, paintBalls)),
+				glow(r(-0.0155, 0.041, -0.022, 0.0045, 0.0045, 0.002, paintBalls)),
+				b(0.0245, 0.032, -0.052, 0.001, 0.004, 0.026, gunBlack), // flutes
+				b(-0.0245, 0.032, -0.052, 0.001, 0.004, 0.026, gunBlack),
+				b(0, 0.0565, -0.052, 0.004, 0.001, 0.026, gunBlack),
+			},
+		),
+		reload:  reloadDrum,
+		magHold: mathx.Vec3{-0.03, 0.032, -0.052}, magDrop: mathx.Vec3{-1, -0.3, 0},
+		kick: 0.3,
+		grip: mathx.Vec3{0, -0.05, 0.05}, fore: mathx.Vec3{-0.02, -0.08, 0.04},
+		muzzle: mathx.Vec3{0, 0.04, -0.25}, sight: mathx.Vec3{0, 0.062, 0.08}, size: 0.6, relief: 0.2,
 	},
 }

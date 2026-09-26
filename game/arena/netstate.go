@@ -278,6 +278,7 @@ type NetEvents struct {
 	Explosions []NetExplosion `json:",omitempty"`
 	Stuck      []NetStick     `json:",omitempty"`
 	Actions    []NetAction    `json:",omitempty"`
+	Topples    []NetTopple    `json:",omitempty"`
 }
 
 type (
@@ -319,6 +320,13 @@ type (
 		By   int
 		Kind GrenadeKind
 	}
+	NetTopple struct {
+		Chunks        []int
+		Pivot, Axis   V3
+		Support, Spin float32
+		Lever, Far    float32
+		By            int
+	}
 	NetStick  struct{ Grenade, On int }
 	NetAction struct {
 		By    int
@@ -330,7 +338,7 @@ type (
 // Empty reports whether nothing happened.
 func (e *NetEvents) Empty() bool {
 	return len(e.Shots)+len(e.Hurts)+len(e.Kills)+len(e.Breaks)+len(e.Chipped)+len(e.Smashes)+
-		len(e.Explosions)+len(e.Stuck)+len(e.Actions) == 0
+		len(e.Explosions)+len(e.Stuck)+len(e.Actions)+len(e.Topples) == 0
 }
 
 func chunkID(c *Chunk) int {
@@ -377,6 +385,13 @@ func (ev *Events) Net() NetEvents {
 	for _, act := range ev.Actions {
 		n.Actions = append(n.Actions, NetAction{By: playerID(act.By), Kind: act.Kind, Value: act.Value})
 	}
+	for _, t := range ev.Topples {
+		nt := NetTopple{Pivot: v3(t.Pivot), Axis: v3(t.Axis), Support: t.Support, Spin: t.Spin, Lever: t.lever, Far: t.far, By: playerID(t.By)}
+		for _, c := range t.Chunks {
+			nt.Chunks = append(nt.Chunks, c.ID)
+		}
+		n.Topples = append(n.Topples, nt)
+	}
 	return n
 }
 
@@ -412,6 +427,25 @@ func (a *Arena) ApplyEvents(n *NetEvents) Events {
 			a.breakChunk(c, vec(b.Push), nil, &ev)
 		}
 		c.Structure.dirty = false // the host decides what falls; it'll say
+	}
+	// Pieces falling over: they fall here too (and shatter here, cosmetically).
+	for _, nt := range n.Topples {
+		t := &Topple{ID: a.nextTopple, Pivot: vec(nt.Pivot), Axis: vec(nt.Axis), Support: nt.Support, Spin: nt.Spin,
+			lever: nt.Lever, far: nt.Far, By: a.player(nt.By)}
+		a.nextTopple++
+		t.own = map[*Structure]bool{}
+		for _, id := range nt.Chunks {
+			if c := chunk(id); c != nil && c.Alive {
+				a.removeChunk(c, nil)
+				c.Structure.dirty = false
+				t.Chunks = append(t.Chunks, c)
+				t.own[c.Structure] = true
+			}
+		}
+		if len(t.Chunks) > 0 {
+			a.Topples = append(a.Topples, t)
+			ev.Topples = append(ev.Topples, t)
+		}
 	}
 	for _, s := range n.Shots {
 		ev.Shots = append(ev.Shots, Shot{By: a.player(s.By), Victim: a.player(s.Victim), From: vec(s.From), To: vec(s.To),
@@ -473,7 +507,10 @@ func (a *Arena) Predict(p *Player, in Input, dt float32) {
 // players carry on along their velocities, rubble flies and settles, and
 // old pieces clear. Nothing that matters to the match happens here. keep
 // (the client's own, predicted player; nil for none) isn't moved.
-func (a *Arena) StepCosmetic(dt float32, keep *Player) {
+//
+// It returns what happened that the game shows: pieces falling over land
+// and shatter here in their own time.
+func (a *Arena) StepCosmetic(dt float32, keep *Player) Events {
 	var pos, vel mathx.Vec3
 	var grounded bool
 	if keep != nil {
@@ -490,6 +527,9 @@ func (a *Arena) StepCosmetic(dt float32, keep *Player) {
 			g.Body.Velocity[1] -= gravity * dt
 		}
 	}
+	var ev Events
+	a.stepTopples(dt, false, &ev) // (the host pushes players; the guest just watches)
+	return ev
 }
 
 // NetMatch is a match's standing.

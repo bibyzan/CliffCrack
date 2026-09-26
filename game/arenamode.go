@@ -90,6 +90,7 @@ type arenaSounds struct {
 	elbow, punch, hook, catch, release, draw             *audio.Sound
 	slide, vault, climb                                  *audio.Sound
 	nearSplat                                            *audio.Sound
+	creak, topple                                        *audio.Sound
 	guns                                                 [len(arena.WeaponNames)]*audio.Sound
 	breaks                                               [arena.MaterialCount]*audio.Sound
 }
@@ -143,6 +144,7 @@ type Arena struct {
 	// Practice is the firing range rather than a match against the bot.
 	Practice    bool
 	startWeapon string // hand the local player this weapon each round (for screenshots)
+	demolish    string // knock out the base of the structures of this name as the fight starts (-demolish)
 
 	balls      []paintball
 	splats     []splat
@@ -179,6 +181,7 @@ type Arena struct {
 	lastPump   float32          // the shotgun's time since its last shot, last frame
 	lastBolt   float32          // ... and the sniper's
 	lastNear   float32          // when (elapsed) the last near-miss splat played
+	lastCreak  float32          // ... and the last creak of an overloaded structure
 	bodyPaint  [][]bodyPaint    // the paint on each player (by ID), this round
 	droplets   []droplet        // paint bursting off hits
 	wasDown    []bool           // each player was down last frame (their paint goes when they get up)
@@ -334,6 +337,10 @@ func (m *Arena) Update(dt float32, in *input.State, mouseFree bool) {
 		}
 	}
 	ev := m.match.Step(dt, m.inputs)
+	if m.demolish != "" && m.match.Phase == arena.PhaseFight {
+		m.sim().Demolish(m.demolish, &ev) // (-demolish: once, as the first fight starts)
+		m.demolish = ""
+	}
 	for i, b := range m.bots {
 		if b != nil {
 			b.Hear(a, a.Players[i], &ev)
@@ -558,7 +565,7 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 	m.popped *= float32(math.Exp(-1.5 * float64(dt)))
 	// Your armour starting to come back.
 	if charging := me.Shield < arena.MaxShield && me.Shield > 0 && !me.Dead && me.Shield > m.lastShield; charging && !m.charging {
-		m.play(m.sfx.recharge, 0.25)
+		m.play(m.sfx.recharge, 0.32)
 		m.charging = true
 	} else if !charging {
 		m.charging = false
@@ -699,7 +706,7 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		// chips thrown off it.
 		size := max(b.Half[0], b.Half[1], b.Half[2]) * 1.4
 		life := float32(0.55)
-		if b.Collapsed {
+		if b.Collapsed || b.Toppled {
 			life = 1.2
 			fell++
 			fellAt = fellAt.Add(b.At)
@@ -715,6 +722,31 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		if heard < breakSounds {
 			m.playAt(m.sfx.breaks[b.Mat], b.At, 0.8)
 			heard++
+		}
+	}
+	// Overstressed pieces creak (not too often), shedding dust.
+	for _, c := range ev.Strained {
+		if m.rng.Float32() < 0.35 {
+			m.addBurst(burst{at: c.Centre.Add(mathx.Vec3{0, -c.Half[1], 0}), size: 0.3, life: 0.8, grow: true, lit: true,
+				colour: withAlpha(dustColor[c.Mat], 0.45)})
+		}
+		if m.elapsed-m.lastCreak > 0.6 {
+			m.lastCreak = m.elapsed
+			m.playAt(m.sfx.creak, c.Centre, 0.9)
+		}
+	}
+	// Something starting to fall over: its groan, from its base, and dust
+	// bursting out along it.
+	for _, t := range ev.Topples {
+		m.playAt(m.sfx.topple, t.Pivot, 1)
+		for i, c := range t.Chunks {
+			if i%4 == 0 {
+				m.addBurst(burst{at: c.Centre, size: max(c.Half[0], c.Half[1], c.Half[2]) * 2, life: 1, grow: true, lit: true,
+					colour: withAlpha(dustColor[c.Mat], 0.5)})
+			}
+		}
+		if dist := t.Pivot.Sub(eye).Len(); dist < 40 {
+			m.shake = max(m.shake, 0.4*(1-dist/40))
 		}
 	}
 	if fell >= 6 {
@@ -1072,8 +1104,12 @@ func (m *Arena) weaponModel() mathx.Mat4 {
 		// Sights up: the sight sits on the eye's line, a hand's width out.
 		aimed := mathx.Vec3{0, 0, -mk.relief}.Sub(mk.sight.Scale(size))
 		offset = offset.Add(aimed.Sub(offset).Scale(ads))
+		kickUp := float32(0.07)
+		if mk.kick > 0 {
+			kickUp = mk.kick
+		}
 		offset[2] += 0.03 * kick
-		pitch += 0.07 * kick * (1 - 0.6*ads)
+		pitch += kickUp * kick * (1 - 0.6*ads)
 		roll *= 1 - ads
 	}
 	return m.camWorld().
@@ -1129,6 +1165,7 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 	out = append(out, m.trim...)
 	out = m.appendPads(out)
 	out = m.appendStructures(out)
+	out = m.appendTopples(out)
 	for i, p := range m.sim().Players {
 		if p != m.me() {
 			out = m.appendCharacter(out, p, m.strides[i])
@@ -1141,6 +1178,7 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 	out = m.appendDroplets(out)
 	out = append(out, m.glass...) // translucent: after every solid
 	out = m.appendEffects(out)
+	view := len(out) // from here on, the first-person view: it casts no shadow
 	scoped := false
 	if mk, ok := m.markerFor(m.me().Current); ok && mk.scope && m.me().ADS > 0.85 {
 		scoped = true // looking through the scope, not at the gun
@@ -1150,7 +1188,11 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 	}
 	out = m.appendHurt(out)
 	out = m.appendReticle(out, fov)
-	return params, m.appendHelmet(out, fov, aspect)
+	out = m.appendHelmet(out, fov, aspect)
+	for i := view; i < len(out); i++ {
+		out[i].Flags |= gfx.DrawNoShadow
+	}
+	return params, out
 }
 
 // appendStructures draws every standing chunk, darkening as it takes damage,
@@ -1365,4 +1407,26 @@ func runFactors(p *arena.Player) (run, sprint float32) {
 	v := p.Body.Velocity
 	speed := float32(math.Hypot(float64(v[0]), float64(v[2])))
 	return clampf(speed/arena.WalkSpeed, 0, 1), clampf((speed-arena.WalkSpeed)/(arena.SprintSpeed-arena.WalkSpeed), 0, 1)
+}
+
+// appendTopples draws the pieces of structures falling over: each chunk as
+// it stood, turned with the piece.
+func (m *Arena) appendTopples(out []render.DrawCmd) []render.DrawCmd {
+	for _, t := range m.sim().Topples {
+		f := t.Frame()
+		for _, c := range t.Chunks {
+			d := render.DrawCmd{
+				Model:   f.Mul(mathx.Translate(c.Centre[0], c.Centre[1], c.Centre[2])).Mul(mathx.Scale(c.Half[0], c.Half[1], c.Half[2])),
+				Color:   materialColor[c.Mat],
+				Texture: m.as.materials[c.Mat],
+				Mesh:    m.as.bevel,
+			}
+			if c.Mat == arena.Glass {
+				m.glass = append(m.glass, d)
+			} else {
+				out = append(out, d)
+			}
+		}
+	}
+	return out
 }
