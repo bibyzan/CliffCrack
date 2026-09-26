@@ -257,8 +257,7 @@ func TestHammerTwoBlowsDownAPlayer(t *testing.T) {
 	a, attacker, target := duel(2.2)
 	attacker.Pitch = -0.1
 	before := target.Body.Position
-	ev := run(a, frame, Input{Melee: true})
-	ev.Merge(run(a, HammerSwing))
+	ev := swing(a)
 	if len(ev.Smashes) != 1 || ev.Smashes[0].Victim != target {
 		t.Fatalf("the blow should land on the player: smashes %+v", ev.Smashes)
 	}
@@ -271,8 +270,7 @@ func TestHammerTwoBlowsDownAPlayer(t *testing.T) {
 	// Close in again and swing.
 	target.Body.Position, target.Body.Velocity = attacker.Body.Position.Add(mathx.Vec3{0, 0, -2.2}), mathx.Vec3{}
 	target.Body.Teleported()
-	run(a, frame, Input{Melee: true})
-	run(a, HammerSwing)
+	swing(a)
 	if !target.Dead {
 		t.Errorf("two blows should kill: health %v", target.Health)
 	}

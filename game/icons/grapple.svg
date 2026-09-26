@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 40">
+  <!-- The grapple: a wrist launcher, its line running out to a three-pronged hook. -->
+  <rect x="2" y="13" width="22" height="14"/>
+  <rect x="6" y="17" width="12" height="6" fill="#000"/>
+  <rect x="24" y="18.5" width="34" height="3"/>
+  <rect x="56" y="15" width="8" height="10"/>
+  <polygon points="64,15 78,4 74,15"/>
+  <polygon points="64,25 78,36 74,25"/>
+  <polygon points="64,18 80,20 64,22"/>
+</svg>

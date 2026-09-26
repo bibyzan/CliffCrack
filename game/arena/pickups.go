@@ -6,10 +6,11 @@ import (
 	"CliffCrack/engine/mathx"
 )
 
-// Pickup is something lying about to take: a weapon (with the ammo it holds)
-// or a crate of grenades. Weapons are taken with Interact, swapping for the
-// one in hand; walking over one you already carry takes its ammo; grenades
-// are taken by walking over them.
+// Pickup is something lying about to take: a weapon (with the ammo it holds),
+// a crate of grenades, or (on the range's table) a gadget. Weapons are taken
+// with Interact, swapping for the one in hand; walking over one you already
+// carry takes its ammo; grenades are taken by walking over them; a gadget is
+// taken with Interact, in place of yours.
 type Pickup struct {
 	Weapon  WeaponKind  // NoWeapon for a crate of grenades
 	Grenade GrenadeKind // ... of this kind
@@ -19,9 +20,12 @@ type Pickup struct {
 	At      mathx.Vec3  // where it rests (its underside)
 	Yaw     float32     // which way it lies
 	Table   bool        // laid out on the range's table: never runs out
-	Age     float32     // s since it was dropped (dropped ones are cleared)
-	spot    int         // the spot it spawned at, -1 if dropped
-	fall    float32     // m/s, falling when what it lay on is gone
+	// IsGadget: it's a gadget, Gadget (Weapon is NoWeapon).
+	IsGadget bool
+	Gadget   GadgetKind
+	Age      float32 // s since it was dropped (dropped ones are cleared)
+	spot     int     // the spot it spawned at, -1 if dropped
+	fall     float32 // m/s, falling when what it lay on is gone
 }
 
 // PickupSpot is where a pickup spawns, and comes back after it's taken.
@@ -57,6 +61,11 @@ func grenadePickup(k GrenadeKind, n int, at mathx.Vec3) Pickup {
 	return Pickup{Weapon: NoWeapon, Grenade: k, Count: n, At: at, spot: -1}
 }
 
+// gadgetPickup is gadget k, to take in place of yours.
+func gadgetPickup(k GadgetKind) Pickup {
+	return Pickup{Weapon: NoWeapon, IsGadget: true, Gadget: k, spot: -1}
+}
+
 // respawnFor is how long a spot's pickup takes to come back.
 func respawnFor(p Pickup) float32 {
 	switch p.Weapon {
@@ -70,6 +79,9 @@ func respawnFor(p Pickup) float32 {
 
 // Name is how the HUD refers to a pickup.
 func (p *Pickup) Name() string {
+	if p.IsGadget {
+		return GadgetNames[p.Gadget]
+	}
 	if p.Weapon == NoWeapon {
 		return GrenadeNames[p.Grenade] + " GRENADES"
 	}
@@ -142,6 +154,9 @@ func (a *Arena) within(pl *Player, p *Pickup) bool {
 // ammo if pl carries the same weapon. It reports whether p is used up.
 func (a *Arena) walkOver(pl *Player, p *Pickup) bool {
 	w := &pl.Weapons
+	if p.IsGadget {
+		return false // (taken with Interact)
+	}
 	if p.Weapon == NoWeapon {
 		room := MaxGrenades - w.Grenades[p.Grenade]
 		if room <= 0 {
@@ -171,7 +186,14 @@ func (a *Arena) NearestPickup(pl *Player) *Pickup {
 	var best *Pickup
 	bestDist := float32(math.MaxFloat32)
 	for _, p := range a.Pickups {
-		if p.Weapon == NoWeapon || pl.Holds(p.Weapon) || !a.within(pl, p) {
+		switch {
+		case !a.within(pl, p):
+			continue
+		case p.IsGadget:
+			if pl.Gadget == p.Gadget {
+				continue
+			}
+		case p.Weapon == NoWeapon || pl.Holds(p.Weapon):
 			continue
 		}
 		if d := flat(pl.Body.Position.Sub(p.At)).Len(); d < bestDist {
@@ -189,6 +211,13 @@ func (a *Arena) pickUp(pl *Player, ev *Events) {
 		return
 	}
 	w := &pl.Weapons
+	if p.IsGadget {
+		w.putHammerAway()
+		a.letGo(pl, ev)
+		w.Gadget = p.Gadget
+		ev.act(pl, ActPickup, -1)
+		return
+	}
 	slot := w.Active
 	if w.Slots[1-slot] == NoWeapon {
 		slot = 1 - slot

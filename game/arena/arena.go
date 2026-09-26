@@ -62,7 +62,8 @@ type Input struct {
 	Select      int  // 1 or 2 picks a slot this step, 0 none
 	Cycle       int  // non-zero: swap to the other slot
 
-	Melee         bool // pressed: swing the hammer
+	Melee         bool // pressed: an elbow (or, with the hammer out, a swing)
+	Gadget        bool // pressed: use the gadget (the hammer out or away, the grapple fired or let go)
 	Throw         bool // pressed: throw a grenade
 	SwitchGrenade bool // pressed: frags / stickies
 	Interact      bool // pressed: take the weapon at your feet
@@ -73,10 +74,11 @@ type Input struct {
 	ViewTime float32
 }
 
-// LookOnly keeps just the aiming and weapon choice: players can look around
-// (and pick a weapon) but not move or fire, as during the countdown.
+// LookOnly keeps just the aiming: players can look around but not move or
+// fire, as during the countdown (where the weapon keys pick a gadget
+// instead: see Match).
 func (in Input) LookOnly() Input {
-	return Input{Look: in.Look, Select: in.Select, Cycle: in.Cycle, Aim: in.Aim, SwitchGrenade: in.SwitchGrenade}
+	return Input{Look: in.Look, Aim: in.Aim, SwitchGrenade: in.SwitchGrenade}
 }
 
 // Stats are a player's numbers for the round.
@@ -196,6 +198,7 @@ type Smash struct {
 	At, Normal mathx.Vec3
 	Mat        Material // what it hit; -1 for the level or a player
 	Victim     *Player  // the player it hit, if any
+	Light      bool     // an elbow, not the hammer
 }
 
 // Explosion is a grenade going off.
@@ -238,10 +241,13 @@ const (
 	ActLaunch
 	ActSwitch
 	ActReload
-	ActEmpty  // the trigger was pulled on an empty magazine
-	ActBoost  // a launch pad threw them
-	ActThrow  // a grenade (Value: its kind)
-	ActPickup // took a weapon (Value: its kind)
+	ActEmpty   // the trigger was pulled on an empty magazine
+	ActBoost   // a launch pad threw them
+	ActThrow   // a grenade (Value: its kind)
+	ActPickup  // took a weapon (Value: its kind)
+	ActElbow   // an elbow strike
+	ActGadget  // the hammer brought out (Value: the gadget kind)
+	ActGrapple // the grapple (Value: 0 fired and missed, 1 caught, 2 let go)
 )
 
 // Action is one player action; Value is the impact speed for ActLand.
@@ -414,6 +420,7 @@ func (a *Arena) Step(dt float32, inputs []Input) Events {
 			p.Shield = min(p.Shield+shieldRate*dt, MaxShield)
 		}
 		a.movePlayer(p, dt, in, &ev)
+		a.updateGrapple(p, dt, in, &ev)
 		a.stepUp(p, dt)
 		undo := a.rewind(p, in.ViewTime)
 		a.updateWeapons(p, dt, in, &ev)
@@ -705,7 +712,9 @@ func (a *Arena) hurtPlayer(p, by *Player, damage float32, head bool, weapon Weap
 	}
 	p.Dead = true
 	p.DiedAt = a.Time
+	a.letGo(p, nil)
 	a.Phys.Remove(p.Body)
+	p.Body.Teleported() // out of the world, it's never stepped again: drawn where it fell, not flickering between its last two steps
 	if by != nil && by != p {
 		by.Kills++
 	}

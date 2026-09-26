@@ -4,7 +4,7 @@ package arena
 type Phase int
 
 const (
-	PhaseCountdown Phase = iota // players are placed; they can look around but not move or fire
+	PhaseCountdown Phase = iota // players are placed and choose their gadget; they can look around but not move or fire
 	PhaseFight                  // one life each: last one standing takes the round
 	PhaseRoundOver              // the result is shown; survivors can still move
 	PhaseMatchOver              // someone has won enough rounds
@@ -12,8 +12,9 @@ const (
 
 // Match rules.
 const (
-	RoundsToWin   = 2 // best of three
-	CountdownTime = 3.0
+	RoundsToWin   = 2   // best of three
+	CountdownTime = 8.0 // choosing a gadget, the last CountdownCall of it counted down aloud
+	CountdownCall = 3.0
 	RoundTime     = 150.0 // s; when it runs out the healthier player takes the round
 	RoundOverTime = 4.0
 )
@@ -33,6 +34,8 @@ type Match struct {
 	RoundWinner int
 	Winner      int
 	Seed        uint64
+	// Gadgets is each player's chosen gadget, kept from round to round.
+	Gadgets []GadgetKind
 
 	// Practice is the firing range: no rounds, and Dummies (players 1 and
 	// up) strafe and get back up.
@@ -42,7 +45,8 @@ type Match struct {
 
 // NewMatch starts a match for players on the site generated from seed.
 func NewMatch(seed uint64, players int) *Match {
-	m := &Match{Players: players, Wins: make([]int, players), Seed: seed, RoundWinner: -1, Winner: -1}
+	m := &Match{Players: players, Wins: make([]int, players), Seed: seed, RoundWinner: -1, Winner: -1,
+		Gadgets: make([]GadgetKind, players)}
 	m.startRound()
 	return m
 }
@@ -50,6 +54,11 @@ func NewMatch(seed uint64, players int) *Match {
 func (m *Match) startRound() {
 	m.Round++
 	m.Arena = New(m.Seed, m.Players, m.Round-1)
+	for i, p := range m.Arena.Players {
+		if i < len(m.Gadgets) {
+			p.Gadget = m.Gadgets[i]
+		}
+	}
 	m.Phase, m.Timer = PhaseCountdown, CountdownTime
 }
 
@@ -58,6 +67,11 @@ func (m *Match) startRound() {
 func (m *Match) Step(dt float32, inputs []Input) Events {
 	if m.Practice {
 		return m.stepRange(dt, inputs)
+	}
+	if m.Phase == PhaseCountdown {
+		for i, in := range inputs {
+			m.chooseGadget(i, in)
+		}
 	}
 	if m.Phase == PhaseCountdown || m.Phase == PhaseMatchOver {
 		held := make([]Input, len(inputs))
@@ -90,6 +104,32 @@ func (m *Match) Step(dt float32, inputs []Input) Events {
 		}
 	}
 	return ev
+}
+
+// chooseGadget takes player i's gadget choice during the countdown: 1 or 2
+// picks one, the swap or gadget button steps to the next.
+func (m *Match) chooseGadget(i int, in Input) {
+	if i >= len(m.Arena.Players) || i >= len(m.Gadgets) {
+		return
+	}
+	g := m.Gadgets[i]
+	switch {
+	case in.Select >= 1 && in.Select <= int(GadgetKinds):
+		g = GadgetKind(in.Select - 1)
+	case in.Cycle != 0 || in.Gadget:
+		g = (g + 1) % GadgetKinds
+	}
+	m.SetGadget(i, g)
+}
+
+// SetGadget gives player i gadget g, now and in the rounds to come.
+func (m *Match) SetGadget(i int, g GadgetKind) {
+	if i < len(m.Gadgets) {
+		m.Gadgets[i] = g
+	}
+	if i < len(m.Arena.Players) {
+		m.Arena.Players[i].Gadget = g
+	}
 }
 
 // endRound scores the round: the last one standing, or when time runs out

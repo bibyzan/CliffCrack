@@ -1,6 +1,7 @@
 package game
 
 import (
+	"CliffCrack/game/arena"
 	"encoding/json"
 	"errors"
 	"io/fs"
@@ -22,6 +23,9 @@ type Settings struct {
 	// ViewDistance is how far down the course Run draws: one of the
 	// viewNear, viewMedium or viewFar levels (see viewProfiles).
 	ViewDistance int `json:"view_distance"`
+	// Gadget is the Arena gadget last chosen (an arena.GadgetKind), taken
+	// into the next match.
+	Gadget int `json:"gadget"`
 	// FloatingStick makes the on-screen move stick (touch screens) appear
 	// wherever the left thumb lands, rather than stay in its corner.
 	FloatingStick bool `json:"floating_stick,omitempty"`
@@ -65,6 +69,9 @@ func (s *Settings) clamp() {
 	fix(&s.HUDWidth, minHUDWidth, maxHUDWidth, d.HUDWidth)
 	if s.ViewDistance < 0 || s.ViewDistance >= len(viewProfiles) {
 		s.ViewDistance = d.ViewDistance
+	}
+	if s.Gadget < 0 || s.Gadget >= int(arena.GadgetKinds) {
+		s.Gadget = d.Gadget
 	}
 }
 

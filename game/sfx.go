@@ -28,8 +28,11 @@ func click(delay float64, volume float32) audio.Layer { return hiss(delay, 18, 1
 // round the chasm.
 func newArenaSounds() arenaSounds {
 	s := arenaSounds{
-		// Hits you land: a wet thwack on flesh, a bright ding for the head.
-		hit:      audio.Synth(0.45, hiss(0, 60, 55, 1, 3000, 250), tone(audio.Sine, 320, 180, 0, 60, 45, 0.6)),
+		// Hits you land: a crisp hit-marker tick over a wet thwack on flesh
+		// (as clear as the armour's tink: every hit should be heard), a
+		// bright ding for the head.
+		hit: audio.Synth(0.7, click(0, 1), tone(audio.Square, 1900, 1500, 0, 45, 60, 0.35),
+			hiss(0, 60, 55, 0.8, 3000, 250), tone(audio.Sine, 320, 180, 0, 60, 45, 0.5)),
 		headshot: audio.Synth(0.5, tone(audio.Sine, 1760, 1760, 0, 300, 12, 0.8), tone(audio.Sine, 2640, 2640, 0, 220, 18, 0.4), click(0, 0.6)),
 		// Paint on your health: a body thud.
 		hurt: audio.Synth(0.7, tone(audio.Sine, 120, 55, 0, 160, 16, 1), hiss(0, 120, 22, 0.8, 700, 0)),
@@ -44,6 +47,16 @@ func newArenaSounds() arenaSounds {
 		// The hammer: a whoosh, and a heavy crunching thud.
 		swing: audio.Synth(0.25, audio.Layer{Wave: audio.Noise, Length: ms(200), Attack: ms(70), Decay: 14, Volume: 1, LowPass: 2600, HighPass: 400}),
 		thud:  audio.Synth(0.95, tone(audio.Sine, 85, 38, 0, 260, 11, 1), hiss(0, 160, 28, 0.9, 1600, 0), hiss(10, 90, 40, 0.5, 0, 900)),
+		// The elbow: a short whoosh, and a dull knock.
+		elbow: audio.Synth(0.2, audio.Layer{Wave: audio.Noise, Length: ms(120), Attack: ms(30), Decay: 22, Volume: 0.9, LowPass: 3000, HighPass: 600}),
+		punch: audio.Synth(0.6, tone(audio.Sine, 140, 70, 0, 120, 26, 1), hiss(0, 80, 40, 0.7, 1800, 100)),
+		// The grapple: the hook zipping out, catching with a clank, the line
+		// snapping back; and the hammer lifted off the back.
+		hook: audio.Synth(0.45, hiss(0, 180, 12, 0.8, 6000, 900), tone(audio.Saw, 700, 1500, 0, 160, 14, 0.25), click(0, 0.7)),
+		catch: audio.Synth(0.5, tone(audio.Square, 520, 480, 0, 90, 30, 0.4), tone(audio.Sine, 1300, 1250, 0, 140, 20, 0.5),
+			click(0, 1), hiss(0, 60, 50, 0.5, 5000, 800)),
+		release: audio.Synth(0.3, click(0, 0.8), tone(audio.Sine, 900, 500, 0, 90, 30, 0.4)),
+		draw:    audio.Synth(0.35, click(0, 0.7), hiss(0, 140, 18, 0.6, 1800, 300), tone(audio.Sine, 220, 160, 20, 120, 20, 0.5)),
 		// The paint grenade launcher: a hollow thoonk.
 		launch: audio.Synth(0.7, tone(audio.Sine, 150, 60, 0, 170, 14, 1), hiss(0, 90, 30, 0.6, 900, 0), click(0, 0.4)),
 		// A grenade going off: a burst of paint and gas, echoing off the walls.

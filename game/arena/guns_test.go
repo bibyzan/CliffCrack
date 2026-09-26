@@ -213,3 +213,44 @@ func TestShotgunLoadsAShellAtATime(t *testing.T) {
 		t.Errorf("fire mid-reload: shots %d, reloading %v", len(ev.Shots), s.Reloading)
 	}
 }
+
+// The pistol fires about as fast as the trigger's pulled: clicking seven or
+// eight times a second (fast), every pull is a shot, none swallowed by the
+// cooldown; faster still, it tops out a little over eight a second.
+func TestPistolKeepsUpWithTheTrigger(t *testing.T) {
+	a := flatArena(nil, at(0, 10, 0))
+	p := a.Players[0]
+	p.Weapons.Slots[0], p.Weapons.Current = WeaponPistol, WeaponPistol
+	a.InfiniteAmmo = true
+	pulls, shots := 0, 0
+	for i := 0; i < 64; i++ { // a pull every 8 frames (7.5 a second)
+		in := Input{Fire: i%8 < 2, FirePressed: i%8 == 0}
+		if in.FirePressed {
+			pulls++
+		}
+		shots += len(a.Step(frame, []Input{in}).Shots)
+	}
+	t.Logf("%d pulls, %d shots", pulls, shots)
+	if shots < pulls {
+		t.Errorf("%d pulls gave only %d shots", pulls, shots)
+	}
+}
+
+// Spamming the pistol sprays: its spread grows well past a steady pace's.
+func TestPistolSpamBlooms(t *testing.T) {
+	bloomAfter := func(every int) float32 {
+		a := flatArena(nil, at(0, 10, 0))
+		p := a.Players[0]
+		p.Weapons.Slots[0], p.Weapons.Current = WeaponPistol, WeaponPistol
+		a.InfiniteAmmo = true
+		for i := 0; i < 60; i++ {
+			a.Step(frame, []Input{{Fire: i%every == 0, FirePressed: i%every == 0}})
+		}
+		return p.Spread()
+	}
+	spam, steady := bloomAfter(7), bloomAfter(24)
+	t.Logf("spread after a second: spamming %.4f, steady %.4f", spam, steady)
+	if spam < steady*1.5 {
+		t.Errorf("spamming (%.4f) should spread much more than a steady pace (%.4f)", spam, steady)
+	}
+}

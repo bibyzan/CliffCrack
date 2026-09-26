@@ -54,6 +54,7 @@ type Bot struct {
 	strafe, strafeT float32
 	jumpT           float32
 	lobT            float32    // until it tries another speculative grenade
+	gadgetT         float32    // s before it presses the gadget button again (its view of the hammer can lag, online)
 	prevAim         [2]float32 // the view angles it wanted last step
 	tracking        bool       // ... and it was looking at the enemy then
 	goal            mathx.Vec3
@@ -86,6 +87,7 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 	b.strafeT -= dt
 	b.jumpT -= dt
 	b.lobT -= dt
+	b.gadgetT -= dt
 	b.goalT -= dt
 	b.avoidT -= dt
 
@@ -291,8 +293,19 @@ func (b *Bot) Think(a *Arena, self *Player, dt float32) Input {
 		}
 	}
 	b.prevAim, b.tracking = want2, b.sees
+	// The bot carries the hammer: out to swing it, away to shoot. One press
+	// at a time: online, the hammer being out reaches it a moment late.
+	if b.gadgetT <= 0 && a.Live { // (in the countdown the button picks a gadget)
+		switch {
+		case melee && self.Gadget == GadgetHammer && !self.HammerOut,
+			!melee && self.HammerOut && !self.Swinging():
+			in.Gadget, b.gadgetT = true, 0.5
+		}
+	}
 	if onTarget && !b.Passive {
 		switch {
+		case melee && self.HammerOut:
+			in.Fire, in.FirePressed = true, true
 		case melee:
 			in.Melee = true
 		case throw:

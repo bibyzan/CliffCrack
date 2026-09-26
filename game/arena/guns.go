@@ -51,9 +51,11 @@ var Guns = [weaponCount]*GunSpec{
 	// the body). Measured, not spammed: quicker than the rifle for a steady
 	// hand, and the thing to draw when the rifle's empty.
 	WeaponPistol: {
-		Mag: 12, Reserve: 48, Interval: 0.28, Reload: 1.4, Pellets: 1,
+		// As fast as you can pull the trigger, near enough; but each shot
+		// blooms, so spamming it sprays and a steady rhythm stays on target.
+		Mag: 12, Reserve: 48, Interval: 0.12, Reload: 1.4, Pellets: 1,
 		Damage: 34, HeadMult: 1.5, Precision: true, ChunkDamage: 22, Range: 150, Push: 0.8,
-		HipSpread: 0.008, ADSSpread: 0.0008, MoveSpread: 0.01, Bloom: 0.018, MaxBloom: 0.04, BloomDecay: 7, Recoil: 0.018,
+		HipSpread: 0.008, ADSSpread: 0.0008, MoveSpread: 0.01, Bloom: 0.028, MaxBloom: 0.07, BloomDecay: 8, Recoil: 0.018,
 		Zoom: 2, ADSTime: 0.14, ADSMove: 0.8, BallSpeed: 190,
 	},
 	// The pump shotgun, after the SPAS-12: a cone of paint that kills in one
@@ -117,13 +119,21 @@ func (a *Arena) updateGun(p *Player, dt float32, in Input, ev *Events) {
 		ev.act(p, ActReload, 0)
 		return
 	}
-	trigger := in.FirePressed
+	// A pull just before the gun is ready isn't lost: it fires as soon as
+	// it can (a fast trigger finger shouldn't find shots swallowed).
+	if in.FirePressed {
+		w.queued = pullBuffer
+	} else {
+		w.queued = max(w.queued-dt, 0)
+	}
+	trigger := w.queued > 0
 	if g.Auto {
 		trigger = in.Fire
 	}
 	if !trigger || w.cooldown > 0 {
 		return
 	}
+	w.queued = 0
 	if w.Ammo == 0 {
 		if in.FirePressed {
 			ev.act(p, ActEmpty, 0)

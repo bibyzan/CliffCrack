@@ -9,14 +9,9 @@ import (
 	"CliffCrack/game/arena"
 )
 
-// heldKind is what's in the hand to draw: the hammer mid-swing, else the
-// weapon in hand.
-func heldKind(w *arena.Weapons) arena.WeaponKind {
-	if w.Swinging() {
-		return arena.WeaponHammer
-	}
-	return w.Current
-}
+// heldKind is what's in the hand to draw: the hammer while it's out, else
+// the weapon in hand.
+func heldKind(w *arena.Weapons) arena.WeaponKind { return w.Holding() }
 
 // Grenade looks.
 var (
@@ -93,6 +88,14 @@ func (m *Arena) appendPickups(out []render.DrawCmd) []render.DrawCmd {
 			}
 		} else {
 			frame = mathx.Translate(at[0], at[1]+0.05, at[2]).Mul(mathx.RotateY(p.Yaw)).Mul(mathx.RotateZ(math.Pi / 2)) // on its side
+		}
+		if p.IsGadget {
+			parts := hammerParts
+			if p.Gadget == arena.GadgetGrapple {
+				parts = grappleParts
+			}
+			out = m.drawParts(out, frame, parts)
+			continue
 		}
 		if p.Weapon == arena.NoWeapon {
 			out = m.appendCrate(out, p, mathx.Translate(at[0], at[1], at[2]).Mul(mathx.RotateY(p.Yaw)))

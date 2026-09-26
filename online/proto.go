@@ -55,6 +55,7 @@ type InputMsg struct {
 	Yaw, Pitch               float32
 	Jump, Fired, Reload      uint32
 	Melee, Throw, SwitchGren uint32
+	Gadget                   uint32 `json:",omitempty"`
 	Interact, Cycle          uint32
 	Select, Selects          uint32  // the last slot picked (1 or 2), and how many times
 	View                     float32 // the host's time the guest was seeing others at (lag compensation)
@@ -113,6 +114,7 @@ func (s *InputSender) Next(in arena.Input, yaw, pitch float32) InputMsg {
 	count(&m.Fired, in.FirePressed)
 	count(&m.Reload, in.Reload)
 	count(&m.Melee, in.Melee)
+	count(&m.Gadget, in.Gadget)
 	count(&m.Throw, in.Throw)
 	count(&m.SwitchGren, in.SwitchGrenade)
 	count(&m.Interact, in.Interact)
@@ -178,6 +180,7 @@ func (r *InputReceiver) Input(p *arena.Player) arena.Input {
 	in := arena.Input{Move: m.Move, Fire: m.Fire, Aim: m.Aim, Sprint: m.Sprint,
 		Jump: m.Jump != u.Jump, FirePressed: m.Fired != u.Fired, Reload: m.Reload != u.Reload,
 		Melee: m.Melee != u.Melee, Throw: m.Throw != u.Throw, SwitchGrenade: m.SwitchGren != u.SwitchGren,
+		Gadget:   m.Gadget != u.Gadget,
 		Interact: m.Interact != u.Interact, ViewTime: m.View}
 	if m.Cycle != u.Cycle {
 		in.Cycle = 1

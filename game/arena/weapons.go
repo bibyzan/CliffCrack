@@ -7,12 +7,12 @@ import (
 	"CliffCrack/engine/physics"
 )
 
-// WeaponKind is a weapon. A player carries two (see Weapons.Slots), swings
-// the hammer as their melee, and throws grenades.
+// WeaponKind is a weapon. A player carries two (see Weapons.Slots), throws
+// grenades, elbows up close, and may carry the hammer as their gadget.
 type WeaponKind int
 
 const (
-	WeaponHammer WeaponKind = iota // the melee: always to hand, never in a slot
+	WeaponHammer WeaponKind = iota // a gadget (see GadgetHammer), never in a slot
 	WeaponRifle                    // the assault rifle
 	WeaponPistol
 	WeaponShotgun
@@ -25,6 +25,7 @@ const (
 	WeaponDrop   = weaponCount + 1 // fell into the pit
 	WeaponFrag   = weaponCount + 2 // a frag grenade
 	WeaponSticky = weaponCount + 3 // a sticky grenade
+	WeaponElbow  = weaponCount + 4 // the melee
 
 	NoWeapon WeaponKind = -1 // an empty slot
 )
@@ -43,6 +44,8 @@ func (k WeaponKind) Cause() string {
 		return "FRAG"
 	case WeaponSticky:
 		return "STICKY"
+	case WeaponElbow:
+		return "ELBOW"
 	}
 	if k >= 0 && k < weaponCount {
 		return WeaponNames[k]
@@ -87,7 +90,12 @@ type GunState struct {
 	SinceShot float32 // s since it last fired (for a pump's cycle)
 	cooldown  float32
 	bloom     float32 // extra spread from firing, radians; settles back
+	queued    float32 // s left of a trigger pull made while it wasn't ready (see pullBuffer)
 }
+
+// pullBuffer is how long a semi-automatic remembers a pull made before it's
+// ready to fire again.
+const pullBuffer = 0.15
 
 // idleSinceShot is a gun's SinceShot before it's first fired: long enough
 // that nothing's cycling.
@@ -116,8 +124,8 @@ type LauncherState struct {
 	Kick      float32
 }
 
-// Weapons is a player's loadout: two weapons in slots, the one in hand, the
-// hammer to swing, and grenades.
+// Weapons is a player's loadout: two weapons in slots, the one in hand,
+// grenades, the elbow, and a gadget.
 type Weapons struct {
 	Slots     [2]WeaponKind
 	Active    int        // which slot is in hand
@@ -125,6 +133,10 @@ type Weapons struct {
 	Switching float32    // seconds until the weapon coming up is ready
 	States    [weaponCount]GunState
 	Hammer    HammerState
+	HammerOut bool // the hammer gadget is in hand, in place of the gun
+	Elbow     ElbowState
+	Gadget    GadgetKind
+	Grapple   GrappleState
 	Launcher  LauncherState
 	// ADS is how far the sights are raised, 0 (hip) to 1 (aiming down them).
 	ADS     float32
@@ -140,7 +152,8 @@ type Weapons struct {
 // so one picked up later comes loaded.
 func newWeapons() Weapons {
 	w := Weapons{Slots: [2]WeaponKind{WeaponRifle, WeaponPistol}, Current: WeaponRifle,
-		Hammer: HammerState{Swing: -1}, Launcher: LauncherState{Ammo: LauncherMag, Reserve: LauncherReserve}}
+		Hammer: HammerState{Swing: -1}, Elbow: ElbowState{Swing: -1},
+		Launcher: LauncherState{Ammo: LauncherMag, Reserve: LauncherReserve}}
 	for k, g := range Guns {
 		if g != nil {
 			w.States[k].Ammo, w.States[k].Reserve = g.Mag, g.Reserve
@@ -185,9 +198,6 @@ func (w *Weapons) Reloading() (float32, bool) {
 	}
 	return 0, false
 }
-
-// Swinging reports whether the hammer is mid-swing (the gun is put aside).
-func (w *Weapons) Swinging() bool { return w.Hammer.Swing >= 0 }
 
 // Zoom is how much the view is magnified right now: 1 at the hip, up to the
 // gun's zoom with its sights all the way up.
@@ -252,7 +262,11 @@ func (a *Arena) updateWeapons(p *Player, dt float32, in Input, ev *Events) {
 	if in.Cycle != 0 {
 		next = 1 - w.Active
 	}
-	if next != w.Active && w.Slots[next] != NoWeapon && !w.Swinging() {
+	switch {
+	case (in.Select != 0 || in.Cycle != 0 || in.Reload) && w.HammerOut && !w.Swinging():
+		w.putHammerAway() // back to the gun: the one in hand
+		ev.act(p, ActSwitch, 0)
+	case next != w.Active && w.Slots[next] != NoWeapon && !w.Swinging():
 		w.setActive(next)
 		ev.act(p, ActSwitch, 0)
 	}
@@ -274,7 +288,7 @@ func (a *Arena) updateWeapons(p *Player, dt float32, in Input, ev *Events) {
 	racking := g != nil && g.BoltTime > 0 && s.SinceShot < g.BoltTime
 	aiming := g != nil && in.Aim && w.Switching == 0 && s.Reloading == 0 && w.descope == 0 && (!sprinting(in) || breathing) && !w.Swinging() && !racking
 	switch {
-	case g == nil:
+	case g == nil || w.HammerOut:
 		w.ADS = 0
 	case aiming:
 		w.ADS = min(w.ADS+dt/g.ADSTime, 1)
@@ -282,16 +296,30 @@ func (a *Arena) updateWeapons(p *Player, dt float32, in Input, ev *Events) {
 		w.ADS = max(w.ADS-dt/g.ADSTime, 0)
 	}
 
-	// The hammer and grenades are to hand whatever's held; a swing puts the
-	// gun aside until it's done.
+	// The gadget, the elbow and grenades are to hand whatever's held; a
+	// strike puts the gun aside until it's done. With the hammer out, the
+	// trigger (or melee) swings it.
 	w.throwWait = max(w.throwWait-dt, 0)
-	if in.Melee && !w.Swinging() {
-		w.Hammer = HammerState{Swing: 0}
-		w.ADS = 0
-		ev.act(p, ActSwing, 0)
+	if in.Gadget {
+		a.useGadget(p, ev)
 	}
-	if w.Swinging() {
+	if !w.Swinging() && (w.Switching == 0 || !w.HammerOut) {
+		switch {
+		case w.HammerOut && (in.Fire || in.Melee):
+			w.Hammer = HammerState{Swing: 0}
+			ev.act(p, ActSwing, 0)
+		case in.Melee && !w.HammerOut:
+			w.Elbow = ElbowState{Swing: 0}
+			w.ADS = 0
+			ev.act(p, ActElbow, 0)
+		}
+	}
+	if w.Hammer.Swing >= 0 {
 		a.updateHammer(p, dt, ev)
+		return
+	}
+	if w.Elbow.Swing >= 0 {
+		a.updateElbow(p, dt, ev)
 		return
 	}
 	if in.Throw {
@@ -307,10 +335,10 @@ func (a *Arena) updateWeapons(p *Player, dt float32, in Input, ev *Events) {
 		return
 	}
 
-	switch w.Current {
-	case WeaponLauncher:
+	switch {
+	case w.HammerOut, w.Current == NoWeapon:
+	case w.Current == WeaponLauncher:
 		a.updateLauncher(p, dt, in, ev)
-	case NoWeapon:
 	default:
 		a.updateGun(p, dt, in, ev)
 	}

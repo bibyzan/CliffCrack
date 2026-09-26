@@ -76,6 +76,7 @@ func (m *Arena) startOnline(s *online.Session, start *online.StartMsg) {
 	m.buildLevel()
 	m.feed = m.feed[:0]
 	m.newRound()
+	m.wantGadget = m.settings.Gadget + 1
 }
 
 // leaveOnline ends our part in the match and the room.

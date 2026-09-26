@@ -76,8 +76,8 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 		}
 		b.Panel("##arenahint", 0.5, hintY, hudText, 1.05)
 		b.ColorText(withAlpha(uiMuted, fade), "%s", prompt(in,
-			"LMB  fire    RMB  aim    1 2 / wheel  swap    R  reload    E  pick up    F  hammer    G  grenade    Q  frag / sticky",
-			"RT  fire    LT  aim    Y  swap    X  reload (hold: pick up)    RB  hammer    LB  grenade    B  frag / sticky",
+			"LMB  fire    RMB  aim    1 2 / wheel  swap    R  reload    E  pick up    F  elbow    Q  gadget    G  grenade    C  frag / sticky",
+			"RT  fire    LT  aim    Y  swap    X  reload (hold: pick up)    R3  elbow    RB  gadget    LB  grenade    B  frag / sticky",
 			"Stick  move (push all the way to sprint)  ·  drag right side  look  ·  hold FIRE and drag to aim while shooting"))
 		b.End()
 	}
@@ -106,7 +106,10 @@ func (m *Arena) weaponHUD(b *ui.Builder, in *input.State, me *arena.Player) {
 	if p := m.sim().NearestPickup(me); p != nil {
 		b.Panel("##pickup", 0.5, 0.6, hudText, 1.15)
 		verb := "pick up"
-		if me.Other() != arena.NoWeapon {
+		switch {
+		case p.IsGadget:
+			verb = "swap " + arena.GadgetNames[me.Gadget] + " for"
+		case me.Other() != arena.NoWeapon:
 			verb = "swap " + arena.WeaponNames[me.Current] + " for"
 		}
 		b.ColorText(uiWhite, "%s", prompt(in, "E  "+verb+" "+p.Name(), "hold X  "+verb+" "+p.Name(),
@@ -160,10 +163,15 @@ func (m *Arena) banner(b *ui.Builder, in *input.State) {
 	}
 	switch mt.Phase {
 	case arena.PhaseCountdown:
-		title = fmt.Sprintf("%d", int(math.Ceil(float64(mt.Timer))))
-		sub = fmt.Sprintf("ROUND %d  ·  LAUNCHING IN", mt.Round)
+		secs := int(math.Ceil(float64(mt.Timer)))
+		if m.choosingGadget() {
+			m.gadgetChoiceUI(b, in, secs)
+			return
+		}
+		title = fmt.Sprintf("%d", secs)
+		sub = fmt.Sprintf("ROUND %d  ·  %s  ·  LAUNCHING IN", mt.Round, arena.GadgetNames[m.me().Gadget])
 		if mt.Round == 3 {
-			sub = "FINAL ROUND  ·  LAUNCHING IN"
+			sub = fmt.Sprintf("FINAL ROUND  ·  %s  ·  LAUNCHING IN", arena.GadgetNames[m.me().Gadget])
 		}
 	case arena.PhaseFight:
 		if mt.Timer > arena.RoundTime-0.8 {

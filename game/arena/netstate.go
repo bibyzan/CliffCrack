@@ -62,11 +62,24 @@ type NetPlayer struct {
 	Guns         [weaponCount]NetGun
 	HammerSwing  float32
 	HammerStruck bool
+	HammerOut    bool
+	ElbowSwing   float32
+	ElbowStruck  bool
+	Gadget       GadgetKind
+	Grapple      NetGrapple
 	Launcher     NetGun
 	Grenades     [GrenadeKinds]int
 	GrenadeKind  GrenadeKind
 	ThrowWait    float32
 	Stats        Stats
+}
+
+// NetGrapple is a player's grapple (what it's caught on stays with the host:
+// the guest has where it is).
+type NetGrapple struct {
+	On, Miss             bool
+	To                   V3
+	Shot, Time, Cooldown float32
 }
 
 // NetGrenade is a grenade in flight or stuck.
@@ -85,16 +98,18 @@ type NetGrenade struct {
 
 // NetPickup is a pickup lying about.
 type NetPickup struct {
-	Weapon  WeaponKind
-	Grenade GrenadeKind
-	Count   int
-	Ammo    int
-	Reserve int
-	At      V3
-	Yaw     float32
-	Table   bool
-	Spot    int
-	Age     float32 `json:"-"` // (the host's business: when a dropped one clears)
+	Weapon   WeaponKind
+	Grenade  GrenadeKind
+	Count    int
+	Ammo     int
+	Reserve  int
+	At       V3
+	Yaw      float32
+	Table    bool
+	IsGadget bool       `json:",omitempty"`
+	Gadget   GadgetKind `json:",omitempty"`
+	Spot     int
+	Age      float32 `json:"-"` // (the host's business: when a dropped one clears)
 }
 
 // Snapshot is the state of the arena at a moment.
@@ -120,6 +135,9 @@ func (a *Arena) Snapshot() Snapshot {
 			SinceJump: p.sinceJump, Airborne: p.airborne, SinceLand: p.sinceLand, JumpQueue: p.jumpQueue, OnSlope: p.onSlope,
 			Slots: p.Slots, Active: p.Active, Current: p.Current, Switching: p.Switching,
 			ADS: p.ADS, Descope: p.descope, HammerSwing: p.Hammer.Swing, HammerStruck: p.Hammer.struck,
+			HammerOut: p.HammerOut, ElbowSwing: p.Elbow.Swing, ElbowStruck: p.Elbow.struck, Gadget: p.Gadget,
+			Grapple: NetGrapple{On: p.Grapple.On, Miss: p.Grapple.Miss, To: v3(p.Grapple.To), Shot: p.Grapple.Shot,
+				Time: p.Grapple.Time, Cooldown: p.Grapple.Cooldown},
 			Grenades: p.Grenades, GrenadeKind: p.GrenadeKind, ThrowWait: p.throwWait, Stats: p.Stats,
 			Launcher: NetGun{Ammo: p.Launcher.Ammo, Reserve: p.Launcher.Reserve, Reloading: p.Launcher.Reloading,
 				Kick: p.Launcher.Kick, Cooldown: p.Launcher.cooldown},
@@ -140,7 +158,8 @@ func (a *Arena) Snapshot() Snapshot {
 	}
 	for _, p := range a.Pickups {
 		s.Pickups = append(s.Pickups, NetPickup{Weapon: p.Weapon, Grenade: p.Grenade, Count: p.Count, Ammo: p.Ammo,
-			Reserve: p.Reserve, At: v3(p.At), Yaw: p.Yaw, Table: p.Table, Spot: p.spot, Age: p.Age})
+			Reserve: p.Reserve, At: v3(p.At), Yaw: p.Yaw, Table: p.Table, IsGadget: p.IsGadget, Gadget: p.Gadget,
+			Spot: p.spot, Age: p.Age})
 	}
 	return s
 }
@@ -176,6 +195,9 @@ func (a *Arena) ApplySnapshot(s *Snapshot, keepAim int) {
 			w.ADS = np.ADS // (the local player's sights go up and down at once, predicted)
 		}
 		w.Hammer = HammerState{Swing: np.HammerSwing, struck: np.HammerStruck}
+		w.HammerOut, w.Elbow, w.Gadget = np.HammerOut, ElbowState{Swing: np.ElbowSwing, struck: np.ElbowStruck}, np.Gadget
+		g := np.Grapple
+		w.Grapple = GrappleState{On: g.On, Miss: g.Miss, To: vec(g.To), Shot: g.Shot, Time: g.Time, Cooldown: g.Cooldown}
 		w.Grenades, w.GrenadeKind, w.throwWait = np.Grenades, np.GrenadeKind, np.ThrowWait
 		l := np.Launcher
 		w.Launcher = LauncherState{Ammo: l.Ammo, Reserve: l.Reserve, Reloading: l.Reloading, Kick: l.Kick, cooldown: l.Cooldown}
@@ -213,7 +235,8 @@ func (a *Arena) ApplySnapshot(s *Snapshot, keepAim int) {
 	a.Pickups = a.Pickups[:0]
 	for _, np := range s.Pickups {
 		a.Pickups = append(a.Pickups, &Pickup{Weapon: np.Weapon, Grenade: np.Grenade, Count: np.Count, Ammo: np.Ammo,
-			Reserve: np.Reserve, At: vec(np.At), Yaw: np.Yaw, Table: np.Table, spot: np.Spot, Age: np.Age})
+			Reserve: np.Reserve, At: vec(np.At), Yaw: np.Yaw, Table: np.Table, IsGadget: np.IsGadget, Gadget: np.Gadget,
+			spot: np.Spot, Age: np.Age})
 	}
 }
 
@@ -278,6 +301,7 @@ type (
 		By, Victim int
 		At, Normal V3
 		Mat        Material
+		Light      bool `json:",omitempty"`
 	}
 	NetExplosion struct {
 		At   V3
@@ -331,7 +355,7 @@ func (ev *Events) Net() NetEvents {
 		}
 	}
 	for _, s := range ev.Smashes {
-		n.Smashes = append(n.Smashes, NetSmash{By: playerID(s.By), Victim: playerID(s.Victim), At: v3(s.At), Normal: v3(s.Normal), Mat: s.Mat})
+		n.Smashes = append(n.Smashes, NetSmash{By: playerID(s.By), Victim: playerID(s.Victim), At: v3(s.At), Normal: v3(s.Normal), Mat: s.Mat, Light: s.Light})
 	}
 	for _, x := range ev.Explosions {
 		n.Explosions = append(n.Explosions, NetExplosion{At: v3(x.At), By: playerID(x.By), Kind: x.Kind})
@@ -390,7 +414,7 @@ func (a *Arena) ApplyEvents(n *NetEvents) Events {
 		ev.Kills = append(ev.Kills, Kill{Victim: a.player(k.Victim), By: a.player(k.By), Weapon: k.Weapon, Head: k.Head})
 	}
 	for _, s := range n.Smashes {
-		ev.Smashes = append(ev.Smashes, Smash{By: a.player(s.By), Victim: a.player(s.Victim), At: vec(s.At), Normal: vec(s.Normal), Mat: s.Mat})
+		ev.Smashes = append(ev.Smashes, Smash{By: a.player(s.By), Victim: a.player(s.Victim), At: vec(s.At), Normal: vec(s.Normal), Mat: s.Mat, Light: s.Light})
 	}
 	for _, x := range n.Explosions {
 		ev.Explosions = append(ev.Explosions, Explosion{At: vec(x.At), By: a.player(x.By), Kind: x.Kind})
@@ -422,6 +446,9 @@ func (a *Arena) Predict(p *Player, in Input, dt float32) {
 	}
 	var ev Events
 	a.movePlayer(p, dt, in, &ev)
+	if p.Grapple.On && (in.Jump || !a.pullGrapple(p, dt)) {
+		p.Grapple.On = false // (the host decides; this is what it will)
+	}
 	a.stepUp(p, dt)
 	a.Phys.StepBody(p.Body, dt)
 	a.headRoom(p)

@@ -19,9 +19,17 @@ func testWall(m Material) (*Arena, *Player, *Structure) {
 	return a, a.Players[0], s
 }
 
-// swing presses melee for one hammer swing and lets it finish.
+// swing brings out the hammer (the gadget) if it isn't already, swings it
+// once and lets the swing finish.
 func swing(a *Arena) Events {
-	ev := run(a, frame, Input{Melee: true})
+	p := a.Players[0]
+	p.Gadget = GadgetHammer
+	var ev Events
+	if !p.HammerOut {
+		ev.Merge(run(a, frame, Input{Gadget: true}))
+		ev.Merge(run(a, hammerDraw))
+	}
+	ev.Merge(run(a, frame, Input{Fire: true, FirePressed: true}))
 	ev.Merge(run(a, HammerSwing))
 	return ev
 }
@@ -173,9 +181,13 @@ func TestTwoSlotsAndSwitching(t *testing.T) {
 	if p.Current != WeaponRifle {
 		t.Errorf("swapping back: current %v, want the rifle", p.Current)
 	}
-	// The hammer is to hand whatever's held.
+	// The hammer comes out over whatever's held, and goes back to it.
 	run(a, SwitchTime)
-	if ev := swing(a); !ev.Did(p, ActSwing) || p.Current != WeaponRifle {
-		t.Errorf("melee: swung %v, holding %v", ev.Did(p, ActSwing), p.Current)
+	if ev := swing(a); !ev.Did(p, ActSwing) || p.Current != WeaponRifle || p.Holding() != WeaponHammer {
+		t.Errorf("hammer: swung %v, current %v, holding %v", ev.Did(p, ActSwing), p.Current, p.Holding())
+	}
+	a.Step(frame, []Input{{Cycle: 1}})
+	if p.HammerOut || p.Current != WeaponRifle {
+		t.Errorf("swap with the hammer out: hammer out %v, current %v; want it away and the rifle back", p.HammerOut, p.Current)
 	}
 }

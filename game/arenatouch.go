@@ -31,6 +31,7 @@ type arenaTouch struct {
 	touchControls
 	fire, jump, aim, reload, swap touchButton
 	melee, throw, kind, pickUp    touchButton
+	gadget                        touchButton
 	pause                         touchButton
 
 	aiming bool // AIM toggles the sights
@@ -55,7 +56,8 @@ func newArenaTouch() *arenaTouch {
 		jump:   cornerButton("JUMP", 0.11, 0.13, 0.068, touchOrange),
 		reload: cornerButton("RELOAD", 0.62, 0.12, 0.058, touchBack),
 		swap:   cornerButton("SWAP", 0.78, 0.10, 0.055, touchBack),
-		melee:  cornerButton("HAMMER", 0.11, 0.54, 0.055, touchBack),
+		gadget: cornerButton("GADGET", 0.11, 0.54, 0.055, touchBack),
+		melee:  cornerButton("ELBOW", 0.235, 0.575, 0.042, touchBack),
 		throw:  cornerButton("NADE", 0.11, 0.70, 0.055, touchBack),
 		kind:   cornerButton("FRAG", 0.235, 0.74, 0.04, touchBack),
 		pickUp: cornerButton("PICK UP", 0.38, 0.59, 0.065, touchOrange),
@@ -66,7 +68,7 @@ func newArenaTouch() *arenaTouch {
 	t.fire.look, t.aim.look = true, true
 	t.jump.icon, t.aim.icon, t.reload.icon = icons.jump, icons.aim, icons.reload
 	t.buttons = []*touchButton{&t.fire, &t.jump, &t.aim, &t.reload, &t.swap,
-		&t.melee, &t.throw, &t.kind, &t.pickUp, &t.pause}
+		&t.melee, &t.throw, &t.kind, &t.pickUp, &t.gadget, &t.pause}
 	return t
 }
 
@@ -95,7 +97,9 @@ func (t *arenaTouch) show(me *arena.Player, pickup *arena.Pickup, ic *hudIcons) 
 	t.fire.icon = weapon(me.Current)
 	t.swap.icon = weapon(me.Other())
 	t.swap.hidden = me.Other() == arena.NoWeapon
-	t.melee.icon = weapon(arena.WeaponHammer)
+	t.melee.icon = ic.elbow
+	t.gadget.icon = ic.gadgets[me.Gadget]
+	t.gadget.lit = me.HammerOut || me.Grapple.On
 	t.throw.icon = grenade(me.GrenadeKind)
 	t.kind.icon = grenade((me.GrenadeKind + 1) % arena.GrenadeKinds)
 	t.pickUp.hidden = pickup == nil
@@ -139,6 +143,7 @@ func (t *arenaTouch) read(in *input.State, w, h float32, me *arena.Player, c *ar
 	c.Jump = c.Jump || t.jump.pressed
 	c.Reload = c.Reload || t.reload.pressed
 	c.Melee = c.Melee || t.melee.pressed
+	c.Gadget = c.Gadget || t.gadget.pressed
 	c.Throw = c.Throw || t.throw.pressed
 	c.SwitchGrenade = c.SwitchGrenade || t.kind.pressed
 	c.Interact = c.Interact || t.pickUp.pressed

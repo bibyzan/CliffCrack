@@ -33,6 +33,8 @@ type hudIcons struct {
 	frag, sticky               icon
 	ball, shell, round, bullet icon // magazine rounds: paintball, shell, sniper round, launcher grenade
 	chevron                    icon
+	gadgets                    [arena.GadgetKinds]icon
+	elbow                      icon
 }
 
 // loadIcon rasterizes icons/<name>.svg, height pixels tall, into a texture.
@@ -67,11 +69,13 @@ func loadIcons() (hudIcons, error) {
 	}{
 		{&h.frag, "frag", 96}, {&h.sticky, "sticky", 96}, {&h.ball, "ball", 32}, {&h.shell, "shell", 48},
 		{&h.round, "round", 64}, {&h.bullet, "grenade", 40}, {&h.chevron, "chevron", 64},
+		{&h.gadgets[arena.GadgetGrapple], "grapple", 96}, {&h.elbow, "elbow", 96},
 	} {
 		if *x.dst, err = load(x.name, x.height); err != nil {
 			return h, err
 		}
 	}
+	h.gadgets[arena.GadgetHammer] = h.weapons[arena.WeaponHammer]
 	return h, nil
 }
 
@@ -143,6 +147,10 @@ func (m *Arena) appendHelmet(out []render.DrawCmd, fovY, aspect float32) []rende
 	me := m.me()
 	h := m.newHelmet(out, fovY, aspect)
 	h.visor()
+	if m.choosingGadget() {
+		h.gadgetChoice(me)
+		return h.out
+	}
 	if !me.Dead {
 		h.armourBar(me)
 		h.hitMarkers()
@@ -229,8 +237,9 @@ func (h *helmet) armourBar(me *arena.Player) {
 	}
 }
 
-// hitMarkers are four diagonal ticks round the crosshair when you land a
-// hit: white on armour and health, red for the head, bigger for a kill.
+// hitMarkers are four diagonal ticks round the crosshair whenever you land
+// a hit: white on health, ice-white on armour, red for the head, bigger for
+// a kill. Each is outlined in dark, to show against the snow and the sky.
 func (h *helmet) hitMarkers() {
 	m := h.m
 	kill := m.killMark > 0
@@ -251,11 +260,89 @@ func (h *helmet) hitMarkers() {
 		gap, long = 0.022, 0.026
 	}
 	gap += 0.01 * (1 - t) // they spring out
-	for _, s := range [][2]float32{{1, 1}, {-1, 1}, {1, -1}, {-1, -1}} {
-		d := gap + long/2
-		h.rect(0.5+s[0]*d*0.707/h.aspect, 0.5+s[1]*d*0.707, long, 0.0035, -s[0]*s[1]*math.Pi/4, withAlpha(col, col[3]*min(t*2, 1)))
+	fade := min(t*2, 1)
+	for _, outline := range []bool{true, false} {
+		for _, s := range [][2]float32{{1, 1}, {-1, 1}, {1, -1}, {-1, -1}} {
+			d := gap + long/2
+			x, y, a := 0.5+s[0]*d*0.707/h.aspect, 0.5+s[1]*d*0.707, -s[0]*s[1]*math.Pi/4
+			if outline {
+				h.rect(x, y, long+0.004, 0.0035+0.003, a, [4]float32{0.02, 0.03, 0.06, 0.6 * fade})
+			} else {
+				h.rect(x, y, long, 0.0035, a, withAlpha(col, col[3]*fade))
+			}
+		}
 	}
 }
+
+// gadget is your gadget, over the grenades: its icon, lit when it's ready,
+// and under it the grapple recharging.
+func (h *helmet) gadget(me *arena.Player, x, grenadeY float32) {
+	ic := h.m.as.icons.gadgets[me.Gadget]
+	const gh = 0.045
+	y := grenadeY - 0.13
+	if h.m.touchOn {
+		y = grenadeY + 0.16
+	}
+	charge, ready := float32(1), true
+	col := withAlpha(uiWhite, 0.95)
+	switch me.Gadget {
+	case arena.GadgetGrapple:
+		charge, ready = me.Grapple.Ready()
+		if me.Grapple.On {
+			col = uiAccent
+		} else if !ready {
+			col = withAlpha(uiWhite, 0.35)
+		}
+	case arena.GadgetHammer:
+		if me.HammerOut {
+			col = uiAccent
+		}
+	}
+	w := gh * ic.aspect
+	cx := (x + w/2) / h.aspect
+	h.icon(ic, cx, y, gh, 0, col)
+	if !ready {
+		bw := w
+		h.rect(cx, y+gh*0.8, bw, 0.006, 0, withAlpha(uiWhite, 0.2))
+		h.rect(cx-(bw*(1-charge)/2)/h.aspect, y+gh*0.8, bw*charge, 0.006, 0, withAlpha(uiAccent, 0.9))
+	}
+}
+
+// gadgetChoice is the countdown's choice: a card for each gadget with its
+// icon, the chosen one lit and framed (the words are in the UI layer: see
+// gadgetChoiceUI, which lines up with gadgetCardX).
+func (h *helmet) gadgetChoice(me *arena.Player) {
+	for k := range arena.GadgetKinds {
+		ic := h.m.as.icons.gadgets[k]
+		cx := 0.5 + gadgetCardX(k)/h.aspect
+		const gh, cw, ch, cy = 0.1, gadgetCardW, gadgetCardH, gadgetCardY
+		chosen := arena.GadgetKind(k) == me.Gadget
+		card, col := withAlpha(mathx.SRGB(0.03, 0.05, 0.1, 1), 0.55), withAlpha(uiWhite, 0.55)
+		if arena.GadgetKind(k) == h.m.gadgetHover && !chosen {
+			card, col = withAlpha(mathx.SRGB(0.08, 0.11, 0.2, 1), 0.7), withAlpha(uiWhite, 0.85)
+		}
+		if chosen {
+			card, col = withAlpha(mathx.SRGB(0.03, 0.05, 0.1, 1), 0.75), uiAccent
+		}
+		h.rect(cx, cy, cw, ch, 0, card)
+		h.d *= 0.995 // what's on the card, just in front of it
+		if chosen {
+			for _, e := range [][4]float32{{0, -ch / 2, cw, 0.005}, {0, ch / 2, cw, 0.005}, {-cw / 2, 0, 0.005, ch}, {cw / 2, 0, 0.005, ch}} {
+				h.rect(cx+e[0]/h.aspect, cy+e[1], e[2], e[3], 0, withAlpha(uiAccent, 0.9))
+			}
+		}
+		h.icon(ic, cx, cy-0.08, gh, 0, col)
+		h.d = helmetDepth
+	}
+}
+
+// The gadget choice's cards: their size and height on the screen, in
+// screen heights (and see gadgetCardX).
+const gadgetCardW, gadgetCardH, gadgetCardY = 0.56, 0.36, 0.52
+
+// gadgetCardX is gadget k's card's centre across the screen, from the
+// middle, in screen heights.
+func gadgetCardX(k arena.GadgetKind) float32 { return (float32(k) - 0.5) * 0.66 }
 
 // damageChevrons point round the crosshair at where recent hits came from.
 func (h *helmet) damageChevrons() {
@@ -289,7 +376,7 @@ func (h *helmet) loadout(me *arena.Player) {
 	}
 	place := func(width, y float32) float32 { return right - width/2/h.aspect }
 
-	cur := ic.weapons[max(me.Current, 0)]
+	cur := ic.weapons[max(me.Holding(), 0)] // (the hammer, while it's out)
 	const curH = 0.06
 	h.icon(cur, place(curH*cur.aspect, 0.84), 0.84, curH, 0, withAlpha(uiWhite, 0.95))
 	if other := me.Other(); other != arena.NoWeapon {
@@ -302,7 +389,7 @@ func (h *helmet) loadout(me *arena.Player) {
 	var round icon
 	var ammo, mag, perRow int
 	var rh float32
-	switch me.Current {
+	switch me.Holding() {
 	case arena.WeaponRifle:
 		round, rh, perRow = ic.ball, 0.011, 24
 	case arena.WeaponPistol:
@@ -332,6 +419,8 @@ func (h *helmet) loadout(me *arena.Player) {
 			h.icon(round, sx, sy, rh, 0, c)
 		}
 	}
+
+	h.gadget(me, grenadeX, grenadeY)
 
 	// Grenades, bottom left: an icon each, the kind G throws lit.
 	for k, gi := range []icon{ic.frag, ic.sticky} {

@@ -76,7 +76,11 @@ const (
 // head and arms following their aim, the weapon in hand and the suit
 // flashing when hit. The dead topple over backwards.
 func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride float32) []render.DrawCmd {
-	pos, _ := p.Body.Interpolated(m.alpha())
+	alpha := m.alpha()
+	if p.Dead {
+		alpha = 1 // (see eye)
+	}
+	pos, _ := p.Body.Interpolated(alpha)
 	feet := pos.Sub(mathx.Vec3{0, arena.PlayerRadius, 0})
 	// Running: the body bounces with each step and leans into a sprint.
 	run, sprint := runFactors(p)
@@ -137,6 +141,9 @@ func (m *Arena) appendCharacter(out []render.DrawCmd, p *arena.Player, stride fl
 	if p.Switching > 0 {
 		weapon = weapon.Mul(mathx.RotateX(-1.2 * p.Switching / arena.SwitchTime))
 	}
+	if e := elbowPose(p.Elbow.Progress()); e > 0 {
+		weapon = weapon.Mul(mathx.Translate(-0.2*e, 0, -0.1*e)).Mul(mathx.RotateY(0.9 * e))
+	}
 	out = m.drawParts(out, weapon, parts)
 	// A scoped sniper's lens catches the light: a glint you can spot them by.
 	if mk, ok := m.markerFor(p.Current); ok && mk.scope && p.ADS > 0.5 && !p.Dead {
@@ -168,6 +175,19 @@ func flatRight(yaw float32) (right, forward mathx.Vec3) {
 	s, c := float32(math.Sin(float64(yaw))), float32(math.Cos(float64(yaw)))
 	forward = mathx.Vec3{s, 0, -c}
 	return mathx.Vec3{c, 0, s}, forward
+}
+
+// elbowPose is how far an elbow strike has got as a pose: 0 at rest, 1 at
+// the moment it lands; p is its progress (0..1, negative when idle).
+func elbowPose(p float32) float32 {
+	if p < 0 {
+		return 0
+	}
+	strike := float32(arena.ElbowHitAt / arena.ElbowTime)
+	if p < strike {
+		return smooth(p / strike)
+	}
+	return 1 - smooth((p-strike)/(1-strike))
 }
 
 // hammerPose is how far a sledgehammer swing has got as a pose: 0 at rest,

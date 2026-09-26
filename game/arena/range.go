@@ -82,14 +82,15 @@ func GenerateRange() *Site {
 	}
 	s.Structures = append(s.Structures, Bunker(rng, v(firingLine-40, 0, -9), 0), Glasshouse(rng, v(firingLine-55, 0, 9), 0))
 
-	// The weapon table, to the left of the line: every gun, and crates of
-	// both grenades, none of which run out.
+	// The weapon table, to the left of the line: every gun, crates of both
+	// grenades and both gadgets, none of which run out.
 	add(Bay, v(tableX0, 0, tableZ-0.6), v(tableX1, tableH, tableZ+0.6))
 	items := []Pickup{
 		weaponPickup(WeaponRifle, mathx.Vec3{}), weaponPickup(WeaponPistol, mathx.Vec3{}),
 		weaponPickup(WeaponShotgun, mathx.Vec3{}), weaponPickup(WeaponSniper, mathx.Vec3{}),
 		weaponPickup(WeaponLauncher, mathx.Vec3{}),
 		grenadePickup(Frag, MaxGrenades, mathx.Vec3{}), grenadePickup(Sticky, MaxGrenades, mathx.Vec3{}),
+		gadgetPickup(GadgetHammer), gadgetPickup(GadgetGrapple),
 	}
 	for i, p := range items {
 		p.At = v(tableX1-0.5-float32(i)*(tableX1-tableX0-1)/float32(len(items)-1), tableH, tableZ)

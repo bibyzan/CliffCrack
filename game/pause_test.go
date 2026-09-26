@@ -1,6 +1,7 @@
 package game
 
 import (
+	"CliffCrack/game/arena"
 	"math"
 	"os"
 	"path/filepath"
@@ -215,5 +216,42 @@ func TestViewProfilesNest(t *testing.T) {
 		if i > 0 && v.chunks <= viewProfiles[i-1].chunks {
 			t.Errorf("%s doesn't see further than %s", v.name, viewProfiles[i-1].name)
 		}
+	}
+}
+
+// A gadget chosen in the countdown is saved, and picked for you in the next
+// match's countdown.
+func TestGadgetChoiceIsRemembered(t *testing.T) {
+	s := DefaultSettings()
+	saved := 0
+	m := &Arena{match: arena.NewMatch(1, 2), settings: &s, saveSettings: func() { saved++ }}
+	m.noteGadgetChoice(arena.Input{Select: 2})
+	if s.Gadget != int(arena.GadgetGrapple) || saved != 1 {
+		t.Fatalf("choosing the grapple: setting %d, saved %d times", s.Gadget, saved)
+	}
+	m.noteGadgetChoice(arena.Input{Select: 2})
+	if saved != 1 {
+		t.Error("choosing the same again shouldn't save again")
+	}
+	m.noteGadgetChoice(arena.Input{Gadget: true})
+	if s.Gadget != int(arena.GadgetHammer) {
+		t.Errorf("stepping on from the grapple: %d, want the hammer", s.Gadget)
+	}
+	m.noteGadgetChoice(arena.Input{Cycle: 1})
+
+	// The next match: last match's choice goes in as a pick in its countdown.
+	next := arena.NewMatch(2, 2)
+	next.Step(1.0/60, []arena.Input{{Select: s.Gadget + 1}, {}})
+	if got := next.Arena.Players[0].Gadget; got != arena.GadgetGrapple {
+		t.Errorf("the next match starts with %v, want the grapple chosen last", got)
+	}
+
+	// Saved to disk and back.
+	dir := t.TempDir()
+	if err := s.Save(dir); err != nil {
+		t.Fatal(err)
+	}
+	if back, err := LoadSettings(dir); err != nil || back.Gadget != s.Gadget {
+		t.Errorf("saved gadget %d came back as %d (%v)", s.Gadget, back.Gadget, err)
 	}
 }

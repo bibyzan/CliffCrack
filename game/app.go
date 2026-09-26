@@ -180,6 +180,7 @@ func (a *App) enter(mode Mode) error {
 		if err != nil {
 			return err
 		}
+		m.saveSettings = a.saveSettings
 		m.Autopilot = a.opts.Autopilot
 		m.touchScreen = a.opts.Touch
 		m.startWeapon = a.opts.Weapon
@@ -527,6 +528,7 @@ func (a *App) startOnline(start *online.StartMsg) {
 			logf("online: %v", err)
 			return
 		}
+		m.saveSettings = a.saveSettings
 		m.touchScreen = a.opts.Touch
 		a.arena = m
 	}

@@ -363,6 +363,20 @@ type gunPart struct {
 	soft         bool // a box with its edges rounded right off (see roundedBox)
 }
 
+// The grapple: a wrist launcher, barrel down -Z, with the hook sitting in
+// its muzzle, three prongs folded back.
+var grappleParts = []gunPart{
+	b(0, 0, 0.02, 0.035, 0.03, 0.09, gunBlack),          // housing
+	b(0, 0.032, 0.02, 0.028, 0.004, 0.07, markerOrange), // top stripe
+	b(0, -0.045, 0.06, 0.03, 0.018, 0.035, gunMetal),    // wrist strap
+	b(0, 0, -0.1, 0.018, 0.018, 0.04, gunMetal),         // barrel
+	r(0, 0, -0.07, 0.03, 0.03, 0.03, gunBlack),          // spool
+	b(0, 0, -0.16, 0.012, 0.012, 0.03, uiAccent),        // hook shank
+	b(0, 0.02, -0.15, 0.004, 0.02, 0.012, gunMetal),     // prongs
+	b(0.018, -0.012, -0.15, 0.018, 0.004, 0.012, gunMetal),
+	b(-0.018, -0.012, -0.15, 0.018, 0.004, 0.012, gunMetal),
+}
+
 // The sledgehammer, handle along +Y, the head's striking face towards -Z:
 // a taped grip, a steel head with a painted band, and a striking face in
 // the team orange.

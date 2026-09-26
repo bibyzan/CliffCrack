@@ -24,7 +24,7 @@ const (
 
 	flashTime   = 0.05
 	feedLife    = 3.5 // s a kill-feed line stays up
-	hitMarkTime = 0.14
+	hitMarkTime = 0.2
 	padHoldTime = 0.3 // s to hold the pad's X to pick up rather than reload
 	maxBursts   = 160 // effect puffs alive at once
 	breakSounds = 3   // per frame, so a collapse doesn't deafen
@@ -81,6 +81,7 @@ type arenaSounds struct {
 	armour, pop, recharge, splat                         *audio.Sound
 	throw, stick, stickyBoom, pickup                     *audio.Sound
 	magOut, magIn, charge, shellIn, pump                 *audio.Sound
+	elbow, punch, hook, catch, release, draw             *audio.Sound
 	guns                                                 [len(arena.WeaponNames)]*audio.Sound
 	breaks                                               [arena.MaterialCount]*audio.Sound
 }
@@ -114,10 +115,17 @@ type Arena struct {
 	debugOpen bool // the F1 window is up: the mouse is for the UI unless the right button is held
 	locked    bool
 
-	touchScreen bool        // the device has one: show on-screen controls while it's in use
-	touch       *arenaTouch // the stick and buttons
-	touchOn     bool        // the on-screen controls are up this frame
-	wantsPause  bool        // the on-screen pause button was tapped
+	touchScreen bool             // the device has one: show on-screen controls while it's in use
+	touch       *arenaTouch      // the stick and buttons
+	viewAspect  float32          // the screen's width / height, as last drawn (for lining the UI up with the helmet)
+	gadgetHover arena.GadgetKind // the gadget card under the mouse while choosing, -1 for none
+	// wantGadget (+1) is the gadget last chosen, to pick for you when a
+	// match starts (sent as a choice, so a guest's reaches the host); 0 once
+	// done. saveSettings keeps a new choice for the next match.
+	wantGadget   int
+	saveSettings func()
+	touchOn      bool // the on-screen controls are up this frame
+	wantsPause   bool // the on-screen pause button was tapped
 
 	net          *netPlay // an online match (nil: against the bot)
 	inputBlocked bool     // a menu's open over an online match: it plays on, without us
@@ -211,6 +219,11 @@ func (m *Arena) start() error {
 	}
 	m.feed = m.feed[:0]
 	m.newRound()
+	m.wantGadget = m.settings.Gadget + 1
+	if m.Practice { // no countdown to choose in: straight into your hand
+		m.match.SetGadget(local, arena.GadgetKind(m.settings.Gadget))
+		m.wantGadget = 0
+	}
 	return nil
 }
 
@@ -276,7 +289,8 @@ func (m *Arena) Update(dt float32, in *input.State, mouseFree bool) {
 	held := in.MouseDown(input.MouseRight) && (mouseFree || m.locked)
 	// On a touch screen the first finger is also the mouse: it mustn't fire
 	// and look as well, so the mouse is left free for the menus.
-	m.locked = (!m.debugOpen || held) && !m.inputBlocked && !m.touchScreen
+	// Choosing a gadget, the mouse is let go, to click one.
+	m.locked = (!m.debugOpen || held) && !m.inputBlocked && !m.touchScreen && !m.choosingGadget()
 	m.touchOn = m.touchScreen && !m.inputBlocked && !m.Autopilot && !in.UsingPad()
 	if !m.touchOn {
 		m.touch.release()
@@ -329,7 +343,7 @@ func (m *Arena) announce() {
 	}
 	switch mt.Phase {
 	case arena.PhaseCountdown:
-		if s := int(math.Ceil(float64(mt.Timer))); s != m.lastTick && s > 0 {
+		if s := int(math.Ceil(float64(mt.Timer))); s != m.lastTick && s > 0 && s <= arena.CountdownCall {
 			m.lastTick = s
 			m.play(m.sfx.tick, 1)
 		}
@@ -407,9 +421,26 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 
 	c.Jump = in.Pressed(input.KeySpace) || in.PadPressed(input.PadA)
 	c.Sprint = in.Down(input.KeyLeftShift) || in.PadDown(input.PadLStick)
-	c.Melee = in.Pressed(input.KeyF) || in.PadPressed(input.PadRB)
+	c.Melee = in.Pressed(input.KeyF) || in.PadPressed(input.PadRStick)
+	c.Gadget = in.Pressed(input.KeyQ) || in.PadPressed(input.PadRB)
 	c.Throw = in.Pressed(input.KeyG) || in.PadPressed(input.PadLB)
-	c.SwitchGrenade = in.Pressed(input.KeyQ) || in.PadPressed(input.PadB)
+	c.SwitchGrenade = in.Pressed(input.KeyC) || in.PadPressed(input.PadB)
+	m.gadgetHover = -1
+	auto := false
+	if m.wantGadget > 0 && m.match.Phase == arena.PhaseCountdown {
+		c.Select, m.wantGadget, auto = m.wantGadget, 0, true // last match's choice
+	}
+	if m.choosingGadget() { // the d-pad and the arrows step through the gadgets too, and the mouse picks one
+		if in.PadPressed(input.PadLeft) || in.PadPressed(input.PadRight) || in.Pressed(input.KeyLeft) || in.Pressed(input.KeyRight) {
+			c.Cycle = 1
+		}
+		if k, ok := m.gadgetUnderMouse(in); ok {
+			m.gadgetHover = k
+			if in.MousePressed(input.MouseLeft) {
+				c.Select = int(k) + 1
+			}
+		}
+	}
 
 	// R reloads, E picks up. On a pad, X does both, as in Halo: tap to
 	// reload, hold to pick up.
@@ -435,7 +466,11 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 	if (m.locked && mouseFree && in.Scroll() != 0) || in.PadPressed(input.PadY) {
 		c.Cycle = 1
 	}
-	return mergeTouch(c, touch)
+	c = mergeTouch(c, touch)
+	if !auto {
+		m.noteGadgetChoice(c)
+	}
+	return c
 }
 
 // mergeTouch adds the on-screen controls' presses to the keyboard's and
@@ -453,6 +488,7 @@ func mergeTouch(c, t arena.Input) arena.Input {
 	c.Jump = c.Jump || t.Jump
 	c.Reload = c.Reload || t.Reload
 	c.Melee = c.Melee || t.Melee
+	c.Gadget = c.Gadget || t.Gadget
 	c.Throw = c.Throw || t.Throw
 	c.SwitchGrenade = c.SwitchGrenade || t.SwitchGrenade
 	c.Interact = c.Interact || t.Interact
@@ -654,11 +690,15 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		m.playAt(m.sfx.collapse, at, min(float32(fell)/20, 1))
 	}
 	for _, s := range ev.Smashes {
-		if s.By == me {
-			m.shake = max(m.shake, 0.35)
+		size, shake, sound := float32(0.35), float32(0.35), m.sfx.thud
+		if s.Light { // an elbow
+			size, shake, sound = 0.18, 0.15, m.sfx.punch
 		}
-		m.addBurst(burst{at: s.At.Add(s.Normal.Scale(0.05)), size: 0.35, life: 0.15, grow: true, colour: flashColor})
-		m.playAt(m.sfx.thud, s.At, 1)
+		if s.By == me {
+			m.shake = max(m.shake, shake)
+		}
+		m.addBurst(burst{at: s.At.Add(s.Normal.Scale(0.05)), size: size, life: 0.15, grow: true, colour: flashColor})
+		m.playAt(sound, s.At, 1)
 	}
 	for _, st := range ev.Stuck {
 		m.playAt(m.sfx.stick, st.Grenade.Position(), 1)
@@ -691,6 +731,23 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		switch act.Kind {
 		case arena.ActSwing:
 			sound = m.sfx.swing
+		case arena.ActElbow:
+			sound = m.sfx.elbow
+		case arena.ActGadget:
+			sound, volume = m.sfx.draw, 0.9
+		case arena.ActGrapple:
+			switch act.Value {
+			case 0:
+				sound = m.sfx.hook
+			case 1:
+				m.play(m.sfx.hook, 0.7)
+				sound, volume = m.sfx.catch, 0.9
+				if mine {
+					m.fovKick = max(m.fovKick, 0.6)
+				}
+			default:
+				sound, volume = m.sfx.release, 0.7
+			}
 		case arena.ActLaunch:
 			sound, volume = m.sfx.launch, 0.9
 			if mine {
@@ -713,6 +770,9 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 			}
 		case arena.ActPickup:
 			sound, volume = m.sfx.pickup, 0.9
+			if mine && act.Value < 0 { // a gadget, off the range's table
+				m.rememberGadget(int(me.Gadget))
+			}
 		case arena.ActBoost:
 			sound, volume = m.sfx.boost, 1
 			if mine {
@@ -792,7 +852,11 @@ func (m *Arena) alpha() float32 {
 
 func (m *Arena) eye() mathx.Vec3 {
 	me := m.me()
-	eye := me.Eye(m.alpha())
+	alpha := m.alpha()
+	if me.Dead {
+		alpha = 1 // no longer stepped (a guest's is placed by the host's snapshots): nothing to draw between
+	}
+	eye := me.Eye(alpha)
 	if np := m.net; np != nil && !np.host {
 		eye = eye.Add(np.pred.Offset) // predicted, a correction easing out
 	}
@@ -882,6 +946,14 @@ func (m *Arena) weaponModel() mathx.Mat4 {
 		}
 		offset = offset.Add(mathx.Vec3{-0.04 * e, 0.02 * e, 0.05 * e})
 	}
+	// An elbow: the gun swings in across the body, canted over, as the
+	// elbow drives forward, and back out.
+	if e := elbowPose(w.Elbow.Progress()); e > 0 {
+		offset = offset.Add(mathx.Vec3{-0.2 * e, 0.04 * e, -0.1 * e})
+		yaw += 0.9 * e
+		roll -= 0.7 * e
+		pitch -= 0.1 * e
+	}
 	switch held := heldKind(w); held {
 	case arena.WeaponLauncher:
 		size = 0.45
@@ -952,6 +1024,7 @@ func (m *Arena) muzzle() mathx.Vec3 {
 
 // Render returns the frame parameters and the draw list (appended to out[:0]).
 func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
+	m.viewAspect = aspect
 	eye := m.eye()
 	fov := m.settings.fovRadians() * 1.25 * (1 + 0.18*m.fovKick) * (1 + 0.07*smooth(m.sprintAmt)) // a wider view suits first person; wider still in a launch
 	fov = min(fov, 1.9)
@@ -986,6 +1059,7 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 		}
 	}
 	out = m.appendDebris(out)
+	out = m.appendGrapples(out)
 	out = m.appendPickups(out)
 	out = m.appendPaint(out)
 	out = append(out, m.glass...) // translucent: after every solid
@@ -994,7 +1068,7 @@ func (m *Arena) Render(aspect float32, out []render.DrawCmd) (render.FrameParams
 	if mk, ok := m.markerFor(m.me().Current); ok && mk.scope && m.me().ADS > 0.85 {
 		scoped = true // looking through the scope, not at the gun
 	}
-	if !m.me().Dead && !scoped {
+	if !m.me().Dead && !scoped && !m.choosingGadget() { // (lowered while choosing a gadget)
 		out = m.appendWeapon(out)
 	}
 	out = m.appendHurt(out)

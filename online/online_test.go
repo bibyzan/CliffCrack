@@ -124,7 +124,12 @@ func TestAMatchOverALossyLink(t *testing.T) {
 	var receiver InputReceiver
 	var batch InputBatch
 	const dt = 1.0 / 60
+	fired, round := 0, host.Arena // the guest's shots, over the rounds
 	for step := 0; step < 60*30; step++ {
+		if host.Arena != round {
+			fired += round.Players[1].ShotsFired
+			round = host.Arena
+		}
 		// The guest (player 1) plays by bot, through the link.
 		g := guest.Arena
 		gin := bots[1].Think(g, g.Players[1], dt)
@@ -177,7 +182,11 @@ func TestAMatchOverALossyLink(t *testing.T) {
 	if h, g := host.Arena.Standing(), guest.Arena.Standing(); h != g {
 		t.Errorf("the site: host %.4f standing, guest %.4f", h, g)
 	}
-	if h, g := host.Arena.Players[1].ShotsFired, guest.Arena.Players[1].ShotsFired; h == 0 {
+	fired += host.Arena.Players[1].ShotsFired
+	if fired == 0 {
+		t.Errorf("the guest never fired through the link, in %d rounds", host.Round)
+	}
+	if h, g := host.Arena.Players[1].ShotsFired, guest.Arena.Players[1].ShotsFired; h > 0 && g == 0 {
 		t.Errorf("the guest never fired through the link (host saw %d, guest %d)", h, g)
 	}
 }

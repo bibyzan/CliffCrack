@@ -3,6 +3,8 @@ package arena
 import (
 	"math"
 	"testing"
+
+	"CliffCrack/engine/mathx"
 )
 
 // A shooter aims where a strafing target was 200 ms ago (as a lagged guest
@@ -54,5 +56,25 @@ func TestRewindIsBoundedAndRestored(t *testing.T) {
 	}
 	if shooter.Body.Position != me {
 		t.Error("the shooter moved")
+	}
+}
+
+// TestADeadBodyHoldsStill: once a player dies, where their body is drawn
+// doesn't depend on how far between steps the frame falls (it used to
+// flicker between the last two positions: the camera twitched).
+func TestADeadBodyHoldsStill(t *testing.T) {
+	a, shooter, target := duel(12)
+	arm(shooter, WeaponPistol)
+	run(a, 0.5, Input{}, Input{Move: [2]float32{1, 0}}) // moving when it dies
+	target.Shield = 0
+	a.hurtPlayer(target, shooter, 1000, false, WeaponPistol, target.Chest(), mathx.Vec3{}, &Events{})
+	if !target.Dead {
+		t.Fatal("the target didn't die")
+	}
+	run(a, 0.2, Input{}, Input{})
+	p0, _ := target.Body.Interpolated(0)
+	p1, _ := target.Body.Interpolated(1)
+	if d := p1.Sub(p0).Len(); d > 1e-4 {
+		t.Errorf("a dead body is drawn %.3f m apart depending on the frame's timing", d)
 	}
 }
