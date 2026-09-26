@@ -15,7 +15,6 @@ import (
 )
 
 const (
-	chunksAhead   = 10  // chunks kept ahead of the ball (~480 m, fading into the haze)
 	overDelay     = 0.9 // seconds from a crash to the game-over card
 	attractReplay = 3.0 // seconds the menu backdrop lingers on a crash before a new run
 	hintTime      = 7.0 // seconds the controls hint stays up
@@ -127,12 +126,12 @@ func (r *Run) obstacles(index int) []course.Obstacle {
 func (r *Run) stream(all bool) {
 	cur := course.ChunkAt(max(r.ride.s(), 0))
 	for index, c := range r.chunks {
-		if index < cur-2 || index > cur+chunksAhead {
+		if index < cur-2 || index > cur+r.settings.view().chunks {
 			render.DestroyMesh(c.mesh)
 			delete(r.chunks, index)
 		}
 	}
-	for index := cur - 1; index <= cur+chunksAhead; index++ {
+	for index := cur - 1; index <= cur+r.settings.view().chunks; index++ {
 		if _, ok := r.chunks[index]; ok {
 			continue
 		}
@@ -327,13 +326,12 @@ func (r *Run) play(s *audio.Sound, volume float32) {
 // Render returns the frame parameters and the draw list (appended to out[:0]).
 func (r *Run) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, []render.DrawCmd) {
 	view, eye := r.cam.view()
-	proj := mathx.Perspective(r.cam.fov(r.settings.fovRadians()), aspect, 0.3, farPlane)
+	v := r.settings.view()
+	proj := mathx.Perspective(r.cam.fov(r.settings.fovRadians()), aspect, 0.3, v.far)
 	params := runFrameParams(proj.Mul(view), eye, r.sun)
+	params.FogDensity = v.fog
 
-	out = r.sc.appendBackdrop(out[:0], eye, func(ahead float32) float32 {
-		s := max(-eye[2], 0) + ahead
-		return r.course.Height(r.course.Centre(s), -s)
-	})
+	out = r.sc.appendBackdrop(out[:0], eye, v)
 	for _, c := range r.chunks {
 		out = append(out, render.DrawCmd{Model: mathx.Identity(), Color: snowColor,
 			Flags: gfx.DrawFlat | gfx.DrawSnow, Mesh: c.mesh})

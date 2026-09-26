@@ -176,3 +176,44 @@ func TestHUDWidthSetting(t *testing.T) {
 		t.Errorf("its right edge at %v, want 0.75", got)
 	}
 }
+
+func TestViewDistanceSetting(t *testing.T) {
+	if d := DefaultSettings(); d.ViewDistance != viewMedium {
+		t.Errorf("default view distance %v, want Medium", d.ViewDistance)
+	}
+	s := DefaultSettings()
+	for _, bad := range []int{-1, len(viewProfiles)} {
+		s.ViewDistance = bad
+		s.clamp()
+		if s.ViewDistance != viewMedium {
+			t.Errorf("view distance %d not reset to the default", bad)
+		}
+	}
+	// An older settings file, from before the setting, gets the default.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "settings.json"), []byte(`{"fov": 60}`), 0o644)
+	if s, err := LoadSettings(dir); err != nil || s.ViewDistance != viewMedium {
+		t.Errorf("old settings file: view distance %v (%v), want Medium", s.ViewDistance, err)
+	}
+}
+
+// Each view distance sees further than the last, and draws its distant
+// ranges inside the sky, and the sky inside the far plane.
+func TestViewProfilesNest(t *testing.T) {
+	for i, v := range viewProfiles {
+		// The furthest a range reaches: its back edge (300 m deep, scaled).
+		reach := float32(0)
+		for _, r := range []float32{560, 860, 1200} { // (the ranges' distances, as built in newScenery)
+			reach = max(reach, (r+300)*v.ranges)
+		}
+		if reach >= v.sky || v.sky >= v.far {
+			t.Errorf("%s: ranges reach %.0f m, sky %.0f m, far plane %.0f m: want each inside the next", v.name, reach, v.sky, v.far)
+		}
+		if course, nearest := float32(v.chunks)*48, 560*v.ranges; course >= nearest {
+			t.Errorf("%s: %.0f m of course runs into the nearest range at %.0f m", v.name, course, nearest)
+		}
+		if i > 0 && v.chunks <= viewProfiles[i-1].chunks {
+			t.Errorf("%s doesn't see further than %s", v.name, viewProfiles[i-1].name)
+		}
+	}
+}

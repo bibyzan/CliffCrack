@@ -86,6 +86,7 @@ const (
 	rowStick // touch screens only: a fixed or floating move stick
 	rowVolume
 	rowHUD
+	rowView
 	rowBack
 	rowCount
 )
@@ -170,6 +171,14 @@ func (m *settingsScreen) update(in *input.State, s *Settings, dt float32) (done 
 		if (steps != 0 && m.heldFor == 0) || confirmPressed(in) {
 			s.FloatingStick = !s.FloatingStick
 		}
+	case rowView:
+		n := len(viewProfiles)
+		switch {
+		case steps != 0 && m.heldFor == 0: // once per press, no repeat
+			s.ViewDistance = (s.ViewDistance + steps%n + n) % n
+		case confirmPressed(in):
+			s.ViewDistance = (s.ViewDistance + 1) % n
+		}
 	case rowBack:
 		if confirmPressed(in) {
 			return true
@@ -209,6 +218,9 @@ func (m *settingsScreen) ui(b *ui.Builder, s *Settings, in *input.State) {
 	}
 	b.StyledSlider("Volume", &s.Volume, 0, 100, style(rowVolume, "%.0f%%"))
 	b.StyledSlider("HUD width (ultrawide)", &s.HUDWidth, minHUDWidth, maxHUDWidth, style(rowHUD, "%.0f%%"))
+	if b.MenuButton(fmt.Sprintf("View distance:  %s##view", s.view().name), width, 0, m.choice == rowView) {
+		s.ViewDistance = (s.ViewDistance + 1) % len(viewProfiles)
+	}
 	b.Separator()
 	if b.MenuButton("Back", width, 46, m.choice == rowBack) {
 		m.back = true

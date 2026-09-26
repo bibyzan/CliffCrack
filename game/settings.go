@@ -19,6 +19,9 @@ type Settings struct {
 	// HUDWidth is how much of the screen's width the HUD spans, in percent,
 	// centred: on an ultrawide, bring it in to where you're looking.
 	HUDWidth float32 `json:"hud_width"`
+	// ViewDistance is how far down the course Run draws: one of the
+	// viewNear, viewMedium or viewFar levels (see viewProfiles).
+	ViewDistance int `json:"view_distance"`
 	// FloatingStick makes the on-screen move stick (touch screens) appear
 	// wherever the left thumb lands, rather than stay in its corner.
 	FloatingStick bool `json:"floating_stick,omitempty"`
@@ -44,7 +47,7 @@ const (
 )
 
 func DefaultSettings() Settings {
-	return Settings{FOV: 50, LookSensitivity: 1, Volume: 80, HUDWidth: 100}
+	return Settings{FOV: 50, LookSensitivity: 1, Volume: 80, HUDWidth: 100, ViewDistance: viewMedium}
 }
 
 // clamp brings every value into range (e.g. after loading a hand-edited file).
@@ -60,7 +63,39 @@ func (s *Settings) clamp() {
 	fix(&s.LookSensitivity, minSensitivity, maxSensitivity, d.LookSensitivity)
 	fix(&s.Volume, 0, 100, d.Volume)
 	fix(&s.HUDWidth, minHUDWidth, maxHUDWidth, d.HUDWidth)
+	if s.ViewDistance < 0 || s.ViewDistance >= len(viewProfiles) {
+		s.ViewDistance = d.ViewDistance
+	}
 }
+
+// View distance levels.
+const (
+	viewNear = iota
+	viewMedium
+	viewFar
+)
+
+// viewProfile is everything that goes with one view distance: how much of
+// the course is streamed ahead, the haze that fades it out towards there,
+// and the sky and distant ranges pushed back beyond it (the ranges scaled
+// up with their distance, so they look the same, just further off).
+type viewProfile struct {
+	name   string
+	chunks int     // course chunks kept ahead of the ball
+	fog    float32 // haze density
+	ranges float32 // distance (and size) of the backdrop ranges, x the nearest level
+	sky    float32 // sky dome radius: beyond the ranges
+	far    float32 // far clip plane: beyond the sky
+}
+
+var viewProfiles = []viewProfile{
+	viewNear:   {name: "Near", chunks: 10, fog: 0.0016, ranges: 1, sky: 2000, far: 2600},
+	viewMedium: {name: "Medium", chunks: 20, fog: 0.001, ranges: 2, sky: 3300, far: 3700},
+	viewFar:    {name: "Far", chunks: 30, fog: 0.0007, ranges: 2.8, sky: 4600, far: 5100},
+}
+
+// view is the chosen view distance's profile.
+func (s *Settings) view() viewProfile { return viewProfiles[s.ViewDistance] }
 
 // hudBox is the HUD's width as a fraction of the screen's.
 func (s *Settings) hudBox() float32 { return s.HUDWidth / 100 }

@@ -35,10 +35,10 @@ const (
 )
 
 // backdropRange is one layer of the mountain ranges on the horizon. The
-// layers keep a fixed distance ahead of the camera, so they sit at
-// "infinity" while the course streams past underneath. Their feet go no
-// higher than the course that far ahead: down a steep face the ground falls
-// away faster than the camera, and sky would show beneath them.
+// layers keep a fixed offset from the camera, so they sit at "infinity"
+// while the course streams past underneath. A deep skirt hangs below each
+// (see rangeMesh): down a steep face the course ahead falls away far below
+// their feet, and sky would show beneath them.
 type backdropRange struct {
 	mesh     render.Mesh
 	distance float32 // ahead of the camera
@@ -190,25 +190,23 @@ func runFrameParams(viewProj mathx.Mat4, eye mathx.Vec3, sun float32) render.Fra
 	}
 }
 
-// rangeSkirt is how far below its foot each range hangs a curtain.
-const rangeSkirt = 700
+// rangeSkirt is how far below its foot each range hangs a curtain: further
+// than the streamed course reaches below the camera, even down the Drop.
+const rangeSkirt = 1600
 
-// appendBackdrop draws the sky and the distant ranges around the camera.
-// ground (nil for none) is the course's height the given distance ahead.
-func (sc *scenery) appendBackdrop(out []render.DrawCmd, eye mathx.Vec3, ground func(ahead float32) float32) []render.DrawCmd {
+// appendBackdrop draws the sky and the distant ranges around the camera, as
+// far off as the view distance v puts them.
+func (sc *scenery) appendBackdrop(out []render.DrawCmd, eye mathx.Vec3, v viewProfile) []render.DrawCmd {
 	out = append(out, render.DrawCmd{
-		Model: mathx.Translate(eye[0], eye[1], eye[2]).Mul(mathx.Scale(skyRadius, skyRadius, skyRadius)),
+		Model: mathx.Translate(eye[0], eye[1], eye[2]).Mul(mathx.Scale(v.sky, v.sky, v.sky)),
 		Color: skyZenith,
 		Flags: gfx.DrawSky,
 		Mesh:  sc.sky,
 	})
+	k := v.ranges
 	for _, r := range sc.ranges {
-		foot := eye[1] - r.drop
-		if ground != nil {
-			foot = min(foot, ground(r.distance)-60)
-		}
 		out = append(out, render.DrawCmd{
-			Model: mathx.Translate(eye[0], foot, eye[2]-r.distance),
+			Model: mathx.Translate(eye[0], eye[1]-r.drop*k, eye[2]-r.distance*k).Mul(mathx.Scale(k, k, k)),
 			Color: r.color,
 			Flags: gfx.DrawFlat | gfx.DrawSnow,
 			Mesh:  r.mesh,
