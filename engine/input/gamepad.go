@@ -63,6 +63,7 @@ func (s *State) PadEvent(b PadButton, down bool) {
 	s.pad.buttons[b] = down
 	if down {
 		s.pad.usingPad = true
+		s.touch.usingTouch = false
 	}
 }
 
@@ -74,6 +75,7 @@ func (s *State) PadAxisEvent(a PadAxis, v float32) {
 	s.pad.axes[a] = v
 	if abs(v) > 0.5 {
 		s.pad.usingPad = true
+		s.touch.usingTouch = false
 	}
 }
 

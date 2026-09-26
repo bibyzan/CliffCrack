@@ -65,6 +65,11 @@ type Run struct {
 	debugOpen bool // the F1 window is up: the mouse is for the UI unless the right button is held
 	locked    bool // the mouse is captured for looking around
 
+	touchScreen bool      // the device has one: show on-screen controls while it's in use
+	touch       *runTouch // the stick, jump and pause buttons
+	touchOn     bool      // the on-screen controls are up this frame
+	wantsPause  bool      // the on-screen pause button was tapped
+
 	settings *Settings // the player's preferences (field of view, look sensitivity)
 }
 
@@ -82,6 +87,7 @@ func newRun(sc *scenery, mixer *audio.Mixer, seed uint64, settings *Settings) *R
 		chunks:    map[int]*runChunk{},
 		sun:       1,
 		sfx:       newRunSounds(),
+		touch:     newRunTouch(),
 	}
 }
 
@@ -167,6 +173,18 @@ func (r *Run) Update(dt float32, in *input.State, mouseFree bool) {
 		r.play(r.sfx.pick, 1)
 		r.start(false)
 	}
+	riding := !r.attract && (!r.ride.crashed || r.overTime < overDelay)
+	r.touchOn = r.touchScreen && riding && !in.UsingPad()
+	var (
+		touchRide rideInput
+		touchLook lookInput
+	)
+	if r.touchOn {
+		w, h := render.DisplaySize()
+		touchRide, touchLook, r.wantsPause = r.touch.read(in, float32(w), float32(h))
+	} else {
+		r.touch.release()
+	}
 	var ctl rideInput
 	switch {
 	case r.attract || r.Autopilot:
@@ -180,11 +198,18 @@ func (r *Run) Update(dt float32, in *input.State, mouseFree bool) {
 				in.PadAxis(input.PadRightTrigger) - in.PadAxis(input.PadLeftTrigger),
 			jump: in.Pressed(input.KeySpace) || in.PadPressed(input.PadA),
 		}
+		ctl.steer += touchRide.steer
+		ctl.throttle += touchRide.throttle
+		ctl.jump = ctl.jump || touchRide.jump
 	}
 	wasCrashed := r.ride.crashed
 	ev := r.ride.step(dt, ctl)
 	r.stream(false)
-	r.cam.update(dt, r.ride, r.course, r.look(in, mouseFree, dt))
+	look := r.look(in, mouseFree, dt)
+	scale := r.settings.LookSensitivity
+	look.yaw += touchLook.yaw * scale
+	look.elev += touchLook.elev * scale * r.settings.lookSign()
+	r.cam.update(dt, r.ride, r.course, look)
 
 	r.zoneTime += dt
 	if s := r.ride.s(); s >= 0 && !r.ride.crashed {
@@ -268,14 +293,17 @@ func (r *Run) look(in *input.State, mouseFree bool, dt float32) lookInput {
 	}
 	riding := !r.ride.crashed || r.overTime < overDelay
 	held := in.MouseDown(input.MouseRight) && (mouseFree || r.locked)
-	r.locked = riding && (!r.debugOpen || held)
+	r.locked = riding && (!r.debugOpen || held) && !r.touchScreen
 
 	var l lookInput
 	if x, y := in.PadStick(true); x != 0 || y != 0 {
 		l.yaw += x * camStickYaw * dt
 		l.elev += y * camStickPitch * dt
 	}
-	if r.locked || ((in.MouseDown(input.MouseLeft) || in.MouseDown(input.MouseRight)) && mouseFree) {
+	// On a touch screen the first finger also acts as the mouse; the
+	// on-screen controls sort out which fingers look.
+	dragging := (in.MouseDown(input.MouseLeft) || in.MouseDown(input.MouseRight)) && mouseFree && !r.touchOn
+	if r.locked || dragging {
 		dx, dy := in.MouseDelta()
 		l.yaw += float32(dx) * camMouseSens
 		l.elev += float32(dy) * camMouseSens

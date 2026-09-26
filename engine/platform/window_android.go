@@ -1,7 +1,8 @@
 //go:build android
 
 // Package platform owns the OS window, input events (keyboard, mouse,
-// gamepad) and time: via GLFW on desktop, via NativeActivity on Android.
+// gamepad, touch) and time: via GLFW on desktop, NativeActivity on Android
+// and UIKit on iOS.
 package platform
 
 /*
@@ -245,6 +246,10 @@ func DataDir() (string, error) {
 // UIScale enlarges the UI for the dense handheld screen: a 1080p panel a few
 // inches across, held closer than a monitor.
 func UIScale() float32 { return float32(C.cc_density()) * 0.6 }
+
+// TouchScreen reports whether to show on-screen touch controls. Not yet on
+// Android: its glue reports only the first finger (as the mouse).
+func TouchScreen() bool { return false }
 
 // Exit finishes the activity and ends the process once the game loop has
 // returned, so the next launch starts clean.

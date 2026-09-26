@@ -270,11 +270,20 @@ func (h *helmet) damageChevrons() {
 
 // loadout is bottom right: the weapon in hand's icon with its magazine as
 // rounds above it (spent ones dim), the other weapon smaller; and bottom
-// left, your grenades.
+// left, your grenades. With the touch controls up, those corners are the
+// stick's and the buttons': the weapons go bottom centre, over the ammo
+// count, and the grenades top left, under the score.
 func (h *helmet) loadout(me *arena.Player) {
 	m := h.m
 	ic := &m.as.icons
 	right := 1 - 0.03/h.aspect // the right margin, as a screen fraction
+	grenadeX, grenadeY := float32(0.035), float32(0.9)
+	if m.touchOn {
+		right = 0.5 + 0.2/h.aspect
+		grenadeX = 0.5 + (m.leftX()-0.5)/m.settings.hudBox() // the score's left edge, in the box
+		grenadeX *= h.aspect
+		grenadeY = 0.21
+	}
 	place := func(width, y float32) float32 { return right - width/2/h.aspect }
 
 	cur := ic.weapons[max(me.Current, 0)]
@@ -329,13 +338,16 @@ func (h *helmet) loadout(me *arena.Player) {
 			col = withAlpha(uiWhite, 0.95)
 		}
 		const gh = 0.04
-		y := 0.9 - float32(k)*0.055
+		y := grenadeY - float32(k)*0.055
+		if m.touchOn {
+			y = grenadeY + float32(k)*0.055 // frags on top, under the score
+		}
 		for i := range arena.MaxGrenades {
 			c := col
 			if i >= n {
 				c = withAlpha(col, 0.12)
 			}
-			h.icon(gi, (0.035+float32(i)*gh*gi.aspect*1.2+gh*gi.aspect/2)/h.aspect, y, gh, 0, c)
+			h.icon(gi, (grenadeX+float32(i)*gh*gi.aspect*1.2+gh*gi.aspect/2)/h.aspect, y, gh, 0, c)
 		}
 	}
 }

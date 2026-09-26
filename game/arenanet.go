@@ -192,7 +192,8 @@ func (m *Arena) hostFrame(dt float32) arena.Events {
 			}
 		}, func() { m.playerLeft(i) })
 	}
-	if m.match.Phase == arena.PhaseMatchOver && m.match.Timer < -1 && confirmPressed(m.lastIn) {
+	if m.match.Phase == arena.PhaseMatchOver && m.match.Timer < -1 &&
+		(confirmPressed(m.lastIn) || (m.touchOn && m.lastIn.MousePressed(input.MouseLeft))) {
 		m.rematch()
 		return arena.Events{}
 	}

@@ -1,7 +1,8 @@
-//go:build !android
+//go:build !android && !ios
 
 // Package platform owns the OS window, input events (keyboard, mouse,
-// gamepad) and time: via GLFW on desktop, via NativeActivity on Android.
+// gamepad, touch) and time: via GLFW on desktop, NativeActivity on Android
+// and UIKit on iOS.
 package platform
 
 import (
@@ -181,6 +182,9 @@ func DataDir() (string, error) {
 
 // UIScale is how much to enlarge the UI for the screen (1 on desktop).
 func UIScale() float32 { return 1 }
+
+// TouchScreen reports whether to show on-screen touch controls (iOS only).
+func TouchScreen() bool { return false }
 
 // OnNativeWindow registers a function called when the OS replaces or removes
 // the native window (Android only; desktop windows live as long as the game).

@@ -109,6 +109,18 @@ func (b *Builder) Gauge(unit string, value, min, max float32, style GaugeStyle) 
 	c.X, c.Y = style.Size, style.RedFrom
 }
 
+// Circle draws a disc (width 0) or a ring width pixels wide behind every
+// window, centred at x, y with radius r in pixels, in an sRGB colour, with
+// label written in the middle at textSize pixels (0 = the normal size). It
+// is for on-screen touch controls, which are laid out in screen pixels.
+func (b *Builder) Circle(label string, x, y, r, width float32, srgb [4]float32, textSize float32) {
+	c := b.add(gfx.UICircle, label)
+	c.X, c.Y, c.Value, c.Min, c.Max = x, y, r, width, textSize
+	for i, v := range srgb {
+		c.Result |= uint32(max(0, min(1, v))*255+0.5) << (8 * i)
+	}
+}
+
 // SameLine keeps the next widget on the current line, spacing pixels after
 // this one (0 = default).
 func (b *Builder) SameLine(spacing float32) {

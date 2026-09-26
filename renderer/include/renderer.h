@@ -101,6 +101,9 @@ enum {
     R_UI_GAUGE,         // dial: value within min..max (shown as the big number), x = diameter in
                         //   pixels, y = where the red zone starts (fraction of the range, 0 = none),
                         //   label = the unit under the number
+    R_UI_CIRCLE,        // disc behind every window (e.g. touch controls): x/y = centre and value =
+                        //   radius in pixels, min = ring width (0 = filled), result (in) = colour as
+                        //   packed sRGB 0xAABBGGRR; label centred in it, max = text size (0 = default)
 };
 
 // Window options, passed in the R_UI_WINDOW command's value.

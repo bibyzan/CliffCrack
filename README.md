@@ -173,6 +173,86 @@ Specifics:
 Tested on an AYANEO (Konkr) Pocket FIT: Snapdragon 8 Gen 3, Adreno 750, Android 14. It
 runs at 144 fps, the display's full refresh rate. Scripts and `-model` are desktop-only.
 
+## iOS
+
+`build-ios.sh` builds the app for the iOS Simulator (default) or an iPhone/iPad. It needs
+Xcode, Go, and CMake, Ninja and glslc (`brew install cmake ninja shaderc`).
+
+```bash
+./build-ios.sh --run                     # build, boot the Simulator, install, start, follow the log
+./build-ios.sh --run --sim "iPad Air 11-inch (M3)"
+./build-ios.sh --run -- -mode run        # the game's own flags go after --
+./build-ios.sh --device --sign "Apple Development: …" --profile CliffCrack.mobileprovision --run
+```
+
+### On your iPhone
+
+Apple only lets signed apps onto a phone. A free Apple ID is enough (the app then
+lasts 7 days before it needs rebuilding); a paid developer account lasts a year. Once:
+
+1. **Xcode → Settings → Accounts → +**: sign in with your Apple ID. This makes your
+   "Personal Team".
+2. On the phone, **Settings → Privacy & Security → Developer Mode**: turn it on (the phone
+   restarts). Plug it into the Mac and tap **Trust**.
+3. Make the provisioning profile: in Xcode, **File → New → Project → iOS → App**, name it
+   anything, pick your team, and set the **bundle identifier** to your own, e.g.
+   `com.yourname.cliffcrack` (bundle ids are unique across Apple, so `com.cliffcrack.game`
+   may be taken). Choose your phone as the run destination and press **Run** once. Xcode
+   makes a signing certificate and a profile for that id. You can delete the project.
+4. With a free account, the first launch is blocked until you trust yourself on the
+   phone: **Settings → General → VPN & Device Management → your Apple ID → Trust**.
+
+Then, with the phone plugged in (or on the same Wi-Fi once it's been paired):
+
+```bash
+./build-ios.sh --device --run                                  # finds the profile made for *cliffcrack*
+./build-ios.sh --device --bundle-id com.yourname.cliffcrack --run
+```
+
+The script finds the identity and profile itself (`ios/find-signing.py`), signs the app
+and MoltenVK, installs with `devicectl` and starts the game with its log in the terminal.
+
+There is no Xcode project, in the same spirit as the Android build:
+
+1. The renderer is built with CMake for iOS (`CMAKE_SYSTEM_NAME=iOS`) as a static
+   `librenderer.a`, with its dependencies.
+2. The Go code is built with `-buildmode=c-archive`, giving `libcliffcrack.a`. It contains
+   `engine/platform`'s UIKit glue (`ios.m`).
+3. clang links `ios/main.m` and both libraries into `CliffCrack.app`, which also gets the
+   SPIR-V shaders, `ios/Info.plist` and MoltenVK.
+
+Specifics:
+
+- **Vulkan is MoltenVK** (Vulkan on Metal), downloaded once into `build-ios/deps` and
+  embedded as `Frameworks/MoltenVK.framework`. The renderer opens it itself and hands its
+  entry point to volk. The surface is the game view's `CAMetalLayer`.
+- **Threads**: UIKit keeps the main thread; the game loop runs on its own thread and reads
+  touches and lifecycle changes from a queue.
+- **Touch controls** in Run: a floating analog stick on the left half (it appears under
+  your thumb; left/right steers, push up to tuck, pull down to brake), a JUMP button bottom
+  right, drag anywhere else on the right to look around, and pause top left. The first
+  finger also acts as the mouse, so menus work by tapping. The controls hide while a
+  gamepad is in use.
+- **Touch controls** in the Arena (and the Firing Range), after phone shooters: the stick
+  moves (pushed all the way forward, it sprints) and dragging on the right half looks,
+  FIRE included, so you can aim while you shoot. Round the bottom-right corner: FIRE,
+  JUMP, AIM (a toggle), RELOAD, SWAP, NADE, FRAG/STICKY and HAMMER; PICK UP appears when
+  there's a weapon at your feet. Touch aiming gets the pad's aim assist. The helmet's
+  loadout moves to the bottom centre (weapons) and top left (grenades), clear of them.
+- **Scenes**: the window comes from a `UIWindowSceneDelegate`; from iOS 26, UIKit stops an
+  app built with the new SDK that doesn't use scenes.
+- **Logs**: in the Simulator they're in the terminal. On a phone they go to
+  `Documents/cliffcrack.log` in the app's container (the last run's):
+  `xcrun devicectl device copy from --device <id> --domain-type appDataContainer
+  --domain-identifier <bundle id> --source Documents/cliffcrack.log --destination .`
+- **Background**: iOS doesn't let a background app use the GPU, so the game stops drawing
+  as soon as it isn't frontmost.
+- **The Simulator's GPU** is an older Metal family: it can't draw with a base vertex (the
+  UI's vertices are flattened into one range on Apple) and MoltenVK doesn't claim dynamic
+  texture-array indexing there (the renderer relies on Metal's instead).
+- Gamepads and keyboards aren't read on
+  iOS yet, and the Engine Demo has no touch controls.
+
 ### Pause and settings
 
 Esc, Start or the Android back button pauses Run and the Engine Demo. The game freezes
@@ -676,7 +756,7 @@ engine/
   audio/               Go mixer (voices, pan, loops, WAV, synth blips) -> oto/WASAPI
   physics/             rigid bodies: dynamic spheres vs spheres/oriented boxes/heightfields
   noise/               seeded gradient noise, FBM and ridged noise for procedural content
-  platform/            GLFW window (desktop) or NativeActivity (Android); feeds OS events into input
+  platform/            GLFW window (desktop), NativeActivity (Android) or UIKit (iOS); feeds OS events into input
   input/               per-frame keyboard/mouse/gamepad state (edges, deltas, deadzones)
   camera/              fly + orbit cameras, perspective lens
   mathx/               Vulkan-convention vectors, matrices, colours
@@ -688,8 +768,9 @@ game/                gameplay code (pure Go, no cgo): app/menu, Run mode, Arena,
   arena/               Arena rules: site generator, destructible structures, players,
                        hitboxes, weapons, rounds and the bot (no GPU)
 scripts/             hot-reloadable behaviours (interpreted at runtime)
-cmd/game/            main package (an .exe on desktop, a c-shared library on Android)
+cmd/game/            main package (an .exe on desktop, a c-shared library on Android, a c-archive on iOS)
 android/             AndroidManifest.xml for the APK
+ios/                 the app's main.m and Info.plist
 ```
 
 ## Roadmap
@@ -711,6 +792,7 @@ android/             AndroidManifest.xml for the APK
 - [x] Main menu, HUD and game-over card (anchored/overlay UI windows, scaled fonts)
 - [x] Gamepad support (GLFW on desktop, Android input), touch as mouse
 - [x] Android build: NativeActivity + c-shared Go, pre-rotated swapchain, window lifecycle
+- [x] iOS build: MoltenVK, UIKit + c-archive Go, multi-touch, on-screen controls for Run and Arena
 
 ### Next ideas
 

@@ -61,8 +61,15 @@ func padDirY(in *input.State) float32 {
 }
 
 // prompt picks the keyboard or gamepad version of a hint, depending on what
-// the player used last.
-func prompt(in *input.State, keys, pad string) string {
+// the player used last. On a touch screen it's the touch version if one is
+// given, else nothing (keys and buttons mean nothing there).
+func prompt(in *input.State, keys, pad string, touch ...string) string {
+	if in != nil && in.UsingTouch() {
+		if len(touch) > 0 {
+			return touch[0]
+		}
+		return ""
+	}
 	if in != nil && in.UsingPad() {
 		return pad
 	}

@@ -19,7 +19,8 @@
 #include <string>
 #include <vector>
 
-// platform_win32.cpp / platform_android.cpp
+// platform_win32.cpp / platform_android.cpp / platform_ios.cpp
+VkResult platform_load_vulkan(); // points volk at the Vulkan implementation
 bool platform_create_surface(VkInstance instance, void* native_window, VkSurfaceKHR* surface);
 void platform_log(const char* message);
 
@@ -920,8 +921,47 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL bootstrap_proc_addr(VkInstance instance
     return vkGetInstanceProcAddr(instance, name);
 }
 
+// The first GPU's features (VK_NULL_HANDLE if there's none).
+VkPhysicalDevice first_gpu_features(const vkb::Instance& instance, VkPhysicalDeviceFeatures2* f,
+                                    VkPhysicalDeviceVulkan12Features* f12, VkPhysicalDeviceVulkan13Features* f13) {
+    uint32_t         count = 1;
+    VkPhysicalDevice gpu = VK_NULL_HANDLE;
+    if (vkEnumeratePhysicalDevices(instance.instance, &count, &gpu) < 0 || !gpu) return VK_NULL_HANDLE;
+    *f13 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    *f12 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, f13};
+    *f = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, f12};
+    vkGetPhysicalDeviceFeatures2(gpu, f);
+    return gpu;
+}
+
+// Lists the required features the first GPU lacks, for the error message
+// when none is suitable.
+std::string missing_features(const vkb::Instance& instance) {
+    VkPhysicalDeviceFeatures2        f;
+    VkPhysicalDeviceVulkan12Features f12;
+    VkPhysicalDeviceVulkan13Features f13;
+    VkPhysicalDevice                 gpu = first_gpu_features(instance, &f, &f12, &f13);
+    if (!gpu) return "";
+    VkPhysicalDeviceProperties props{};
+    vkGetPhysicalDeviceProperties(gpu, &props);
+    std::string out = " (" + std::string(props.deviceName) + ", Vulkan " +
+                      std::to_string(VK_API_VERSION_MAJOR(props.apiVersion)) + "." +
+                      std::to_string(VK_API_VERSION_MINOR(props.apiVersion)) + "; missing:";
+    auto need = [&](VkBool32 have, const char* name) {
+        if (!have) out += std::string(" ") + name;
+    };
+    need(f.features.samplerAnisotropy, "samplerAnisotropy");
+    need(f.features.shaderSampledImageArrayDynamicIndexing, "shaderSampledImageArrayDynamicIndexing");
+    need(f12.descriptorBindingPartiallyBound, "descriptorBindingPartiallyBound");
+    need(f12.descriptorBindingSampledImageUpdateAfterBind, "descriptorBindingSampledImageUpdateAfterBind");
+    need(f12.descriptorBindingUpdateUnusedWhilePending, "descriptorBindingUpdateUnusedWhilePending");
+    need(f13.dynamicRendering, "dynamicRendering");
+    need(f13.synchronization2, "synchronization2");
+    return out + ")";
+}
+
 bool init(const RInitDesc& desc) {
-    VK_TRY(volkInitialize());
+    VK_TRY(platform_load_vulkan());
 
     vkb::InstanceBuilder inst_builder(bootstrap_proc_addr);
     inst_builder.set_app_name("Cliff Crack").require_api_version(1, 3, 0);
@@ -940,6 +980,22 @@ bool init(const RInitDesc& desc) {
     VkPhysicalDeviceFeatures features{};
     features.samplerAnisotropy = VK_TRUE;
     features.shaderSampledImageArrayDynamicIndexing = VK_TRUE;
+#ifdef __APPLE__
+    // MoltenVK doesn't claim dynamic texture-array indexing for older Metal
+    // GPU families (the iOS Simulator's among them), but indexing the Metal
+    // texture array with a push constant, as mesh.frag does, works on all of
+    // them. Newer iPhones (A13 on) do claim it.
+    {
+        VkPhysicalDeviceFeatures2        have;
+        VkPhysicalDeviceVulkan12Features have12;
+        VkPhysicalDeviceVulkan13Features have13;
+        if (first_gpu_features(g->instance, &have, &have12, &have13) &&
+            !have.features.shaderSampledImageArrayDynamicIndexing) {
+            features.shaderSampledImageArrayDynamicIndexing = VK_FALSE;
+            platform_log("[renderer] GPU doesn't claim dynamic texture indexing; relying on Metal's");
+        }
+    }
+#endif
 
     VkPhysicalDeviceVulkan12Features features12{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     features12.descriptorBindingPartiallyBound = VK_TRUE;
@@ -956,7 +1012,7 @@ bool init(const RInitDesc& desc) {
                     .set_required_features_12(features12)
                     .set_required_features_13(features13)
                     .select();
-    if (!phys.has_value()) return fail("no suitable GPU: " + phys.error().message());
+    if (!phys.has_value()) return fail("no suitable GPU: " + phys.error().message() + missing_features(g->instance));
     platform_log(("[renderer] GPU: " + phys.value().name).c_str());
     g->max_anisotropy = std::min(16.0f, phys.value().properties.limits.maxSamplerAnisotropy);
 

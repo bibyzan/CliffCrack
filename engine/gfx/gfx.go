@@ -52,6 +52,7 @@ const (
 	UIProgress
 	UISameLine
 	UIGauge
+	UICircle
 )
 
 // UIWindowFlags are window options (values match R_UI_WINDOW_* in renderer.h).

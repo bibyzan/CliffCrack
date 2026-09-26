@@ -3,10 +3,16 @@
 #include <imgui.h>
 #include <imgui_impl_vulkan.h>
 
+#ifdef __APPLE__
+#include <CoreText/CoreText.h>
+#endif
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
+#include <string>
 
 namespace {
 
@@ -71,11 +77,42 @@ void apply_style() {
     c[ImGuiCol_ResizeGrip] = ImVec4(0, 0, 0, 0);
 }
 
-// Uses Windows' Bahnschrift (a sporty DIN face) or Segoe UI if present,
-// otherwise ImGui's built-in font. ImGui 1.92 rasterises glyphs at whatever
-// size is asked for, so scaled text stays sharp.
+#ifdef __APPLE__
+// The file behind an installed font (iOS keeps them outside any fixed path).
+std::string font_file(const char* name) {
+    std::string    path;
+    CFStringRef    cf_name = CFStringCreateWithCString(nullptr, name, kCFStringEncodingUTF8);
+    CTFontRef      font = CTFontCreateWithName(cf_name, 18.0, nullptr);
+    CFURLRef       url = static_cast<CFURLRef>(CTFontCopyAttribute(font, kCTFontURLAttribute));
+    char           buf[1024];
+    if (url && CFURLGetFileSystemRepresentation(url, true, reinterpret_cast<UInt8*>(buf), sizeof buf)) path = buf;
+    if (url) CFRelease(url);
+    CFRelease(font);
+    CFRelease(cf_name);
+    return path;
+}
+#endif
+
+// Uses Windows' Bahnschrift (a sporty DIN face) or Segoe UI if present (DIN
+// Alternate on iOS, Roboto on Android), otherwise ImGui's built-in font.
+// ImGui 1.92 rasterises glyphs at whatever size is asked for, so scaled text
+// stays sharp.
 void load_font() {
     ImGuiIO& io = ImGui::GetIO();
+#ifdef __APPLE__
+    // CoreText substitutes a fallback for a missing name, so check it's a .ttf.
+    if (const std::string din = font_file("DINAlternate-Bold");
+        din.size() > 4 && din.compare(din.size() - 4, 4, ".ttf") == 0 &&
+        io.Fonts->AddFontFromFileTTF(din.c_str(), 18.0f)) {
+        // Glyphs DIN lacks (the · in taglines) come from Helvetica Neue.
+        if (const std::string fallback = font_file("HelveticaNeue"); !fallback.empty()) {
+            ImFontConfig merge;
+            merge.MergeMode = true;
+            io.Fonts->AddFontFromFileTTF(fallback.c_str(), 18.0f, &merge);
+        }
+        return;
+    }
+#endif
     for (const char* path : {"C:/Windows/Fonts/bahnschrift.ttf", "C:/Windows/Fonts/segoeui.ttf",
                              "/system/fonts/Roboto-Regular.ttf"}) {
         if (FILE* f = std::fopen(path, "rb")) {
@@ -251,6 +288,26 @@ static void draw_gauge(const RUICmd& c, const std::string& unit) {
                 unit.c_str());
 }
 
+// Draws a disc or ring behind every window (on-screen touch controls), with
+// its label centred in it.
+static void draw_circle(const RUICmd& c, uint32_t packed, const std::string& label) {
+    auto channel = [&](int shift) { return static_cast<float>((packed >> shift) & 0xffu) / 255.0f; };
+    const ImU32  color = srgb(channel(0), channel(8), channel(16), channel(24));
+    const ImVec2 centre(c.x, c.y);
+    ImDrawList*  dl = ImGui::GetBackgroundDrawList();
+    if (c.min > 0.0f) {
+        dl->AddCircle(centre, c.value, color, 0, c.min);
+    } else {
+        dl->AddCircleFilled(centre, c.value, color);
+    }
+    if (label.empty()) return;
+    ImFont*      font = ImGui::GetFont();
+    const float  size = c.max > 0.0f ? c.max : ImGui::GetFontSize();
+    const ImVec2 ts = font->CalcTextSizeA(size, FLT_MAX, 0.0f, label.c_str());
+    dl->AddText(font, size, ImVec2(centre.x - ts.x * 0.5f, centre.y - ts.y * 0.5f), srgb(1.0f, 1.0f, 1.0f, 0.9f),
+                label.c_str());
+}
+
 void ui_set_formats(VkFormat color_format, VkFormat depth_format) {
     if (!g_ready || (color_format == g_color_format && depth_format == g_depth_format)) return;
     g_color_format = color_format;
@@ -284,6 +341,32 @@ void rotate_draw_data(ImDrawData* data, VkSurfaceTransformFlagBitsKHR transform)
         data->DisplaySize = ImVec2(h, w);
     }
 }
+
+#ifdef __APPLE__
+// Metal GPUs of the older families (the iOS Simulator's among them) can't
+// draw with a base vertex, and the ImGui backend draws each list with one:
+// its offset into the vertex buffer shared by all the lists. So every list's
+// vertices move into the last list, the others' indices are rebased onto
+// them (ImDrawIdx is 32-bit on Apple, see CMakeLists.txt), and each list is
+// then drawn with a base vertex of 0.
+static_assert(sizeof(ImDrawIdx) == 4, "flatten_vertices needs 32-bit ImGui indices");
+
+void flatten_vertices(ImDrawData* data) {
+    if (data->CmdLists.Size < 2) return;
+    ImDrawList*          last = data->CmdLists.back();
+    ImVector<ImDrawVert> all;
+    all.resize(data->TotalVtxCount);
+    int base = 0;
+    for (ImDrawList* list : data->CmdLists) {
+        for (ImDrawIdx& i : list->IdxBuffer) i += static_cast<ImDrawIdx>(base);
+        for (ImDrawCmd& c : list->CmdBuffer) c.VtxOffset = 0;
+        std::memcpy(all.Data + base, list->VtxBuffer.Data, sizeof(ImDrawVert) * static_cast<size_t>(list->VtxBuffer.Size));
+        base += list->VtxBuffer.Size;
+        if (list != last) list->VtxBuffer.resize(0);
+    }
+    last->VtxBuffer.swap(all);
+}
+#endif
 
 void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBitsKHR transform,
               const RUIInput& input, RUICmd* cmds, uint32_t count, const char* text, uint32_t text_length,
@@ -323,6 +406,7 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBit
     std::string label;
     for (uint32_t i = 0; i < count; ++i) {
         RUICmd& c = cmds[i];
+        const uint32_t packed = c.result; // R_UI_CIRCLE's colour comes in here
         c.result = 0;
         if (c.label_offset <= text_length && c.label_length <= text_length - c.label_offset) {
             label.assign(text + c.label_offset, c.label_length);
@@ -358,6 +442,10 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBit
         }
         if (c.kind == R_UI_END) {
             if (window_open) end_window();
+            continue;
+        }
+        if (c.kind == R_UI_CIRCLE) {
+            draw_circle(c, packed, label);
             continue;
         }
         if (collapsed) continue;
@@ -445,6 +533,9 @@ void ui_frame(VkCommandBuffer cmd, VkExtent2D display, VkSurfaceTransformFlagBit
 
     ImGui::Render();
     rotate_draw_data(ImGui::GetDrawData(), transform);
+#ifdef __APPLE__
+    flatten_vertices(ImGui::GetDrawData());
+#endif
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
 
     if (out) {

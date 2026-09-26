@@ -13,8 +13,12 @@ elseif(ANDROID)
     # Configure with the NDK's toolchain file (see build-android.ps1).
     set(PLATFORM_SOURCE src/platform_android.cpp)
     set(VK_PLATFORM_DEFINE VK_USE_PLATFORM_ANDROID_KHR)
+elseif(IOS)
+    # Configure with -DCMAKE_SYSTEM_NAME=iOS (see build-ios.sh). Vulkan is MoltenVK.
+    set(PLATFORM_SOURCE src/platform_ios.cpp)
+    set(VK_PLATFORM_DEFINE VK_USE_PLATFORM_METAL_EXT)
 else()
-    message(FATAL_ERROR "Only Windows and Android surfaces are implemented so far.")
+    message(FATAL_ERROR "Only Windows, Android and iOS surfaces are implemented so far.")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -71,12 +75,21 @@ add_library(imgui STATIC
     ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp)
 target_include_directories(imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/backends)
 target_compile_definitions(imgui PUBLIC IMGUI_IMPL_VULKAN_NO_PROTOTYPES IMGUI_DISABLE_OBSOLETE_FUNCTIONS)
+if(APPLE)
+    # 32-bit indices, so the UI can be drawn without base vertices (see flatten_vertices in ui.cpp).
+    target_compile_definitions(imgui PUBLIC "ImDrawIdx=unsigned int")
+endif()
 target_link_libraries(imgui PUBLIC Vulkan::Headers)
 
 # ---------------------------------------------------------------------------
-# Renderer DLL
+# Renderer DLL (a static library on iOS, linked into the app's executable)
 # ---------------------------------------------------------------------------
-add_library(renderer SHARED
+if(IOS)
+    set(RENDERER_LIBRARY_TYPE STATIC)
+else()
+    set(RENDERER_LIBRARY_TYPE SHARED)
+endif()
+add_library(renderer ${RENDERER_LIBRARY_TYPE}
     src/renderer.cpp
     src/ui.cpp
     src/ui.h

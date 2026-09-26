@@ -114,6 +114,11 @@ type Arena struct {
 	debugOpen bool // the F1 window is up: the mouse is for the UI unless the right button is held
 	locked    bool
 
+	touchScreen bool        // the device has one: show on-screen controls while it's in use
+	touch       *arenaTouch // the stick and buttons
+	touchOn     bool        // the on-screen controls are up this frame
+	wantsPause  bool        // the on-screen pause button was tapped
+
 	net          *netPlay // an online match (nil: against the bot)
 	inputBlocked bool     // a menu's open over an online match: it plays on, without us
 	lastIn       *input.State
@@ -165,6 +170,7 @@ func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64, 
 		skill:     1,
 		rng:       rand.New(rand.NewPCG(11, 13)),
 		sfx:       newArenaSounds(),
+		touch:     newArenaTouch(),
 	}
 	as, err := newArenaAssets()
 	if err != nil {
@@ -265,14 +271,20 @@ func (m *Arena) Update(dt float32, in *input.State, mouseFree bool) {
 	m.elapsed += dt
 	m.lastIn = in
 	held := in.MouseDown(input.MouseRight) && (mouseFree || m.locked)
-	m.locked = (!m.debugOpen || held) && !m.inputBlocked
+	// On a touch screen the first finger is also the mouse: it mustn't fire
+	// and look as well, so the mouse is left free for the menus.
+	m.locked = (!m.debugOpen || held) && !m.inputBlocked && !m.touchScreen
+	m.touchOn = m.touchScreen && !m.inputBlocked && !m.Autopilot && !in.UsingPad()
+	if !m.touchOn {
+		m.touch.release()
+	}
 	if m.net != nil {
 		m.updateOnline(dt, in, mouseFree)
 		return
 	}
 
 	if m.match.Phase == arena.PhaseMatchOver && m.match.Timer < -1 &&
-		(confirmPressed(in) || (m.locked && in.MousePressed(input.MouseLeft))) {
+		(confirmPressed(in) || ((m.locked || m.touchOn) && in.MousePressed(input.MouseLeft))) {
 		m.restart() // rematch
 		return
 	}
@@ -362,6 +374,19 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 		yaw += x * arenaStickYaw * dt * slow
 		pitch -= y * arenaStickPch * dt * slow
 	}
+	var touch arena.Input // the on-screen controls' presses, merged in at the end
+	if m.touchOn {
+		w, h := render.DisplaySize()
+		me := m.me()
+		tyaw, tpitch, pause := m.touch.read(in, float32(w), float32(h), me, m.sim().NearestPickup(me) != nil, &touch)
+		m.wantsPause = m.wantsPause || pause
+		// A thumb can't track like a mouse: the pad's aim assist helps it too.
+		if tyaw != 0 || tpitch != 0 || touch.Move != [2]float32{} {
+			slow, assist = m.aimAssist(true, dt)
+		}
+		yaw += tyaw * slow
+		pitch += tpitch * slow
+	}
 	s := m.settings.LookSensitivity / m.me().Zoom() // finer through a scope
 	c.Look = [2]float32{yaw*s + assist[0], pitch*s*m.settings.lookSign() + assist[1]}
 	// Aim down the sights: the right button (unless it's holding the look
@@ -403,8 +428,33 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 	if (m.locked && mouseFree && in.Scroll() != 0) || in.PadPressed(input.PadY) {
 		c.Cycle = 1
 	}
+	return mergeTouch(c, touch)
+}
+
+// mergeTouch adds the on-screen controls' presses to the keyboard's and
+// pad's (either can move, fire, jump...).
+func mergeTouch(c, t arena.Input) arena.Input {
+	c.Move[0] += t.Move[0]
+	c.Move[1] += t.Move[1]
+	if l := float32(math.Hypot(float64(c.Move[0]), float64(c.Move[1]))); l > 1 {
+		c.Move[0], c.Move[1] = c.Move[0]/l, c.Move[1]/l
+	}
+	c.Sprint = c.Sprint || t.Sprint
+	c.Aim = c.Aim || t.Aim
+	c.Fire = c.Fire || t.Fire
+	c.FirePressed = c.FirePressed || t.FirePressed
+	c.Jump = c.Jump || t.Jump
+	c.Reload = c.Reload || t.Reload
+	c.Melee = c.Melee || t.Melee
+	c.Throw = c.Throw || t.Throw
+	c.SwitchGrenade = c.SwitchGrenade || t.SwitchGrenade
+	c.Interact = c.Interact || t.Interact
+	if t.Cycle != 0 {
+		c.Cycle = t.Cycle
+	}
 	return c
 }
+
 
 // playerName is how the HUD refers to a player.
 func (m *Arena) playerName(p *arena.Player) string {

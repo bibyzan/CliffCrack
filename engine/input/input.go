@@ -98,7 +98,8 @@ type State struct {
 	dx, dy         float64
 	scroll         float64
 
-	pad padState
+	pad   padState
+	touch touchState
 }
 
 // NewFrame starts a new frame: edges and deltas are relative to this point.
@@ -108,6 +109,7 @@ func (s *State) NewFrame() {
 	s.pad.prevButtons = s.pad.buttons
 	s.pad.prevAxes = s.pad.axes
 	s.dx, s.dy, s.scroll = 0, 0, 0
+	s.newTouchFrame()
 }
 
 // KeyEvent records a key going down (including auto-repeat) or up.
@@ -115,6 +117,7 @@ func (s *State) KeyEvent(k Key, down bool) {
 	if k >= 0 && k < keyCount {
 		s.keys[k] = down
 		s.pad.usingPad = false
+		s.touch.usingTouch = false
 	}
 }
 
@@ -147,13 +150,16 @@ func (s *State) ResetMouse() {
 	s.haveMouse = false
 }
 
-// ReleaseAll marks every key and button as up and centres the gamepad (e.g.
-// when the window loses focus).
+// ReleaseAll marks every key and button as up, centres the gamepad and lifts
+// every finger (e.g. when the window loses focus).
 func (s *State) ReleaseAll() {
 	s.keys = [keyCount]bool{}
 	s.buttons = [buttonCount]bool{}
 	s.pad.buttons = [padButtonCount]bool{}
 	s.pad.axes = [padAxisCount]float32{}
+	for i := range s.touch.touches {
+		s.touch.touches[i].Ended = true
+	}
 }
 
 func (s *State) Down(k Key) bool     { return valid(k) && s.keys[k] }

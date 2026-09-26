@@ -5,6 +5,9 @@
 #include <android/log.h>
 #include <android/native_window.h>
 
+// The GPU driver's Vulkan loader, found by volk.
+VkResult platform_load_vulkan() { return volkInitialize(); }
+
 bool platform_create_surface(VkInstance instance, void* native_window, VkSurfaceKHR* surface) {
     VkAndroidSurfaceCreateInfoKHR info{VK_STRUCTURE_TYPE_ANDROID_SURFACE_CREATE_INFO_KHR};
     info.window = static_cast<ANativeWindow*>(native_window);

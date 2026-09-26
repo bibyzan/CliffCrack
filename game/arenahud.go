@@ -19,13 +19,16 @@ const arenaHintTime = 8.0 // seconds the controls hint stays up
 func (m *Arena) UI(b *ui.Builder, in *input.State) {
 	mt, me := m.match, m.me()
 	anchored := hudText &^ gfx.UICentered
+	if m.touchOn {
+		m.touch.ui(b)
+	}
 
 	if mt.Practice {
 		m.rangeHUD(b)
 	} else {
 		// Score, top left under the visor's corner (the armour bar has the
 		// top middle): YOU 1 : 0 BOT, the round and its clock.
-		b.Panel("##score", m.hudX(0.035), 0.075, anchored, 1.5)
+		b.Panel("##score", m.leftX(), 0.075, anchored, 1.5)
 		// You first; then everyone else, by name online.
 		b.ColorText(suitColor[0], "YOU %d", mt.Wins[local])
 		for _, p := range m.sim().Players {
@@ -36,7 +39,7 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 			b.ColorText(suitColor[1], "%d %s", mt.Wins[p.ID], m.playerName(p))
 		}
 		b.End()
-		b.Panel("##round", m.hudX(0.035), 0.135, anchored, 1.0)
+		b.Panel("##round", m.leftX(), 0.135, anchored, 1.0)
 		clock := ""
 		if mt.Phase == arena.PhaseFight {
 			t := int(math.Ceil(float64(mt.Timer)))
@@ -67,10 +70,15 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 
 	if m.elapsed < arenaHintTime && !m.Autopilot && mt.Round == 1 {
 		fade := clampf((arenaHintTime-m.elapsed)*2, 0, 1)
-		b.Panel("##arenahint", 0.5, 0.975, hudText, 1.05)
+		hintY := float32(0.975)
+		if m.touchOn {
+			hintY = 0.2
+		}
+		b.Panel("##arenahint", 0.5, hintY, hudText, 1.05)
 		b.ColorText(withAlpha(uiMuted, fade), "%s", prompt(in,
 			"LMB  fire    RMB  aim    1 2 / wheel  swap    R  reload    E  pick up    F  hammer    G  grenade    Q  frag / sticky",
-			"RT  fire    LT  aim    Y  swap    X  reload (hold: pick up)    RB  hammer    LB  grenade    B  frag / sticky"))
+			"RT  fire    LT  aim    Y  swap    X  reload (hold: pick up)    RB  hammer    LB  grenade    B  frag / sticky",
+			"Stick  move (push all the way to sprint)  ·  drag right side  look  ·  hold FIRE and drag to aim while shooting"))
 		b.End()
 	}
 }
@@ -80,7 +88,11 @@ func (m *Arena) UI(b *ui.Builder, in *input.State) {
 // reach. (Reloads show in the hands, not as a bar.)
 func (m *Arena) weaponHUD(b *ui.Builder, in *input.State, me *arena.Player) {
 	anchored := hudText &^ gfx.UICentered
-	b.Panel("##ammo", m.hudX(0.985), 0.975, anchored, 2.8)
+	if m.touchOn {
+		b.Panel("##ammo", 0.5, 0.975, hudText, 2.8) // the buttons have the corner
+	} else {
+		b.Panel("##ammo", m.hudX(0.985), 0.975, anchored, 2.8)
+	}
 	switch g, s := me.Gun(); {
 	case g != nil:
 		ammoText(b, s.Ammo, s.Reserve, s.Reloading > 0)
@@ -97,7 +109,8 @@ func (m *Arena) weaponHUD(b *ui.Builder, in *input.State, me *arena.Player) {
 		if me.Other() != arena.NoWeapon {
 			verb = "swap " + arena.WeaponNames[me.Current] + " for"
 		}
-		b.ColorText(uiWhite, "%s", prompt(in, "E  "+verb+" "+p.Name(), "hold X  "+verb+" "+p.Name()))
+		b.ColorText(uiWhite, "%s", prompt(in, "E  "+verb+" "+p.Name(), "hold X  "+verb+" "+p.Name(),
+			"PICK UP  "+verb+" "+p.Name()))
 		b.End()
 	}
 }
@@ -141,7 +154,7 @@ func (m *Arena) banner(b *ui.Builder, in *input.State) {
 		b.ColorText(uiMuted, "%s", m.net.over)
 		b.End()
 		b.Panel("##rematch", 0.5, 0.45, hudText, 1.2)
-		b.ColorText(uiWhite, "%s", prompt(in, "Enter / click  main menu", "A  main menu"))
+		b.ColorText(uiWhite, "%s", prompt(in, "Enter / click  main menu", "A  main menu", "Tap  main menu"))
 		b.End()
 		return
 	}
@@ -183,7 +196,7 @@ func (m *Arena) banner(b *ui.Builder, in *input.State) {
 		case m.net != nil && !m.net.host:
 			b.ColorText(uiWhite, "waiting for the host to start a rematch   ·   Esc  menu")
 		default:
-			b.ColorText(uiWhite, "%s", prompt(in, "Enter / click  rematch     Esc  menu", "A  rematch     Start  menu"))
+			b.ColorText(uiWhite, "%s", prompt(in, "Enter / click  rematch     Esc  menu", "A  rematch     Start  menu", "Tap  rematch      II  menu"))
 		}
 		b.End()
 	}
@@ -229,10 +242,10 @@ func ammoText(b *ui.Builder, ammo, reserve int, reloading bool) {
 // far, and how you're shooting.
 func (m *Arena) rangeHUD(b *ui.Builder) {
 	s, me := m.sim(), m.me()
-	b.Panel("##range", m.hudX(0.035), 0.075, hudText&^gfx.UICentered, 1.3)
+	b.Panel("##range", m.leftX(), 0.075, hudText&^gfx.UICentered, 1.3)
 	b.ColorText(paintColor[0], "FIRING RANGE")
 	b.End()
-	b.Panel("##rangeinfo", m.hudX(0.035), 0.125, hudText&^gfx.UICentered, 0.95)
+	b.Panel("##rangeinfo", m.leftX(), 0.125, hudText&^gfx.UICentered, 0.95)
 	what := "--"
 	if !me.Dead {
 		shot := s.Trace(me, me.Eye(1), me.Forward(), 300)
@@ -282,3 +295,12 @@ func (m *Arena) DebugUI(b *ui.Builder, st Stats) {
 // hudX maps x across the HUD box (0 its left edge, 1 its right) to the
 // screen: the box is centred, as wide as the HUD width setting.
 func (m *Arena) hudX(x float32) float32 { return 0.5 + (x-0.5)*m.settings.hudBox() }
+
+// leftX is where the top-left panels start: moved right, clear of the
+// on-screen pause button, while the touch controls are up.
+func (m *Arena) leftX() float32 {
+	if m.touchOn {
+		return max(m.hudX(0.035), 0.13)
+	}
+	return m.hudX(0.035)
+}

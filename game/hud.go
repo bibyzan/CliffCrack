@@ -81,16 +81,23 @@ func (r *Run) UI(b *ui.Builder, in *input.State) {
 	b.Text("%.0f m", r.ride.distance)
 	b.End()
 
+	// The speedometer sits bottom left, or bottom centre when the touch
+	// stick has that corner.
+	speedoX, speedoSize, powersY := 0.5+(0.015-0.5)*r.settings.hudBox(), float32(210), float32(0.66)
+	if r.touchOn {
+		speedoX, speedoSize, powersY = 0.5, 150, 0.7
+		r.touch.ui(b)
+	}
 	if !r.ride.crashed {
-		// Speedometer, bottom left. The red zone starts where only a tuck at
-		// the fastest part of the mountain gets you.
-		b.Panel("##speedo", 0.5+(0.015-0.5)*r.settings.hudBox(), 0.985, hudText&^gfx.UICentered, 1)
-		b.Gauge("km/h", r.ride.speed()*3.6, 0, speedoMax, ui.GaugeStyle{Size: 210, RedFrom: 0.8})
+		// The red zone starts where only a tuck at the fastest part of the
+		// mountain gets you.
+		b.Panel("##speedo", speedoX, 0.985, hudText&^gfx.UICentered, 1)
+		b.Gauge("km/h", r.ride.speed()*3.6, 0, speedoMax, ui.GaugeStyle{Size: speedoSize, RedFrom: 0.8})
 		b.End()
 	}
 	if !r.ride.crashed && (r.ride.boost > 0 || r.ride.shield > 0) {
 		// What's running, and how long it has left, over the speedometer.
-		b.Panel("##powers", 0.5+(0.015-0.5)*r.settings.hudBox(), 0.66, hudText&^gfx.UICentered, 1.2)
+		b.Panel("##powers", speedoX, powersY, hudText&^gfx.UICentered, 1.2)
 		if r.ride.boost > 0 {
 			b.ColorText(boostColor, "BOOST")
 			b.Progress("", r.ride.boost/rideBoostTime, 210, 10)
@@ -133,7 +140,11 @@ func (r *Run) UI(b *ui.Builder, in *input.State) {
 		b.ColorText(withAlpha(uiAccent, pulse), "%s", msg)
 		b.End()
 	}
-	if r.ride.time < hintTime && !r.ride.crashed {
+	if r.ride.time < hintTime && !r.ride.crashed && r.touchOn {
+		b.Panel("##hint", 0.5, 0.14, hudText, 1.1)
+		b.ColorText(uiMuted, "Stick  steer  ·  push up  tuck  ·  pull down  brake  ·  drag right side  look")
+		b.End()
+	} else if r.ride.time < hintTime && !r.ride.crashed {
 		b.Panel("##hint", 0.5, 0.975, hudText, 1.1)
 		b.ColorText(uiMuted, "%s", prompt(in,
 			"A / D  steer      W  tuck      S  brake      Space  jump      Mouse  look      Esc  pause",

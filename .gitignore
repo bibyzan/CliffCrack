@@ -13,3 +13,6 @@
 # Android build (build-android.ps1)
 /build-android/
 *.apk
+
+# iOS build (build-ios.sh)
+/build-ios/

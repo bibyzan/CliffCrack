@@ -65,6 +65,7 @@ type Options struct {
 	Name      string // online: the name to go by (overrides the setting)
 	AutoHost  bool   // online: make a room and start as soon as someone's in (-host)
 	AutoJoin  bool   // online: join the first open room (-join)
+	Touch     bool   // the device has a touch screen: Run shows on-screen controls
 }
 
 // overlay is a screen shown over the frozen (or, on the main menu, idling) game.
@@ -122,6 +123,7 @@ func NewApp(opts Options) (*App, error) {
 	a.run = newRun(sc, opts.Audio, opts.Seed, &a.settings)
 	a.run.Autopilot = opts.Autopilot
 	a.run.startAt = opts.StartAt
+	a.run.touchScreen = opts.Touch
 	a.opts.Demo.Settings = &a.settings
 	if err := a.enter(opts.Start); err != nil {
 		return nil, err
@@ -178,6 +180,7 @@ func (a *App) enter(mode Mode) error {
 			return err
 		}
 		m.Autopilot = a.opts.Autopilot
+		m.touchScreen = a.opts.Touch
 		m.startWeapon = a.opts.Weapon
 		m.newRound() // again, now it knows what to hand you
 		a.arena = m
@@ -259,7 +262,9 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 			a.choose(ModeMenu)
 			return
 		}
-		if pausePressed(in) {
+		if pausePressed(in) || a.run.wantsPause {
+			a.run.wantsPause = false
+			a.run.touch.release()
 			a.openPause()
 			return
 		}
@@ -277,7 +282,9 @@ func (a *App) Update(dt float32, in *input.State, mouseFree bool) {
 			a.choose(ModeMenu)
 			return
 		}
-		if pausePressed(in) {
+		if pausePressed(in) || a.arena.wantsPause {
+			a.arena.wantsPause = false
+			a.arena.touch.release()
 			a.openPause()
 			return
 		}
@@ -519,6 +526,7 @@ func (a *App) startOnline(start *online.StartMsg) {
 			logf("online: %v", err)
 			return
 		}
+		m.touchScreen = a.opts.Touch
 		a.arena = m
 	}
 	session := a.lobby.session

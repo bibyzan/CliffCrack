@@ -7,6 +7,9 @@
 
 #include <cstdio>
 
+// The GPU driver's Vulkan loader, found by volk.
+VkResult platform_load_vulkan() { return volkInitialize(); }
+
 bool platform_create_surface(VkInstance instance, void* native_window, VkSurfaceKHR* surface) {
     VkWin32SurfaceCreateInfoKHR info{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
     info.hinstance = GetModuleHandleW(nullptr);

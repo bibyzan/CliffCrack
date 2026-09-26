@@ -2,7 +2,8 @@
 // renderer.dll (librenderer.so on Android) does the Vulkan work.
 //
 // On Android this package is built as a shared library loaded by
-// NativeActivity; main_android.go starts run from there instead of main.
+// NativeActivity; main_android.go starts run from there instead of main. On
+// iOS it's a static library linked into the app, and main_ios.go does the same.
 package main
 
 import (
@@ -123,6 +124,7 @@ func run() error {
 		DebugUI:   *ui,
 		Audio:     mixer,
 		DataDir:   dataDir,
+		Touch:     platform.TouchScreen(),
 		Demo: game.DemoOptions{
 			Model:      *model,
 			ScriptsDir: scriptsDir(*scripts, exeDir),
