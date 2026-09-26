@@ -52,7 +52,7 @@ func TestPileConservesEnergyAndSettles(t *testing.T) {
 	}
 
 	prev := energy(w)
-	allowance := 0.01 * prev // depenetration may lift bodies slightly
+	allowance := 0.01 * prev            // depenetration may lift bodies slightly
 	for step := 0; step < 900; step++ { // 15 s: a chaotic pile can leave a ball rolling for a while
 		w.Update(1.0 / 60)
 		e := energy(w)

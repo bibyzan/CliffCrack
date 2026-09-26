@@ -60,7 +60,11 @@ func autopilot(r *ride) rideInput {
 		steer:    clampf((wantVx-vx)/3, -1, 1),
 		throttle: 0.4,
 	}
-	if speed > 45 {
+	limit := float32(60)
+	if k, ok := r.course.SectionAt(s); ok && k.Kind == course.Ridge {
+		limit = 38 // the climb swings sideways and the crest rolls: faster, it flies off
+	}
+	if speed > limit {
 		in.throttle = -0.4
 	}
 	// Hop off the kicker lip when a crack is just ahead.

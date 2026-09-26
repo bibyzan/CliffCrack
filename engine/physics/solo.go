@@ -54,8 +54,7 @@ func (w *World) StepBody(b *Body, dt float32) {
 		b.Grounded = false
 		for i := range contacts {
 			c := &contacts[i]
-			const supportY = 0.5
-			if (c.b == b && c.normal[1] > supportY) || (c.a == b && c.normal[1] < -supportY) {
+			if (c.b == b && c.normal[1] > w.SupportY) || (c.a == b && c.normal[1] < -w.SupportY) {
 				b.Grounded = true
 			}
 			if vn := relativeVelocity(c).Dot(c.normal); vn < -bounceThreshold {

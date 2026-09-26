@@ -132,5 +132,15 @@ func newRunSounds() runSounds {
 			hiss(0, 90, 40, 0.6, 0, 2000)), ms(260), 0.25, 2),
 		move: uiMoveSound(),
 		pick: uiPickSound(),
+		// A rising rush of air.
+		boost: audio.Synth(0.8, hiss(0, 700, 3, 0.9, 5000, 400), tone(audio.Saw, 180, 720, 0, 500, 5, 0.35),
+			tone(audio.Sine, 360, 1440, 60, 440, 6, 0.3)),
+		// A bright chime, ringing on.
+		shield: audio.Echo(audio.Synth(0.6, tone(audio.Sine, 880, 880, 0, 500, 7, 0.6),
+			tone(audio.Sine, 1320, 1320, 40, 460, 8, 0.45), tone(audio.Triangle, 1760, 1760, 80, 420, 9, 0.3)),
+			ms(120), 0.35, 3),
+		// Rock or wood bursting apart.
+		smash: audio.Synth(0.9, hiss(0, 260, 14, 1, 3000, 150), tone(audio.Square, 220, 60, 0, 160, 18, 0.35),
+			click(0, 0.8), click(35, 0.5)),
 	}
 }

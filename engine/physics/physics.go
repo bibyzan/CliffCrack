@@ -121,6 +121,11 @@ type World struct {
 	// for rolling resistance.
 	LinearDamping, AngularDamping float32
 
+	// SupportY is the least a contact normal's up component can be for the
+	// contact to count as ground (Body.Grounded): 0.5 by default, so faces
+	// steeper than 60 degrees are walls.
+	SupportY float32
+
 	// PrevPerUpdate marks where bodies were (for Interpolated) once per
 	// Update rather than every step: for a caller that updates on its own
 	// fixed tick, several steps at a time, and draws between its ticks.
@@ -140,6 +145,7 @@ func NewWorld() *World {
 		FixedStep:  1.0 / 120,
 		Iterations: 8,
 		MaxSteps:   8,
+		SupportY:   0.5,
 		touched:    map[[2]*Body]bool{},
 
 		LinearDamping:  0.02,
@@ -266,10 +272,9 @@ func (w *World) step(h float32) {
 	touched := make(map[[2]*Body]bool, len(contacts))
 	for i := range contacts {
 		c := &contacts[i]
-		const supportY = 0.5 // contact normals steeper than ~60 degrees don't count as ground
-		if c.normal[1] > supportY {
+		if c.normal[1] > w.SupportY {
 			c.b.Grounded = c.b.Grounded || c.b.Kind == Dynamic // a is below b
-		} else if c.normal[1] < -supportY {
+		} else if c.normal[1] < -w.SupportY {
 			c.a.Grounded = c.a.Grounded || c.a.Kind == Dynamic
 		}
 		vn := relativeVelocity(c).Dot(c.normal)

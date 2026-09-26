@@ -31,7 +31,7 @@ type Section struct {
 func (k Section) End() float32 { return k.Start + k.Length }
 
 const (
-	sectionsFrom = 450 // metres of plain valley before the first special section
+	sectionsFrom = 600 // metres of plain valley before the first special section
 
 	ridgeClimb     = 170 // metres from the section start to the top of the ridge (and back down)
 	ridgeOffset    = 50  // how far sideways the ridge path sits from the valley's centre line
@@ -142,12 +142,12 @@ func (c *Course) crestWeave(s float32) float32 {
 
 // gorgeWeave is the gorge centre's wander, metres either side of the valley line.
 func (c *Course) gorgeWeave(s float32) float32 {
-	return float32(c.shape.Line(float64(s)/100+9)) * 8
+	return float32(c.shape.Line(float64(s)/100+9)) * 10
 }
 
 // gorgeHalfWidth is half the gorge floor at s: it pinches and opens, about
-// 4.4 m to 8.2 m, instead of one constant slot.
+// 4.1 m to 8.9 m, instead of one constant slot.
 func (c *Course) gorgeHalfWidth(s float32) float32 {
 	n := clamp(float32(c.shape.Line(float64(s)/46+2)), -1, 1)
-	return 6.3 + 1.9*n
+	return 6.5 + 2.4*n
 }

@@ -26,7 +26,7 @@ const hudText = gfx.UIOverlay | gfx.UIAnchored | gfx.UINoBackground | gfx.UICent
 const card = gfx.UIOverlay | gfx.UIAnchored | gfx.UICentered
 
 // speedoMax is the top of the speedometer (km/h).
-const speedoMax = 200
+const speedoMax = 400
 
 // zoneLength is how often the run announces a new zone (metres).
 const zoneLength = 500
@@ -86,6 +86,29 @@ func (r *Run) UI(b *ui.Builder, in *input.State) {
 		// the fastest part of the mountain gets you.
 		b.Panel("##speedo", 0.5+(0.015-0.5)*r.settings.hudBox(), 0.985, hudText&^gfx.UICentered, 1)
 		b.Gauge("km/h", r.ride.speed()*3.6, 0, speedoMax, ui.GaugeStyle{Size: 210, RedFrom: 0.8})
+		b.End()
+	}
+	if !r.ride.crashed && (r.ride.boost > 0 || r.ride.shield > 0) {
+		// What's running, and how long it has left, over the speedometer.
+		b.Panel("##powers", 0.5+(0.015-0.5)*r.settings.hudBox(), 0.66, hudText&^gfx.UICentered, 1.2)
+		if r.ride.boost > 0 {
+			b.ColorText(boostColor, "BOOST")
+			b.Progress("", r.ride.boost/rideBoostTime, 210, 10)
+		}
+		if r.ride.shield > 0 {
+			b.ColorText(shieldColor, "SHIELD")
+			b.Progress("", r.ride.shield/rideShieldTime, 210, 10)
+		}
+		b.End()
+	}
+	if t := r.ride.time - r.pickedAt; r.picked != "" && t < 1.2 && !r.ride.crashed {
+		fade := min(t*6, (1.2-t)*3)
+		c := boostColor
+		if r.pickedKind == course.Shield {
+			c = shieldColor
+		}
+		b.Panel("##picked", 0.5, 0.5, hudText, 3+t)
+		b.ColorText(withAlpha(c, fade), "%s!", r.picked)
 		b.End()
 	}
 	if r.best > 0 {

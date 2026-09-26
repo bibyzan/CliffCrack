@@ -13,9 +13,10 @@ import (
 func camOnFlat(t *testing.T) (*ride, *chaseCam) {
 	t.Helper()
 	r := newTestRide(1)
-	const s = 400 // past the steep drop, before any section
+	s := valleyStretch(t, r.course, 100) // plain valley, past the Drop
 	x := r.course.Centre(s)
 	r.ball.Position = mathx.Vec3{x, r.course.Height(x, -s) + rideBallRadius, -s}
+	r.ball.Velocity = mathx.Vec3{} // resting
 	r.ball.Teleported()
 	c := newChaseCam(r)
 	for i := 0; i < 60; i++ {
@@ -45,13 +46,18 @@ func TestChaseCamStartsBehindTheBall(t *testing.T) {
 func TestLookingTurnsTheCameraAroundTheBall(t *testing.T) {
 	r, c := camOnFlat(t)
 	// Turn a quarter circle to the right: the camera swings round to the left
-	// side of the ball, still at the same distance.
-	before := c.eye.Sub(r.ball.Position).Len()
+	// side of the ball, still at the same distance across the ground (the
+	// height changes: the camera keeps clear of the slope behind the ball).
+	flat := func() float64 {
+		d := c.eye.Sub(r.ball.Position)
+		return math.Hypot(float64(d[0]), float64(d[2]))
+	}
+	before := flat()
 	c.update(1.0/60, r, r.course, lookInput{yaw: math.Pi / 2})
 	if side := sideways(r, c); side > -5 {
 		t.Errorf("after turning right the eye is %v to the right of the ball, want well to its left", side)
 	}
-	if after := c.eye.Sub(r.ball.Position).Len(); math.Abs(float64(after-before)) > 0.5 {
+	if after := flat(); math.Abs(after-before) > 0.5 {
 		t.Errorf("orbit distance changed from %v to %v", before, after)
 	}
 	// The look should be immediate, not eased in over several frames.
@@ -144,6 +150,6 @@ func TestFieldOfViewFollowsTheSettingWhilePaused(t *testing.T) {
 		c.update(1.0/60, r, r.course, lookInput{})
 	}
 	if c.fov(s.fovRadians()) <= after+0.2 {
-		t.Error("at speed the view should widen beyond the setting")
+		t.Errorf("at speed the view should widen beyond the setting: %v -> %v (widen %v, speed %v)", after, c.fov(s.fovRadians()), c.widen, r.speed())
 	}
 }

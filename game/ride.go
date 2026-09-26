@@ -13,25 +13,40 @@ import (
 const (
 	rideBallRadius = 0.5
 	// Cruise speed: what the ride builds towards on the ground, rising from
-	// 22 m/s (79 km/h) at the top to ~52 m/s (187 km/h) far down.
-	rideCruiseBase = 22.0
-	rideCruiseGain = 30.0
+	// 36 m/s (130 km/h) at the top to ~76 m/s (274 km/h) far down.
+	rideCruiseBase = 36.0
+	rideCruiseGain = 40.0
 	rideTuckBonus  = 0.3   // W: cruise this much faster...
 	rideTuckBoost  = 0.8   // ... and push up to it this much harder
 	rideBrakeCut   = 0.6   // S: cruise this much slower...
 	rideBrakeDrag  = 0.012 // ... and scrub speed with quadratic drag
-	rideBoost      = 6.0   // m/s^2 at most of push towards the cruise speed
-	rideOverDrag   = 0.02  // drag on speed above cruise (per m/s over, per m/s)
-	rideSteer      = 17.0  // m/s^2 of sideways push on the ground
-	rideAirSteer   = 5.0   // ... and in the air
-	rideSkipTime   = 0.3   // seconds after touching down that still count as on the ground (skipping over moguls)
-	rideJumpCool   = 0.35  // seconds before another jump: the ball can still touch the snow for a step after one
-	rideJump       = 6.5   // m/s straight up
-	rideStallSpeed = 1.5   // slower than this for rideStallTime ends the run
-	rideStallTime  = 2.5   // seconds
-	rideCrackFall  = 4.0   // metres below the rim: fallen into a crack
-	rideEdgeFall   = 14.0  // metres below the path: fallen off the ridge (or the mountain)
-	rideOffPiste   = 95.0  // metres from the path's centre line: lost on the mountain
+	rideBoost      = 12.0  // m/s^2 at most of push towards the cruise speed
+	rideOverDrag   = 0.01  // drag on speed above cruise (per m/s over, per m/s), on the level
+	rideAirHold    = 0.3   // share of it in the air
+	// Down a steep face the ball is pulled along the slope harder than
+	// rolling alone would (a rolling ball only gets ~70% of gravity's pull,
+	// the rest spins it up): up to this share of gravity along the slope on
+	// the Drop's face, less the gentler the slope, none on the flat.
+	rideSteepPull = 0.6
+	// Off the snow, extra gravity keeps the ball planted: at these speeds
+	// every bump would otherwise throw it tens of metres, where it neither
+	// steers nor builds speed.
+	rideAirPull = 9.81 // m/s^2 down, on top of gravity
+	// Grip: near the snow, speed away from it (off a mogul's crest, a roll)
+	// is damped at this rate (1/s), so the ball hugs the surface at speed
+	// instead of skipping. Not after a jump, nor on a crack's kicker.
+	rideStick      = 10.0
+	rideSteer      = 17.0 // m/s^2 of sideways push on the ground
+	rideAirSteer   = 5.0  // ... and in the air
+	rideSkipTime   = 0.3  // seconds after touching down that still count as on the ground (skipping over moguls)
+	rideJumpCool   = 0.35 // seconds before another jump: the ball can still touch the snow for a step after one
+	rideJump       = 7.2  // m/s off the snow, square to the slope (on the level; see the jump)
+	rideJumpFlight = 1.5  // seconds after a jump with no extra air pull: the jump is the player's
+	rideStallSpeed = 1.5  // slower than this for rideStallTime ends the run
+	rideStallTime  = 2.5  // seconds
+	rideCrackFall  = 4.0  // metres below the rim: fallen into a crack
+	rideEdgeFall   = 14.0 // metres below the path: fallen off the ridge (or the mountain)
+	rideOffPiste   = 95.0 // metres from the path's centre line: lost on the mountain
 
 	// Up on the valley's banks the snow slides you back towards the path:
 	// past rideBankFree metres beyond the channel's edge, a push grows with
@@ -48,11 +63,13 @@ const (
 	// In the narrows they tumble off the gorge walls at a ball that climbs
 	// one: sooner and more often, the walls being quick to climb.
 	snowballWall      = 1.5  // metres up a wall before they come
-	snowballWallAfter = 0.15 // seconds up it before the first
-	snowballWallEvery = 0.35 // seconds between them
+	snowballWallAfter = 0.1  // seconds up it before the first
+	snowballWallEvery = 0.25 // seconds between them
 	snowballLife      = 14.0 // seconds before one melts away
-	rideStartSpeed    = 7.0  // push off the cliff top
-	rideBodiesAhead   = 2    // chunks of obstacle colliders kept ahead of the ball
+	// The ride starts already at the Drop's terminal speed, where the drag
+	// above cruise balances gravity down its face.
+	rideStartSpeed  = 52.0
+	rideBodiesAhead = 2 // chunks of obstacle colliders kept ahead of the ball
 )
 
 // rideInput is one frame of control. Steer is -1 (left) .. 1 (right) relative
@@ -67,10 +84,15 @@ type rideEvents struct {
 	jumped  bool
 	landed  float32 // impact speed of a landing, 0 if none
 	crashed bool
+	picked  []course.PowerKind // power-ups collected
+	smashed []int              // chunks an obstacle was smashed out of (with the shield up)
 }
 
 // obstacleTag marks obstacle bodies (Body.UserData).
-type obstacleTag struct{ kind course.ObstacleKind }
+type obstacleTag struct {
+	kind course.ObstacleKind
+	id   obstacleID
+}
 
 // snowball is a big ball of snow rolling down a bank. It knocks the player
 // about but, unlike a rock, doesn't end the run.
@@ -107,6 +129,8 @@ type ride struct {
 	onBank    float32 // seconds the ball has been up on a bank
 	nextBall  float32 // seconds until the next snowball may roll
 	rng       *rand.Rand
+
+	powers
 }
 
 // newRide starts a run on c. obstacles returns a chunk's obstacles (cached
@@ -122,6 +146,7 @@ func newRide(c *course.Course, obstacles func(index int) []course.Obstacle) *rid
 	}
 	r.phys.AngularDamping = 0.15 // snow is fast: little rolling resistance
 	r.phys.LinearDamping = 0     // air drag is applied by the ride itself
+	r.phys.SupportY = 0.25       // the Drop's face (~70 degrees) is ground to ride, not a wall
 	terrain := physics.NewHeightfield(c.Height)
 	terrain.Friction = 0.7
 	terrain.Restitution = 0.05
@@ -131,7 +156,9 @@ func newRide(c *course.Course, obstacles func(index int) []course.Obstacle) *rid
 	r.ball.Friction = 0.9
 	r.ball.Restitution = 0.15
 	r.ball.Position = c.StartPosition()
-	r.ball.Velocity = mathx.Vec3{0, 0, -rideStartSpeed}
+	// Down the face, not off it.
+	g := course.GradeAt(1)
+	r.ball.Velocity = mathx.Vec3{0, -g, -1}.Normalize().Scale(rideStartSpeed)
 	r.ball.AngularVelocity = mathx.Vec3{-rideStartSpeed / rideBallRadius, 0, 0}
 	r.phys.Add(r.ball)
 	r.syncBodies()
@@ -170,9 +197,13 @@ func (r *ride) syncBodies() {
 			continue
 		}
 		var bodies []*physics.Body
-		for _, o := range r.chunkFn(index) {
+		for i, o := range r.chunkFn(index) {
+			id := obstacleID{index, i}
+			if r.smashed[id] {
+				continue
+			}
 			b := &physics.Body{Kind: physics.Static, Shape: physics.Sphere, Radius: o.Radius,
-				Position: o.Centre, Restitution: 0.4, Friction: 0.5, UserData: obstacleTag{o.Kind}}
+				Position: o.Centre, Restitution: 0.4, Friction: 0.5, UserData: obstacleTag{o.Kind, id}}
 			r.phys.Add(b)
 			bodies = append(bodies, b)
 		}
@@ -218,6 +249,9 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 	// Speed builds towards a cruise speed that rises the further you get:
 	// on the ground the ride pushes you up to it, and drag only bites above it.
 	cruise := r.cruise()
+	if r.boost > 0 {
+		cruise *= rideBoostCruise
+	}
 	drag := float32(0)
 	switch {
 	case throttle > 0:
@@ -226,13 +260,39 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 		cruise *= 1 - rideBrakeCut*-throttle
 		drag = rideBrakeDrag * -throttle
 	}
+	// On (or skimming just off) the snow, steepness pulls the ball on.
+	at := b.Position
+	n := physics.TerrainNormal(r.course.Height, at[0], at[2], 0.5)
+	onSnow := (at[1]-r.course.Height(at[0], at[2]))*n[1]-rideBallRadius < 1
+	if onSnow {
+		g := mathx.Vec3{0, -9.81, 0}
+		down := g.Sub(n.Scale(g.Dot(n))) // gravity along the slope
+		steep := clampf((1-n[1])/0.66, 0, 1)
+		b.Velocity = b.Velocity.Add(down.Scale(rideSteepPull * steep * dt))
+	} else {
+		if r.sinceJump > rideJumpFlight {
+			b.Velocity[1] -= rideAirPull * dt
+		}
+	}
 	speed := b.Velocity.Len()
-	if onGround && speed < cruise {
+	if (onGround || r.boost > 0) && speed < cruise {
 		boost := float32(rideBoost) * (1 + rideTuckBoost*max(throttle, 0))
+		if r.boost > 0 {
+			boost = rideBoostPush
+		}
 		b.Velocity = b.Velocity.Add(r.heading.Scale(min(boost, (cruise-speed)*0.8) * dt))
 	}
 	if speed > cruise {
-		drag += rideOverDrag * (speed - cruise) / speed
+		// Above cruise the snow holds the ball back, less the steeper it is
+		// (on a sheer face gravity wins: the Drop keeps getting faster), and
+		// the air only a little.
+		// (Down a steep face the ball skims, just off the snow as often as
+		// on it: near enough counts.)
+		hold := float32(rideAirHold)
+		if onSnow {
+			hold = n[1] * n[1]
+		}
+		drag += rideOverDrag * hold * (speed - cruise) / speed
 	}
 	b.Velocity = b.Velocity.Scale(1 / (1 + drag*speed*dt))
 
@@ -243,14 +303,26 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 
 	if in.jump && onGround && r.sinceJump > rideJumpCool {
 		r.sinceJump = 0
-		b.Velocity[1] = max(b.Velocity[1], 0) + rideJump
+		// Off the slope, not straight up: the ball keeps its speed down the
+		// hill (a jump used to cancel it, which down a steep face was a leap
+		// far out over the snow) and pops clear of the surface it's on: a
+		// few metres in the valley, a bit less down the Drop. The push
+		// shrinks with the slope's steepness as gravity's pull back onto it
+		// does (down a steep face the hang is longer).
+		n := physics.TerrainNormal(r.course.Height, b.Position[0], b.Position[2], 0.5)
+		if into := b.Velocity.Dot(n); into < 0 {
+			b.Velocity = b.Velocity.Sub(n.Scale(into))
+		}
+		b.Velocity = b.Velocity.Add(n.Scale(rideJump * float32(math.Sqrt(float64(n[1])))))
 		r.airborne = rideSkipTime // a jump leaves the ground: no second jump off the same contact
 		ev.jumped = true
 	}
 
+	before := b.Velocity // (a smash puts most of it back)
 	r.phys.Update(dt)
 	r.syncBodies()
 	r.distance = max(r.distance, r.s())
+	r.updatePowers(dt)
 
 	for _, hit := range r.phys.Impacts() {
 		if hit.A != b && hit.B != b {
@@ -259,6 +331,10 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 		other := hit.A
 		if other == b {
 			other = hit.B
+		}
+		if tag, ok := other.UserData.(obstacleTag); ok && r.shield > 0 {
+			r.smash(other, tag, before, &ev)
+			continue
 		}
 		if tag, ok := other.UserData.(obstacleTag); ok {
 			what := "a rock"
@@ -300,6 +376,7 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 	}
 	if !r.crashed {
 		r.updateSnowballs(dt)
+		r.collectPowerUps(&ev)
 	}
 	if r.landed && b.Velocity.Len() < rideStallSpeed {
 		r.stalled += dt
@@ -318,7 +395,8 @@ func (r *ride) step(dt float32, in rideInput) rideEvents {
 func (r *ride) placeAt(s, u, speed float32) {
 	x := r.course.PathCentre(s) + u
 	r.ball.Position = mathx.Vec3{x, r.course.Height(x, -s) + rideBallRadius + 0.05, -s}
-	r.ball.Velocity = mathx.Vec3{0, 0, -speed}
+	grade := r.course.Height(x, -s) - r.course.Height(x, -s-1)
+	r.ball.Velocity = mathx.Vec3{0, -grade, -1}.Normalize().Scale(speed) // down the slope, not off it
 	r.ball.AngularVelocity = mathx.Vec3{-speed / rideBallRadius, 0, 0}
 	r.ball.Teleported()
 	r.landed = true

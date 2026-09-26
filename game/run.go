@@ -49,15 +49,18 @@ type Run struct {
 	chunks map[int]*runChunk
 	cam    chaseCam
 
-	best      float32
-	newBest   bool
-	overTime  float32 // seconds since the crash
-	choice    int     // game-over card: 0 retry, 1 main menu
-	wantsMenu bool    // the player picked "Main menu"
-	retry     bool    // "Ride again" was clicked; restart on the next update
-	sun       float32 // debug: sun intensity
-	zone      int     // current zone (zoneLength metres each), -1 before the start line
-	zoneTime  float32 // seconds since entering it
+	best       float32
+	newBest    bool
+	overTime   float32 // seconds since the crash
+	choice     int     // game-over card: 0 retry, 1 main menu
+	wantsMenu  bool    // the player picked "Main menu"
+	retry      bool    // "Ride again" was clicked; restart on the next update
+	sun        float32 // debug: sun intensity
+	zone       int     // current zone (zoneLength metres each), -1 before the start line
+	zoneTime   float32 // seconds since entering it
+	picked     string  // the last power-up collected, for its banner
+	pickedKind course.PowerKind
+	pickedAt   float32 // ride time it was collected
 
 	debugOpen bool // the F1 window is up: the mouse is for the UI unless the right button is held
 	locked    bool // the mouse is captured for looking around
@@ -67,6 +70,7 @@ type Run struct {
 
 type runSounds struct {
 	jump, land, crash, move, pick *audio.Sound
+	boost, shield, smash          *audio.Sound
 }
 
 func newRun(sc *scenery, mixer *audio.Mixer, seed uint64, settings *Settings) *Run {
@@ -133,12 +137,25 @@ func (r *Run) stream(all bool) {
 			continue
 		}
 		c := &runChunk{mesh: mesh, obstacles: data.Obstacles}
-		for _, o := range data.Obstacles {
-			c.draws = r.sc.appendObstacle(c.draws, o)
-		}
 		r.chunks[index] = c
+		r.drawObstacles(index)
 		if !all {
 			return
+		}
+	}
+}
+
+// drawObstacles (re)builds chunk index's obstacle draws, leaving out any
+// smashed with the shield up.
+func (r *Run) drawObstacles(index int) {
+	c, ok := r.chunks[index]
+	if !ok {
+		return
+	}
+	c.draws = c.draws[:0]
+	for i, o := range c.obstacles {
+		if !r.ride.smashed[obstacleID{index, i}] {
+			c.draws = r.sc.appendObstacle(c.draws, o)
 		}
 	}
 }
@@ -176,6 +193,23 @@ func (r *Run) Update(dt float32, in *input.State, mouseFree bool) {
 			if !r.attract {
 				r.play(r.sfx.pick, 0.7)
 			}
+		}
+	}
+	for _, index := range ev.smashed {
+		r.drawObstacles(index)
+		if !r.attract {
+			r.play(r.sfx.smash, 1)
+		}
+	}
+	for _, k := range ev.picked {
+		r.pickedAt = r.ride.time
+		r.picked, r.pickedKind = "BOOST", k
+		sound := r.sfx.boost
+		if k == course.Shield {
+			r.picked, sound = "SHIELD", r.sfx.shield
+		}
+		if !r.attract {
+			r.play(sound, 1)
 		}
 	}
 	if !r.attract {
@@ -267,13 +301,96 @@ func (r *Run) Render(aspect float32, out []render.DrawCmd) (render.FrameParams, 
 	proj := mathx.Perspective(r.cam.fov(r.settings.fovRadians()), aspect, 0.3, farPlane)
 	params := runFrameParams(proj.Mul(view), eye, r.sun)
 
-	out = r.sc.appendBackdrop(out[:0], eye)
+	out = r.sc.appendBackdrop(out[:0], eye, func(ahead float32) float32 {
+		s := max(-eye[2], 0) + ahead
+		return r.course.Height(r.course.Centre(s), -s)
+	})
 	for _, c := range r.chunks {
 		out = append(out, render.DrawCmd{Model: mathx.Identity(), Color: snowColor,
 			Flags: gfx.DrawFlat | gfx.DrawSnow, Mesh: c.mesh})
 		out = append(out, c.draws...)
 	}
+	out = r.appendPowerUps(out)
 	return params, r.appendBall(out)
+}
+
+// Power-up colours: boost is fire, shield is ice.
+var (
+	boostColor  = mathx.SRGB(1.0, 0.55, 0.12, 1)
+	shieldColor = mathx.SRGB(0.35, 0.85, 1.0, 1)
+)
+
+// appendPowerUps draws the pickups still on the course (spinning, bobbing
+// and glowing, each in a faint halo), the shards of anything smashed, and
+// what's active on the ball: a trail of fire for a boost, a bubble of ice
+// for a shield.
+func (r *Run) appendPowerUps(out []render.DrawCmd) []render.DrawCmd {
+	t := r.ride.time
+	for index := range r.chunks {
+		for i, p := range r.ride.powerUps(index) {
+			if r.ride.taken[powerID{index, i}] {
+				continue
+			}
+			bob := 0.25 * float32(math.Sin(float64(t)*3+float64(p.Distance)))
+			at := p.Pos.Add(mathx.Vec3{0, bob, 0})
+			place := mathx.Translate(at[0], at[1], at[2])
+			halo := boostColor
+			if p.Kind == course.Shield {
+				halo = shieldColor
+				spin := mathx.AxisAngle(mathx.Vec3{0, 1, 0}, t*2.5)
+				out = append(out, render.DrawCmd{Model: place.Mul(spin.Mat4()).Mul(mathx.Scale(0.6, 0.6, 0.6)),
+					Color: shieldColor, Flags: gfx.DrawUnlit, Mesh: r.sc.orb})
+			} else {
+				// Pointing down the run (-Z), spinning about that axis.
+				roll := mathx.AxisAngle(mathx.Vec3{0, 0, 1}, t*4)
+				tip := mathx.AxisAngle(mathx.Vec3{1, 0, 0}, -math.Pi/2)
+				m := place.Mul(roll.Mat4()).Mul(tip.Mat4()).Mul(mathx.Translate(0, -0.65, 0))
+				out = append(out, render.DrawCmd{Model: m, Color: boostColor, Flags: gfx.DrawUnlit, Mesh: r.sc.arrow})
+			}
+			pulse := 1.1 + 0.12*float32(math.Sin(float64(t)*6))
+			halo[3] = 0.22
+			out = append(out, render.DrawCmd{Model: place.Mul(mathx.Scale(pulse, pulse, pulse)),
+				Color: halo, Flags: gfx.DrawUnlit, Mesh: r.sc.orb})
+		}
+	}
+	for _, s := range r.ride.shards {
+		c := rockColor
+		if s.kind == course.Tree {
+			c = crownColor
+		}
+		pos, rot := r.ride.pose(s.body)
+		size := s.body.Radius * min(1, (shardLife-s.age)/0.5)
+		out = append(out, render.DrawCmd{Model: bodyMatrix(pos, rot, size), Color: c, Flags: gfx.DrawFlat, Mesh: r.sc.chip})
+	}
+	if r.ride.crashed {
+		return out
+	}
+	p, _ := r.ride.pose(r.ride.ball)
+	if r.ride.boost > 0 {
+		back := r.ride.ball.Velocity.Normalize().Scale(-1)
+		fade := min(1, r.ride.boost/0.5)
+		for i := 1; i <= 6; i++ {
+			k := float32(i)
+			c := boostColor
+			c[3] = 0.5 * fade * (1 - k/7)
+			size := rideBallRadius * (1 - k*0.1)
+			at := p.Add(back.Scale(k * 0.9))
+			out = append(out, render.DrawCmd{Model: mathx.Translate(at[0], at[1], at[2]).Mul(mathx.Scale(size, size, size)),
+				Color: c, Flags: gfx.DrawUnlit, Mesh: r.sc.orb})
+		}
+	}
+	if sh := r.ride.shield; sh > 0 {
+		c := shieldColor
+		c[3] = 0.3
+		if sh < 1.5 && int(sh*10)%2 == 0 {
+			c[3] = 0.1 // flickering: about to go
+		}
+		size := float32(rideBallRadius * 1.9)
+		spin := mathx.AxisAngle(mathx.Vec3{0, 1, 0}, t)
+		out = append(out, render.DrawCmd{Model: mathx.Translate(p[0], p[1], p[2]).Mul(spin.Mat4()).Mul(mathx.Scale(size, size, size)),
+			Color: c, Flags: gfx.DrawUnlit, Mesh: r.sc.orb})
+	}
+	return out
 }
 
 // appendBall draws the ball and its shadow, or its pieces after a crash.

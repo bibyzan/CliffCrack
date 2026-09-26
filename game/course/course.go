@@ -25,16 +25,16 @@ import (
 
 const (
 	// The slope steepens from startGrade to endGrade (drop per metre travelled,
-	// about 21 to 33 degrees) over the first steepenOver metres, so the ride
+	// about 29 to 42 degrees) over the first steepenOver metres, so the ride
 	// keeps getting faster.
-	startGrade  = 0.38
-	endGrade    = 0.65
+	startGrade  = 0.55
+	endGrade    = 0.9
 	steepenOver = 3000
-	// The Drop: off the cliff the slope starts dropGrade steeper (about 47
+	// The Drop: off the cliff the slope starts dropGrade steeper (about 70
 	// degrees in all), easing into the run over dropLength metres, to get the
 	// ball going fast from the first second.
-	dropGrade  = 0.7
-	dropLength = 160
+	dropGrade  = 2.2
+	dropLength = 500
 
 	// ChunkLength is the length of one generated piece of the level (metres).
 	ChunkLength = 48
@@ -47,9 +47,11 @@ const (
 	halfSpan = 130
 
 	// StartClear is how far down the run the first obstacles may appear.
-	StartClear = 70
-	// cliffHeight is the wall the ball is dropped from, behind the start.
-	cliffHeight = 30
+	StartClear = 300
+	// cliffHeight is the wall behind the start, at the top of the Drop.
+	cliffHeight = 40
+
+	bankEase = 5 // metres over which a bank curves up from the floor's edge
 
 	crackDepth = 30
 	landing    = 45 // metres kept clear after a crack: you can't steer much in the air
@@ -84,6 +86,7 @@ type Obstacle struct {
 	Variant  int        // which mesh variant to draw (any non-negative number)
 	Squash   float32    // rocks: vertical scale factor
 	Distance float32    // s at the obstacle
+	Scenery  bool       // off the path (up a wall, down a mountainside); still solid
 }
 
 // Course is one generated level.
@@ -110,7 +113,7 @@ func New(seed uint64) *Course {
 	// Cracks: the first after a warm-up stretch, then closer together and
 	// wider the further you get, only in plain valley. Aligned to mesh rows.
 	rng := rand.New(rand.NewPCG(seed, 0xc4ac5))
-	for s := float32(220 + rng.IntN(60)); s < 200000; {
+	for s := float32(dropLength + 80 + rng.IntN(60)); s < 200000; {
 		d := Difficulty(s)
 		width := float32(math.Round(float64(3 + 5*d + float32(rng.IntN(2)))))
 		at := float32(math.Round(float64(s)))
@@ -272,14 +275,20 @@ func (c *Course) surface(x, z float32) (height, cut float32) {
 	bowl := min(au, w)
 	h += 0.012 * bowl * bowl
 	if e := au - w; e > 0 {
-		// Tall banks: a berm that keeps climbing into a mountain wall.
-		h += 30*(1-float32(math.Exp(-float64(e)/11))) + e*0.4
+		// Tall banks: a berm that keeps climbing into a mountain wall. It
+		// starts level with the floor's edge and curves up (eased over the
+		// first few metres), not a crease: at the speeds down the Drop a
+		// crease throws the ball.
+		eased := e * e / (e + bankEase)
+		h += 30*(1-float32(math.Exp(-float64(eased)/11))) + eased*0.4
 		ridges := float32(c.peaks.Ridged(float64(x)/90, float64(z)/90, 5, 0.5))
 		h += ridges * 90 * smoothstep(14, 90, e)
 	}
 	// Moguls on the floor, fading out up the banks; bumpier further down.
+	// Long enough (rollers more than bumps) that at 200+ km/h the ball rides
+	// them instead of being thrown off every crest.
 	floor := 1 - smoothstep(w-2, w+6, au)
-	h += (0.5 + 0.25*Difficulty(s)) * float32(c.detail.FBM(float64(x)/6, float64(z)/6, 3, 0.5)) * floor
+	h += (0.6 + 0.3*Difficulty(s)) * float32(c.detail.FBM(float64(x)/12, float64(z)/12, 3, 0.5)) * floor
 
 	// Behind the start: the cliff the ball is dropped from.
 	h += cliffHeight * smoothstep(-2, -10, s)
@@ -396,10 +405,11 @@ func (c *Course) gorge(x, z, base, hv float32, p profile) float32 {
 	return face + (hv-face)*t
 }
 
-// StartPosition is where the ball is dropped: over the cliff edge behind the start.
+// StartPosition is where the ball starts: at the foot of the cliff, on the
+// lip of the Drop's face, which it rides straight down.
 func (c *Course) StartPosition() mathx.Vec3 {
-	const s = -9
-	return mathx.Vec3{c.Centre(s), c.Rim(c.Centre(s), -s) + 1.5, -s}
+	const s = 1 // (just onto the face: behind it, the cliff's foot is a kink)
+	return mathx.Vec3{c.Centre(s), c.Rim(c.Centre(s), -s) + 0.55, -s}
 }
 
 // Chunk is one generated piece of the level.
@@ -534,63 +544,126 @@ func (c *Course) obstacles(index int, start float32) []Obstacle {
 	return out
 }
 
-// sectionObstacles places a chunk's obstacles inside a special section: none
-// on its transitions (the climb, the pinch). On a ridge's crest, rocks
-// across it and pines clinging to its edges; in the narrows, rocks and pines
-// hugging alternate walls with boulders out on the floor, so you weave
-// between them. One at a time along the run, with room to swerve.
+// Section obstacles: how far the path's edge items reach in from the edge
+// (at most), and the lane a middle item must leave clear beside it.
+const (
+	edgeReach = 1.8
+	laneClear = 2.6
+)
+
+// sectionObstacles places a chunk's obstacles inside a special section, all
+// along it once its path has taken over from the valley (a ridge's climb
+// and descent included):
+//   - lining the path's edges, thick: pines clinging to a ridge's crest,
+//     rocks and pines hugging the gorge walls. They leave the middle open.
+//   - out in the middle: rocks on the crest, boulders on the gorge floor,
+//     every few metres, each leaving a lane to one side.
+//   - scenery beyond the edges: rocks and pines up the gorge walls and down
+//     the ridge's mountainsides, so neither is bare.
 func (c *Course) sectionObstacles(rng *rand.Rand, start, d float32) []Obstacle {
-	var out []Obstacle
-	count := 5 + int(6*d) + rng.IntN(3)
-	for range count {
-		s := start + rng.Float32()*ChunkLength
-		q, ok := c.profileAt(s)
-		if !ok || !q.stable {
-			continue
-		}
-		hw := c.PathHalfWidth(s)
-		o := Obstacle{Kind: Rock, Distance: s, Yaw: rng.Float32() * 2 * math.Pi, Variant: rng.IntN(1 << 16)}
-		side := float32(1)
-		if rng.IntN(2) == 0 {
-			side = -1
-		}
-		var u float32
-		switch pick := rng.Float32(); {
-		case pick < 0.3: // a pine on the edge
-			o.Kind = Tree
-			o.Scale = 0.7 + 0.4*rng.Float32()
-			u = side * (hw - 0.8*o.Scale)
-		case q.kind == Narrows && pick < 0.7: // a rock against the wall
-			o.Scale = 0.7 + 0.5*rng.Float32()
-			u = side * (hw - o.Scale*0.6)
-		case q.kind == Narrows: // a boulder out on the floor
-			o.Scale = 0.6 + 0.4*rng.Float32()
-			u = (rng.Float32()*2 - 1) * (hw - 3)
-		default: // a rock on the crest
-			o.Scale = 0.7 + 0.7*rng.Float32()
-			u = (rng.Float32()*2 - 1) * (hw - 2)
-		}
+	var edge, middle, scenery []Obstacle
+	// place fills in an obstacle of kind at distance s, u across from the path centre.
+	place := func(kind ObstacleKind, s, u, scale float32) Obstacle {
+		o := Obstacle{Kind: kind, Distance: s, Scale: scale, Yaw: rng.Float32() * 2 * math.Pi, Variant: rng.IntN(1 << 16)}
 		x, z := c.PathCentre(s)+u, -s
 		o.Base = mathx.Vec3{x, c.Height(x, z), z}
-		if o.Kind == Tree {
-			o.Radius = 0.8 * o.Scale
-			o.Centre = o.Base.Add(mathx.Vec3{0, 0.9 * o.Scale, 0})
+		if kind == Tree {
+			o.Radius = 0.8 * scale
+			o.Centre = o.Base.Add(mathx.Vec3{0, 0.9 * scale, 0})
 		} else {
 			o.Squash = 0.6 + 0.3*rng.Float32()
-			o.Radius = o.Scale * 0.85
-			o.Centre = o.Base.Add(mathx.Vec3{0, o.Scale * o.Squash * 0.35, 0})
+			o.Radius = scale * 0.85
+			o.Centre = o.Base.Add(mathx.Vec3{0, scale * o.Squash * 0.35, 0})
+		}
+		return o
+	}
+	side := func() float32 {
+		if rng.IntN(2) == 0 {
+			return -1
+		}
+		return 1
+	}
+	stable := func(s float32) (profile, bool) {
+		q, ok := c.profileAt(s)
+		return q, ok && q.corridor > 0.99
+	}
+
+	// The edges: thick, but never two on one side within a few metres.
+	for range 16 + int(10*d) {
+		s := start + rng.Float32()*ChunkLength
+		q, ok := stable(s)
+		if !ok {
+			continue
+		}
+		hw, sd := c.PathHalfWidth(s), side()
+		var o Obstacle
+		if q.kind == Ridge || rng.Float32() < 0.4 {
+			scale := 0.7 + 0.4*rng.Float32()
+			o = place(Tree, s, sd*(hw-0.8*scale), scale)
+		} else {
+			scale := 0.7 + 0.5*rng.Float32()
+			o = place(Rock, s, sd*(hw-0.6*scale), scale)
 		}
 		crowded := false
-		for _, q := range out {
-			if abs(q.Distance-s) < 9-2*d { // room to swerve between them
+		for _, p := range edge {
+			if abs(p.Distance-s) < 3.5 && (p.Base[0]-c.PathCentre(p.Distance))*sd > 0 {
 				crowded = true
 			}
 		}
 		if !crowded {
-			out = append(out, o)
+			edge = append(edge, o)
 		}
 	}
-	return out
+
+	// The middle: a rock or boulder every so often, each leaving a lane
+	// between it and the edge items on one side.
+	for range 5 + int(4*d) {
+		s := start + rng.Float32()*ChunkLength
+		q, ok := stable(s)
+		if !ok {
+			continue
+		}
+		hw := c.PathHalfWidth(s)
+		scale := 0.6 + 0.4*rng.Float32()
+		if q.kind == Ridge {
+			scale = 0.7 + 0.6*rng.Float32()
+		}
+		o := place(Rock, s, (rng.Float32()*2-1)*(hw-2), scale)
+		u := o.Base[0] - c.PathCentre(s)
+		left := (u - o.Radius) - (-hw + edgeReach)
+		right := (hw - edgeReach) - (u + o.Radius)
+		if max(left, right) < laneClear {
+			continue
+		}
+		crowded := false
+		for _, p := range middle {
+			if abs(p.Distance-s) < 10-3*d { // room to swerve between them
+				crowded = true
+			}
+		}
+		if !crowded {
+			middle = append(middle, o)
+		}
+	}
+
+	// Scenery: up the walls and down the mountainsides, off the path.
+	for range 24 {
+		s := start + rng.Float32()*ChunkLength
+		q, ok := stable(s)
+		if !ok {
+			continue
+		}
+		hw := c.PathHalfWidth(s)
+		off := hw + 1.5 + rng.Float32()*rng.Float32()*22 // most near the path, where they're seen
+		kind, scale := Rock, 0.8+0.9*rng.Float32()
+		if rng.Float32() < 0.45 || q.kind == Ridge && rng.Float32() < 0.5 {
+			kind, scale = Tree, 0.8+0.6*rng.Float32()
+		}
+		o := place(kind, s, side()*off, scale)
+		o.Scenery = true
+		scenery = append(scenery, o)
+	}
+	return append(append(edge, middle...), scenery...)
 }
 
 func abs(v float32) float32 {

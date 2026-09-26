@@ -35,8 +35,10 @@ const (
 )
 
 // backdropRange is one layer of the mountain ranges on the horizon. The
-// layers keep a fixed offset from the camera, so they sit at "infinity"
-// while the course streams past underneath.
+// layers keep a fixed distance ahead of the camera, so they sit at
+// "infinity" while the course streams past underneath. Their feet go no
+// higher than the course that far ahead: down a steep face the ground falls
+// away faster than the camera, and sky would show beneath them.
 type backdropRange struct {
 	mesh     render.Mesh
 	distance float32 // ahead of the camera
@@ -57,6 +59,8 @@ type scenery struct {
 	shadow  render.Mesh
 	chip    render.Mesh // a piece of shattered ball
 	snow    render.Mesh // a rolling snowball
+	arrow   render.Mesh // the boost pickup: a cone pointing down the run
+	orb     render.Mesh // the shield pickup, halos, and the shield around the ball
 }
 
 func newScenery() (*scenery, error) {
@@ -104,6 +108,8 @@ func newScenery() (*scenery, error) {
 	sc.shadow = mesh(geom.Disc(1, 24, false))
 	sc.chip = mesh(geom.Icosphere(1, 0))
 	sc.snow = mesh(rockMesh(rand.New(rand.NewPCG(9, 9)))) // lumpy, like packed snow
+	sc.arrow = mesh(geom.Cone(0.55, 1.3, 12))
+	sc.orb = mesh(geom.Icosphere(1, 1))
 	if err != nil {
 		return nil, err
 	}
@@ -118,13 +124,17 @@ func newScenery() (*scenery, error) {
 // rangeMesh is a strip of mountains 4.8 km wide and 300 m deep along -Z from
 // the origin, with its foot on y = 0 and peaks up to height: ridged noise
 // for the skyline, lifted into a ridge between the front and back edges and
-// jittered so every facet catches the light differently.
+// jittered so every facet catches the light differently. A skirt hangs
+// rangeSkirt metres below its front edge, so nothing shows under it.
 func rangeMesh(field *noise.Field, offset float64, height float32) geom.MeshData {
-	const cols, rows = 161, 8
+	const cols, rows = 161, 9
 	const width, depth = 4800, 300
 	return geom.Grid(cols, rows, func(i, j int) mathx.Vec3 {
 		x := -width/2 + float32(i)*width/(cols-1)
-		v := float32(j) / (rows - 1)
+		if j == 0 {
+			return mathx.Vec3{x, -rangeSkirt, 0}
+		}
+		v := float32(j-1) / (rows - 2)
 		z := -v * depth
 		skyline := 0.3 + 0.7*float32(field.Ridged(float64(x)/520+offset, offset, 4, 0.55))
 		ridge := float32(math.Pow(math.Sin(math.Pi*float64(v)), 0.6))
@@ -180,8 +190,12 @@ func runFrameParams(viewProj mathx.Mat4, eye mathx.Vec3, sun float32) render.Fra
 	}
 }
 
+// rangeSkirt is how far below its foot each range hangs a curtain.
+const rangeSkirt = 700
+
 // appendBackdrop draws the sky and the distant ranges around the camera.
-func (sc *scenery) appendBackdrop(out []render.DrawCmd, eye mathx.Vec3) []render.DrawCmd {
+// ground (nil for none) is the course's height the given distance ahead.
+func (sc *scenery) appendBackdrop(out []render.DrawCmd, eye mathx.Vec3, ground func(ahead float32) float32) []render.DrawCmd {
 	out = append(out, render.DrawCmd{
 		Model: mathx.Translate(eye[0], eye[1], eye[2]).Mul(mathx.Scale(skyRadius, skyRadius, skyRadius)),
 		Color: skyZenith,
@@ -189,8 +203,12 @@ func (sc *scenery) appendBackdrop(out []render.DrawCmd, eye mathx.Vec3) []render
 		Mesh:  sc.sky,
 	})
 	for _, r := range sc.ranges {
+		foot := eye[1] - r.drop
+		if ground != nil {
+			foot = min(foot, ground(r.distance)-60)
+		}
 		out = append(out, render.DrawCmd{
-			Model: mathx.Translate(eye[0], eye[1]-r.drop, eye[2]-r.distance),
+			Model: mathx.Translate(eye[0], foot, eye[2]-r.distance),
 			Color: r.color,
 			Flags: gfx.DrawFlat | gfx.DrawSnow,
 			Mesh:  r.mesh,

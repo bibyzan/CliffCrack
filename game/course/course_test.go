@@ -2,6 +2,7 @@ package course
 
 import (
 	"math"
+	"sort"
 	"testing"
 )
 
@@ -123,17 +124,23 @@ func TestObstaclesStayClear(t *testing.T) {
 	}
 }
 
-func TestStartIsAboveTheCliff(t *testing.T) {
+func TestStartIsAtTheTopOfTheDrop(t *testing.T) {
 	c := New(5)
 	p := c.StartPosition()
 	if drop := p[1] - c.Height(c.Centre(10), -10); drop < 20 {
-		t.Errorf("the start is only %v m above the slope below the cliff", drop)
+		t.Errorf("the start is only %v m above the slope 10 m down the Drop", drop)
+	}
+	if drop := p[1] - c.Height(c.Centre(dropLength), -dropLength); drop < 600 {
+		t.Errorf("the Drop only falls %v m: it should be huge", drop)
+	}
+	if up := c.Height(c.Centre(-10), 10) - p[1]; up < 20 {
+		t.Errorf("the cliff behind the start is only %v m high", up)
 	}
 }
 
 func TestItGetsSteeperAndHarder(t *testing.T) {
 	c := New(21)
-	if a, b := GradeAt(dropLength), GradeAt(3000); b < a*1.5 {
+	if a, b := GradeAt(dropLength), GradeAt(3000); b < a*1.3 {
 		t.Errorf("grade %v after the drop vs %v at 3 km: the slope should steepen", a, b)
 	}
 	if a, b := GradeAt(10), GradeAt(dropLength); a < b+0.5 {
@@ -392,12 +399,76 @@ func TestSectionObstaclesStayOnThePath(t *testing.T) {
 				if !ok {
 					continue // valley chunk ends
 				}
-				if !p.stable {
-					t.Errorf("obstacle at s=%v on a section's transition", o.Distance)
+				if p.corridor < 0.99 {
+					t.Errorf("obstacle at s=%v where the section's path is still joining the valley", o.Distance)
 				}
-				if u := abs(o.Base[0] - c.PathCentre(o.Distance)); u > c.PathHalfWidth(o.Distance) {
+				if u := abs(o.Base[0] - c.PathCentre(o.Distance)); u > c.PathHalfWidth(o.Distance) && !o.Scenery {
 					t.Errorf("obstacle at s=%v is %v m off the path centre, past its edge", o.Distance, u)
 				}
+			}
+		}
+	}
+}
+
+// TestSectionsAreBusyButPassable: ridges and narrows are thick with rocks
+// and pines, on the path and off it, yet wherever something stands on the
+// path there's still a lane past it.
+func TestSectionsAreBusyButPassable(t *testing.T) {
+	c := New(12)
+	for _, kind := range []SectionKind{Ridge, Narrows} {
+		k := firstSection(t, c, kind)
+		var onPath []Obstacle
+		scenery, length := 0, float32(0)
+		for s := k.Start; s < k.End(); s++ {
+			if p, ok := c.profileAt(s); ok && p.corridor > 0.99 {
+				length++
+			}
+		}
+		for index := ChunkAt(k.Start); index <= ChunkAt(k.End()); index++ {
+			for _, o := range c.Obstacles(index) {
+				if _, ok := c.SectionAt(o.Distance); !ok {
+					continue
+				}
+				if o.Scenery {
+					scenery++
+				} else {
+					onPath = append(onPath, o)
+				}
+			}
+		}
+		per100 := float32(len(onPath)) / length * 100
+		t.Logf("kind %v: %.0f m: %d on the path (%.0f per 100 m), %d scenery", kind, length, len(onPath), per100, scenery)
+		if per100 < 25 {
+			t.Errorf("kind %v: only %.0f obstacles per 100 m on the path: too bare", kind, per100)
+		}
+		if float32(scenery)/length*100 < 15 {
+			t.Errorf("kind %v: only %d scenery pieces over %.0f m: the walls and slopes are bare", kind, scenery, length)
+		}
+		// A lane: at every metre, the widest gap between things on the path
+		// (and the path's edges) fits the ball with room to spare.
+		for s := k.Start; s < k.End(); s++ {
+			if p, ok := c.profileAt(s); !ok || p.corridor < 0.99 {
+				continue
+			}
+			pc, hw := c.PathCentre(s), c.PathHalfWidth(s)
+			type span struct{ lo, hi float32 }
+			var blocked []span
+			for _, o := range onPath {
+				if dz := abs(o.Distance - s); dz < o.Radius+0.5 {
+					u := o.Base[0] - pc
+					blocked = append(blocked, span{u - o.Radius, u + o.Radius})
+				}
+			}
+			sort.Slice(blocked, func(i, j int) bool { return blocked[i].lo < blocked[j].lo })
+			best, at := float32(0), -hw
+			for _, b := range blocked {
+				best = max(best, b.lo-at)
+				at = max(at, b.hi)
+			}
+			best = max(best, hw-at)
+			if best < 2 {
+				t.Errorf("kind %v: at s=%.0f the widest lane is %.1f m", kind, s, best)
+				break
 			}
 		}
 	}

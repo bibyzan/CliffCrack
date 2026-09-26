@@ -18,6 +18,8 @@ const (
 	camMaxElev       = 1.35 // radians above the horizon, seen from the ball
 	camFollowRate    = 15   // 1/s: how tightly the camera tracks the ball
 	camTurnRate      = 4    // 1/s: how quickly it swings round to a new direction of travel
+	camDiveRate      = 5    // 1/s: how quickly it tilts to follow the ball diving down a slope
+	camMaxDive       = 1.25 // radians: the steepest it tilts (the Drop's face is ~1.22)
 )
 
 // lookInput turns the camera this frame (radians): yaw to the right, and
@@ -38,6 +40,7 @@ type chaseCam struct {
 	lookElev float32    // the player's change of height angle
 	idle     float32    // seconds since the last look input
 	widen    float32    // extra field of view from speed (radians), added to the player's setting
+	dive     float32    // how steeply the ball is heading down (radians below the horizon), smoothed
 
 	eye, target mathx.Vec3 // this frame's result
 }
@@ -46,8 +49,19 @@ func newChaseCam(rd *ride) chaseCam {
 	c := chaseCam{idle: camRecenterAfter}
 	c.pivot, _ = rd.pose(rd.ball)
 	c.yaw = headingYaw(rd.heading)
+	c.dive = diveOf(rd)
 	c.place(rd, rd.course)
 	return c
+}
+
+// diveOf is how steeply the ball is heading down, from its velocity.
+func diveOf(rd *ride) float32 {
+	v := rd.ball.Velocity
+	flat := float32(math.Hypot(float64(v[0]), float64(v[2])))
+	if flat+abs32(v[1]) < 5 {
+		return 0 // too slow to have a direction worth following
+	}
+	return clampf(float32(math.Atan2(float64(-v[1]), float64(flat))), 0, camMaxDive)
 }
 
 // headingYaw is the yaw that looks along a horizontal direction.
@@ -64,6 +78,7 @@ func (c *chaseCam) update(dt float32, rd *ride, crs *course.Course, look lookInp
 	c.pivot = c.pivot.Add(p.Sub(c.pivot).Scale(smoothing(camFollowRate, dt)))
 	if !rd.crashed {
 		c.yaw = wrapAngle(c.yaw + wrapAngle(headingYaw(rd.heading)-c.yaw)*smoothing(camTurnRate, dt))
+		c.dive += (diveOf(rd) - c.dive) * smoothing(camDiveRate, dt)
 	}
 
 	if look.yaw != 0 || look.elev != 0 {
@@ -95,17 +110,29 @@ func (c *chaseCam) place(rd *ride, crs *course.Course) {
 	c.lookElev = clampf(c.lookElev, camMinElev-base, camMaxElev-base)
 	elev := float64(base + c.lookElev)
 
+	// The orbit tilts with the ball's dive: down a steep face the camera
+	// rides above and behind it, looking down the slope rather than out at
+	// the horizon. Turned away to look around, the tilt fades.
 	forward := camera.Direction(c.yaw+c.lookYaw, 0)
+	dive := float64(c.dive * max(0, float32(math.Cos(float64(c.lookYaw)))))
+	cd, sd := float32(math.Cos(dive)), float32(math.Sin(dive))
+	along := forward.Scale(cd).Add(mathx.Vec3{0, -sd, 0}) // the way the ball's going
+	above := forward.Scale(sd).Add(mathx.Vec3{0, cd, 0})  // "up", square to it
 	c.eye = c.pivot.
-		Sub(forward.Scale(dist * float32(math.Cos(elev)))).
-		Add(mathx.Vec3{0, dist * float32(math.Sin(elev)), 0})
-	if ground := crs.Height(c.eye[0], c.eye[2]) + 1.2; c.eye[1] < ground {
-		c.eye[1] = ground // never inside the mountain
+		Sub(along.Scale(dist * float32(math.Cos(elev)))).
+		Add(above.Scale(dist * float32(math.Sin(elev))))
+	// Never inside the mountain. On a steep slope (the Drop) the snow behind
+	// rises far above the ball: skimming it, the camera would look along the
+	// surface, so it stands further off it the steeper it gets.
+	ground := crs.Height(c.eye[0], c.eye[2])
+	grade := (ground - crs.Height(c.pivot[0], c.pivot[2])) / back
+	if clear := ground + 1.2 + up*clampf((grade-0.6)/0.8, 0, 1); c.eye[1] < clear {
+		c.eye[1] = clear
 	}
 	// Look a little ahead of the ball when facing downhill; turned away, aim
 	// at the ball itself so it stays in the middle of the picture.
 	ahead := 5 * max(0, float32(math.Cos(float64(c.lookYaw))))
-	c.target = c.pivot.Add(forward.Scale(ahead)).Add(mathx.Vec3{0, 0.4, 0})
+	c.target = c.pivot.Add(along.Scale(ahead)).Add(above.Scale(0.4))
 }
 
 // fov is the vertical field of view to draw with: the player's setting (read
