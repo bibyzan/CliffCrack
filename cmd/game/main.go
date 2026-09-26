@@ -52,7 +52,7 @@ func run() error {
 	name := flag.String("name", "", "online: the name to go by (default: the setting, else your account name)")
 	hostRoom := flag.Bool("host", false, "online: make a room, and start the match as soon as someone's connected")
 	joinRoom := flag.Bool("join", false, "online: join the first open room")
-	tap := flag.String("tap", "", `keys to press on given frames, e.g. "R@60,G@90" (for scripted tests)`)
+	tap := flag.String("tap", "", `keys or mouse buttons to press on given frames, e.g. "R@60,G@90,MOUSE5@120" (for scripted tests)`)
 	aim := flag.Bool("aim", false, "hold the right mouse button every frame: aim down the sights (for scripted tests)")
 	touch := flag.Bool("touch", platform.TouchScreen(), "show the touch screen's controls and settings (-touch=false: a keyboard's, e.g. to test them on a phone)")
 	scripts := flag.String("scripts", "", `hot-reloadable scripts directory (default: ./scripts, else the repo's scripts/; "none" disables)`)
@@ -162,16 +162,23 @@ func run() error {
 		if *aim {
 			in.ButtonEvent(input.MouseRight, true)
 		}
-		taps := map[rune]bool{} // each key down on any of its frames, up otherwise
+		taps := map[rune]bool{}   // each key down on any of its frames, up otherwise
+		buttons := map[int]bool{} // ... and each mouse button (1 = left)
 		for _, t := range strings.Split(*tap, ",") {
 			var k rune
-			var at int
-			if n, _ := fmt.Sscanf(strings.ToUpper(t), "%c@%d", &k, &at); n == 2 {
+			var b, at int
+			t = strings.ToUpper(t)
+			if n, _ := fmt.Sscanf(t, "MOUSE%d@%d", &b, &at); n == 2 {
+				buttons[b] = buttons[b] || rendered == at
+			} else if n, _ := fmt.Sscanf(t, "%c@%d", &k, &at); n == 2 {
 				taps[k] = taps[k] || rendered == at
 			}
 		}
 		for k, down := range taps {
 			in.KeyEvent(input.Key(k), down)
+		}
+		for b, down := range buttons {
+			in.ButtonEvent(input.MouseButton(b-1), down)
 		}
 		if in.Pressed(input.KeyF12) && capturePath == "" {
 			capturePath = time.Now().Format("screenshot-20060102-150405.png")

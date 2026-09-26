@@ -177,14 +177,19 @@ type Arena struct {
 	fovKick    float32          // 0..1 widening of the view as a launch pad throws you
 	throwAnim  float32          // 0..1 the gun dipping as you throw a grenade
 	reloadEase float32          // 0..1 the gun turned for a reload
-	reloadT    float32          // how far through the reload it was last frame
-	lastPump   float32          // the shotgun's time since its last shot, last frame
-	lastBolt   float32          // ... and the sniper's
-	lastNear   float32          // when (elapsed) the last near-miss splat played
-	lastCreak  float32          // ... and the last creak of an overloaded structure
-	bodyPaint  [][]bodyPaint    // the paint on each player (by ID), this round
-	droplets   []droplet        // paint bursting off hits
-	wasDown    []bool           // each player was down last frame (their paint goes when they get up)
+	// Inspecting the weapon (ActInspect): whether it's on, how far through
+	// (s; held where it stopped while it eases out), and how much of the
+	// pose shows (eased in, and out when anything else needs the gun).
+	inspecting, wantInspect bool
+	inspectT, inspectW      float32
+	reloadT                 float32       // how far through the reload it was last frame
+	lastPump                float32       // the shotgun's time since its last shot, last frame
+	lastBolt                float32       // ... and the sniper's
+	lastNear                float32       // when (elapsed) the last near-miss splat played
+	lastCreak               float32       // ... and the last creak of an overloaded structure
+	bodyPaint               [][]bodyPaint // the paint on each player (by ID), this round
+	droplets                []droplet     // paint bursting off hits
+	wasDown                 []bool        // each player was down last frame (their paint goes when they get up)
 }
 
 func newArena(sc *scenery, mixer *audio.Mixer, settings *Settings, seed uint64, practice bool) (*Arena, error) {
@@ -442,6 +447,9 @@ func (m *Arena) input(in *input.State, dt float32, mouseFree bool) arena.Input {
 	c.Fire = (m.locked && k.down(in, ActFire)) || pull
 	c.FirePressed = (m.locked && k.pressed(in, ActFire)) || (pull && !m.prevPull)
 	m.prevPull = pull
+	if k.pressed(in, ActInspect) || (in.PadPressed(input.PadUp) && !m.choosingGadget()) {
+		m.wantInspect = true
+	}
 
 	c.Jump = k.pressed(in, ActJump) || in.PadPressed(input.PadA)
 	c.Sprint = k.down(in, ActSprint) || in.PadDown(input.PadLStick)
@@ -584,6 +592,7 @@ func (m *Arena) effects(dt float32, ev arena.Events) {
 		m.reloadEase = max(m.reloadEase-dt*5, 0)
 	}
 	m.reloadCues(me)
+	m.updateInspect(me, reloadingNow, dt)
 
 	// How hard you're running, eased so the sway and the sprint pose come
 	// and go smoothly.
@@ -1114,6 +1123,13 @@ func (m *Arena) weaponModel() mathx.Mat4 {
 		pitch += kickUp * kick * (1 - 0.6*ads)
 		roll *= 1 - ads
 	}
+	if e := smooth(m.inspectW); e > 0 {
+		p := inspectPose(m.inspectT)
+		offset = offset.Add(p.offset.Scale(e))
+		yaw += p.yaw * e
+		pitch += p.pitch * e
+		roll += p.roll * e
+	}
 	return m.camWorld().
 		Mul(mathx.Translate(offset[0], offset[1], offset[2])).
 		Mul(mathx.RotateY(yaw)).
@@ -1431,4 +1447,73 @@ func (m *Arena) appendTopples(out []render.DrawCmd) []render.DrawCmd {
 		}
 	}
 	return out
+}
+
+// Inspecting: the weapon is brought in and turned to show its left side,
+// then tipped up and rolled over to show the other, and put back. It's only
+// for looking at: firing, aiming, reloading, swapping, sprinting, throwing
+// or a melee puts it straight back.
+const inspectTime = 3.4 // s
+
+type inspectKey struct {
+	t                float32
+	offset           mathx.Vec3
+	yaw, pitch, roll float32
+}
+
+var inspectKeys = []inspectKey{
+	{0, mathx.Vec3{}, 0, 0, 0},
+	{0.55, mathx.Vec3{-0.09, 0.06, 0.1}, 0.85, 0.12, -0.3},
+	{1.45, mathx.Vec3{-0.1, 0.065, 0.1}, 0.95, 0.18, -0.38}, // (drifting as it's looked over)
+	{2.0, mathx.Vec3{-0.07, 0.07, 0.08}, -0.35, 0.3, 1.25},
+	{2.8, mathx.Vec3{-0.075, 0.075, 0.08}, -0.4, 0.26, 1.35},
+	{inspectTime, mathx.Vec3{}, 0, 0, 0},
+}
+
+// inspectPose is the inspect's pose t seconds in, eased between the keys.
+func inspectPose(t float32) inspectKey {
+	for i := 1; i < len(inspectKeys); i++ {
+		a, b := inspectKeys[i-1], inspectKeys[i]
+		if t > b.t {
+			continue
+		}
+		e := smooth(clampf((t-a.t)/(b.t-a.t), 0, 1))
+		lerp := func(x, y float32) float32 { return x + (y-x)*e }
+		return inspectKey{t, a.offset.Add(b.offset.Sub(a.offset).Scale(e)),
+			lerp(a.yaw, b.yaw), lerp(a.pitch, b.pitch), lerp(a.roll, b.roll)}
+	}
+	return inspectKey{}
+}
+
+// updateInspect starts an inspect when asked and nothing else needs the
+// weapon, runs it, and eases it away when it ends or something does.
+func (m *Arena) updateInspect(me *arena.Player, reloading bool, dt float32) {
+	w := &me.Weapons
+	held := heldKind(w)
+	busy := me.Dead || w.ADS > 0.02 || reloading || w.Switching > 0 || m.sprintAmt > 0.3 ||
+		m.throwAnim > 0.05 || w.Elbow.Progress() >= 0 || w.Hammer.Progress() >= 0 ||
+		mantleReach(me) > 0 || m.slideAmt > 0.2 || m.choosingGadget()
+	if held != arena.WeaponHammer && int(held) < len(w.States) && w.States[held].SinceShot < 0.3 {
+		busy = true // just fired
+	}
+	if m.wantInspect && !busy && !m.inspecting && m.inspectW == 0 {
+		m.inspecting, m.inspectT = true, 0
+		m.play(m.sfx.draw, 0.3)
+	}
+	m.wantInspect = false
+	if m.inspecting {
+		before := m.inspectT
+		m.inspectT = min(m.inspectT+dt, inspectTime)
+		if before < 1.45 && m.inspectT >= 1.45 {
+			m.play(m.sfx.swap, 0.18) // turned over in the hand
+		}
+		if busy || m.inspectT >= inspectTime {
+			m.inspecting = false
+		}
+	}
+	if m.inspecting {
+		m.inspectW = min(m.inspectW+dt*6, 1)
+	} else {
+		m.inspectW = max(m.inspectW-dt*8, 0)
+	}
 }

@@ -31,6 +31,7 @@ const (
 	ActGrenadeKind
 	ActWeapon1
 	ActWeapon2
+	ActInspect
 	actionCount
 )
 
@@ -56,6 +57,7 @@ var actionInfo = [actionCount]struct {
 	ActGrenadeKind: {"grenadekind", "Frag / sticky", input.KeyC},
 	ActWeapon1:     {"weapon1", "Weapon 1", input.Key1},
 	ActWeapon2:     {"weapon2", "Weapon 2", input.Key2},
+	ActInspect:     {"inspect", "Inspect weapon", input.KeyMouse + 4}, // Mouse 5, the front side button
 }
 
 // key is the key bound to a (its default unless rebound).

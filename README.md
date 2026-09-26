@@ -91,6 +91,7 @@ The output goes into `build/bin/`: `renderer.dll`, `game.exe` and `shaders/*.spv
 | | **F** | swing the hammer |
 | | **G** / **Q** | throw a grenade / switch frags and stickies |
 | | **R** / **Space** | reload / jump |
+| | **Mouse 5** (the front side button) | inspect your weapon: brought in, turned to show one side, rolled over to show the other, and put back (firing, aiming, reloading or sprinting puts it straight back) |
 | | **Esc** | pause (restart match, settings, main menu) |
 | Engine Demo, orbit (default) | **W A S D** | roll the ball (relative to the camera) |
 | | **Space** / **R** | jump / reset the ball |
@@ -127,6 +128,7 @@ button. The on-screen hints switch to gamepad buttons as soon as you use one.
 | | **X** | reload; hold to pick up |
 | | **Y** | swap weapons |
 | | **RB** / **LB** / **B** | hammer / throw a grenade / switch grenades |
+| | **D-pad up** | inspect your weapon |
 | | **Start** | pause |
 | Engine Demo | left stick | roll the ball |
 | | right stick, **LB / RB** | orbit, zoom |
@@ -581,9 +583,10 @@ rematch on a new site.
 - **The kill feed** shows who, how and who: the names in their colours and an icon for
   the weapon, grenade or blow, rubble, a fall (nobody's credited) or a knock off the
   edge (whoever hit you last, within 6 s), with a headshot's icon after it.
-- **Controls** (Settings → Controls..., with a keyboard): every keyboard action can be
-  rebound; pick one and press its key (a key another action had swaps over), or reset
-  them all. They're saved in `settings.json` and the hints show them.
+- **Controls** (Settings → Controls..., with a keyboard): every action, fire and aim
+  included, can be rebound to a key or a mouse button (left, right, middle or a side
+  button); pick one and press its key or click its button (whatever another action had
+  swaps over), or reset them all. They're saved in `settings.json` and the hints show them.
 - **The helmet HUD** is drawn in the world a hand's width from your eye, framed by
   faint visor brackets: your **armour bar** across the top (segments that drain, flash
   when hit, sweep back as it recharges, amber when low and red once it's gone, with

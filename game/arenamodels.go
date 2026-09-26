@@ -411,7 +411,7 @@ var markers = [...]marker{
 		magHold: mathx.Vec3{0, -0.175, 0.03}, magDrop: mathx.Vec3{0, -1, 0},
 		charge: mathx.Vec3{0, 0.056, -0.075}, // the knob on top
 		grip:   mathx.Vec3{0, -0.075, 0.03}, fore: mathx.Vec3{0, -0.04, -0.075}, foreFlat: true,
-		muzzle: mathx.Vec3{0, 0.012, -0.195}, sight: mathx.Vec3{0, 0.071, 0.12}, size: 0.55, relief: 0.16,
+		muzzle: mathx.Vec3{0, 0.012, -0.195}, sight: mathx.Vec3{0, 0.071, 0.12}, size: 0.66, relief: 0.17,
 	},
 	arena.WeaponRevolver: {
 		// A big polished hand cannon: a long barrel over a full underlug, a
